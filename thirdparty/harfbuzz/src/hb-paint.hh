@@ -48,7 +48,6 @@
   HB_PAINT_FUNC_IMPLEMENT (push_group_for) \
   HB_PAINT_FUNC_IMPLEMENT (pop_group) \
   HB_PAINT_FUNC_IMPLEMENT (custom_palette_color) \
-  HB_PAINT_FUNC_IMPLEMENT (fill_glyph) \
   /* ^--- Add new callbacks here */
 
 struct hb_paint_funcs_t
@@ -93,7 +92,7 @@ struct hb_paint_funcs_t
   { return func.color_glyph (this, paint_data,
                              glyph,
                              font,
-                             !user_data ? nullptr : user_data->color_glyph); }
+                             !user_data ? nullptr : user_data->push_clip_glyph); }
   void push_clip_glyph (void *paint_data,
                         hb_codepoint_t glyph,
                         hb_font_t *font)
@@ -122,15 +121,6 @@ struct hb_paint_funcs_t
   { func.color (this, paint_data,
                 is_foreground, color,
                 !user_data ? nullptr : user_data->color); }
-  void fill_glyph (void *paint_data,
-                   hb_codepoint_t glyph,
-                   hb_font_t *font,
-                   hb_bool_t is_foreground,
-                   hb_color_t color)
-  { func.fill_glyph (this, paint_data,
-                     glyph, font,
-                     is_foreground, color,
-                     !user_data ? nullptr : user_data->fill_glyph); }
   bool image (void *paint_data,
               hb_blob_t *image,
               unsigned width, unsigned height,

@@ -34,36 +34,8 @@
 #include "core/io/json.h"
 #include "core/io/resource.h"
 #include "core/math/math_funcs.h"
-#include "core/object/gdtype.h"
 #include "core/variant/variant_parser.h"
 #include "core/variant/variant_pools.h"
-
-// Caution: These GDTypes are work-in-progress and may not be feature complete.
-// Do not use them without consulting the core team.
-static GDType *variant_gdtypes[Variant::VARIANT_MAX] = {};
-
-GDType &Variant::_get_gdtype_for_type(Variant::Type p_type) {
-	ERR_FAIL_INDEX_V_MSG(p_type, VARIANT_MAX, *variant_gdtypes[Variant::NIL], "Invalid Variant type");
-
-	return *variant_gdtypes[p_type];
-}
-
-void Variant::_register_variant_gdtypes() {
-	for (int i = 0; i < Variant::VARIANT_MAX; i++) {
-		Variant::Type type = static_cast<Variant::Type>(i);
-		variant_gdtypes[i] = memnew(GDType(nullptr, Variant::get_type_name(type)));
-		variant_gdtypes[i]->initialize();
-	}
-}
-
-void Variant::_unregister_variant_gdtypes() {
-	for (int i = 0; i < Variant::VARIANT_MAX; i++) {
-		if (variant_gdtypes[i]) {
-			memdelete(variant_gdtypes[i]);
-			variant_gdtypes[i] = nullptr;
-		}
-	}
-}
 
 String Variant::get_type_name(Variant::Type p_type) {
 	switch (p_type) {
@@ -1443,11 +1415,7 @@ void Variant::_clear_internal() {
 			reinterpret_cast<NodePath *>(_data._mem)->~NodePath();
 		} break;
 		case OBJECT: {
-			// Mirrors ObjData::unref
-			const ObjData &objdata = _get_obj();
-			if (objdata.id.is_ref_counted() && static_cast<RefCounted *>(objdata.obj)->unreference()) {
-				memdelete(objdata.obj);
-			}
+			_get_obj().unref();
 		} break;
 		case RID: {
 			// Not much need probably.
@@ -1582,8 +1550,8 @@ struct _VariantStrPair {
 	String key;
 	String value;
 
-	bool operator<(const _VariantStrPair &p_pair) const {
-		return key < p_pair.key;
+	bool operator<(const _VariantStrPair &p) const {
+		return key < p.key;
 	}
 };
 
@@ -1591,8 +1559,8 @@ Variant::operator String() const {
 	return stringify(0);
 }
 
-String stringify_variant_clean(const Variant &p_variant, int p_recursion_count) {
-	String s = p_variant.stringify(p_recursion_count);
+String stringify_variant_clean(const Variant &p_variant, int recursion_count) {
+	String s = p_variant.stringify(recursion_count);
 
 	// Wrap strings in quotes to avoid ambiguity.
 	switch (p_variant.get_type()) {
@@ -1613,20 +1581,20 @@ String stringify_variant_clean(const Variant &p_variant, int p_recursion_count) 
 }
 
 template <typename T>
-String stringify_vector(const T &p_vec, int p_recursion_count) {
+String stringify_vector(const T &vec, int recursion_count) {
 	String str("[");
-	for (int i = 0; i < p_vec.size(); i++) {
+	for (int i = 0; i < vec.size(); i++) {
 		if (i > 0) {
 			str += ", ";
 		}
 
-		str += stringify_variant_clean(p_vec[i], p_recursion_count);
+		str += stringify_variant_clean(vec[i], recursion_count);
 	}
 	str += "]";
 	return str;
 }
 
-String Variant::stringify(int p_recursion_count) const {
+String Variant::stringify(int recursion_count) const {
 	switch (type) {
 		case NIL:
 			return "<null>";
@@ -1675,8 +1643,8 @@ String Variant::stringify(int p_recursion_count) const {
 		case COLOR:
 			return String(operator Color());
 		case DICTIONARY: {
-			ERR_FAIL_COND_V_MSG(p_recursion_count > MAX_RECURSION, "{ ... }", "Maximum dictionary recursion reached!");
-			p_recursion_count++;
+			ERR_FAIL_COND_V_MSG(recursion_count > MAX_RECURSION, "{ ... }", "Maximum dictionary recursion reached!");
+			recursion_count++;
 
 			const Dictionary &d = *reinterpret_cast<const Dictionary *>(_data._mem);
 
@@ -1688,8 +1656,8 @@ String Variant::stringify(int p_recursion_count) const {
 
 			for (const KeyValue<Variant, Variant> &kv : d) {
 				_VariantStrPair sp;
-				sp.key = stringify_variant_clean(kv.key, p_recursion_count);
-				sp.value = stringify_variant_clean(kv.value, p_recursion_count);
+				sp.key = stringify_variant_clean(kv.key, recursion_count);
+				sp.value = stringify_variant_clean(kv.value, recursion_count);
 
 				pairs.push_back(sp);
 			}
@@ -1706,40 +1674,40 @@ String Variant::stringify(int p_recursion_count) const {
 		}
 		// Packed arrays cannot contain recursive structures, the recursion_count increment is not needed.
 		case PACKED_VECTOR2_ARRAY: {
-			return stringify_vector(operator PackedVector2Array(), p_recursion_count);
+			return stringify_vector(operator PackedVector2Array(), recursion_count);
 		}
 		case PACKED_VECTOR3_ARRAY: {
-			return stringify_vector(operator PackedVector3Array(), p_recursion_count);
+			return stringify_vector(operator PackedVector3Array(), recursion_count);
 		}
 		case PACKED_COLOR_ARRAY: {
-			return stringify_vector(operator PackedColorArray(), p_recursion_count);
+			return stringify_vector(operator PackedColorArray(), recursion_count);
 		}
 		case PACKED_VECTOR4_ARRAY: {
-			return stringify_vector(operator PackedVector4Array(), p_recursion_count);
+			return stringify_vector(operator PackedVector4Array(), recursion_count);
 		}
 		case PACKED_STRING_ARRAY: {
-			return stringify_vector(operator PackedStringArray(), p_recursion_count);
+			return stringify_vector(operator PackedStringArray(), recursion_count);
 		}
 		case PACKED_BYTE_ARRAY: {
-			return stringify_vector(operator PackedByteArray(), p_recursion_count);
+			return stringify_vector(operator PackedByteArray(), recursion_count);
 		}
 		case PACKED_INT32_ARRAY: {
-			return stringify_vector(operator PackedInt32Array(), p_recursion_count);
+			return stringify_vector(operator PackedInt32Array(), recursion_count);
 		}
 		case PACKED_INT64_ARRAY: {
-			return stringify_vector(operator PackedInt64Array(), p_recursion_count);
+			return stringify_vector(operator PackedInt64Array(), recursion_count);
 		}
 		case PACKED_FLOAT32_ARRAY: {
-			return stringify_vector(operator PackedFloat32Array(), p_recursion_count);
+			return stringify_vector(operator PackedFloat32Array(), recursion_count);
 		}
 		case PACKED_FLOAT64_ARRAY: {
-			return stringify_vector(operator PackedFloat64Array(), p_recursion_count);
+			return stringify_vector(operator PackedFloat64Array(), recursion_count);
 		}
 		case ARRAY: {
-			ERR_FAIL_COND_V_MSG(p_recursion_count > MAX_RECURSION, "[...]", "Maximum array recursion reached!");
-			p_recursion_count++;
+			ERR_FAIL_COND_V_MSG(recursion_count > MAX_RECURSION, "[...]", "Maximum array recursion reached!");
+			recursion_count++;
 
-			return stringify_vector(operator Array(), p_recursion_count);
+			return stringify_vector(operator Array(), recursion_count);
 		}
 		case OBJECT: {
 			if (_get_obj().obj) {
@@ -2323,8 +2291,7 @@ Variant::operator Vector<StringName>() const {
 	return to;
 }
 
-template <>
-IPAddress Variant::to<IPAddress>() const {
+Variant::operator IPAddress() const {
 	if (type == PACKED_FLOAT32_ARRAY || type == PACKED_INT32_ARRAY || type == PACKED_FLOAT64_ARRAY || type == PACKED_INT64_ARRAY || type == PACKED_BYTE_ARRAY) {
 		Vector<int> addr = operator Vector<int>();
 		if (addr.size() == 4) {
@@ -2507,10 +2474,10 @@ Variant::Variant(const Transform3D &p_transform) :
 	memnew_placement(_data._transform3d, Transform3D(p_transform));
 }
 
-Variant::Variant(const Projection &p_projection) :
+Variant::Variant(const Projection &pp_projection) :
 		type(PROJECTION) {
 	_data._projection = VariantPools::alloc<Projection>();
-	memnew_placement(_data._projection, Projection(p_projection));
+	memnew_placement(_data._projection, Projection(pp_projection));
 }
 
 Variant::Variant(const Transform2D &p_transform) :
@@ -2539,12 +2506,8 @@ Variant::Variant(const ::RID &p_rid) :
 
 Variant::Variant(const Object *p_object) :
 		type(OBJECT) {
-	// Mirrors ObjData::ref_pointer(Object *) but without the cleanup
-	if (p_object && (!p_object->is_ref_counted() || static_cast<RefCounted *>(const_cast<Object *>(p_object))->init_ref())) {
-		memnew_placement(_data._mem, ObjData({ p_object->get_instance_id(), const_cast<Object *>(p_object) }));
-	} else {
-		memnew_placement(_data._mem, ObjData());
-	}
+	_get_obj() = ObjData();
+	_get_obj().ref_pointer(const_cast<Object *>(p_object));
 }
 
 Variant::Variant(const Callable &p_callable) :
@@ -2843,7 +2806,7 @@ uint32_t Variant::hash() const {
 	return recursive_hash(0);
 }
 
-uint32_t Variant::recursive_hash(int p_recursion_count) const {
+uint32_t Variant::recursive_hash(int recursion_count) const {
 	switch (type) {
 		case NIL: {
 			return 0;
@@ -2994,7 +2957,7 @@ uint32_t Variant::recursive_hash(int p_recursion_count) const {
 			return reinterpret_cast<const NodePath *>(_data._mem)->hash();
 		} break;
 		case DICTIONARY: {
-			return reinterpret_cast<const Dictionary *>(_data._mem)->recursive_hash(p_recursion_count);
+			return reinterpret_cast<const Dictionary *>(_data._mem)->recursive_hash(recursion_count);
 
 		} break;
 		case CALLABLE: {
@@ -3008,7 +2971,7 @@ uint32_t Variant::recursive_hash(int p_recursion_count) const {
 		} break;
 		case ARRAY: {
 			const Array &arr = *reinterpret_cast<const Array *>(_data._mem);
-			return arr.recursive_hash(p_recursion_count);
+			return arr.recursive_hash(recursion_count);
 
 		} break;
 		case PACKED_BYTE_ARRAY: {
@@ -3210,7 +3173,7 @@ uint32_t Variant::recursive_hash(int p_recursion_count) const {
 \
 	return true
 
-bool Variant::hash_compare(const Variant &p_variant, int p_recursion_count, bool p_semantic_comparison) const {
+bool Variant::hash_compare(const Variant &p_variant, int recursion_count, bool semantic_comparison) const {
 	if (type != p_variant.type) {
 		return false;
 	}
@@ -3221,7 +3184,7 @@ bool Variant::hash_compare(const Variant &p_variant, int p_recursion_count, bool
 		} break;
 
 		case FLOAT: {
-			return hash_compare_scalar_base(_data._float, p_variant._data._float, p_semantic_comparison);
+			return hash_compare_scalar_base(_data._float, p_variant._data._float, semantic_comparison);
 		} break;
 
 		case STRING: {
@@ -3342,7 +3305,7 @@ bool Variant::hash_compare(const Variant &p_variant, int p_recursion_count, bool
 			const Array &l = *(reinterpret_cast<const Array *>(_data._mem));
 			const Array &r = *(reinterpret_cast<const Array *>(p_variant._data._mem));
 
-			if (!l.recursive_equal(r, p_recursion_count + 1)) {
+			if (!l.recursive_equal(r, recursion_count + 1)) {
 				return false;
 			}
 
@@ -3353,7 +3316,7 @@ bool Variant::hash_compare(const Variant &p_variant, int p_recursion_count, bool
 			const Dictionary &l = *(reinterpret_cast<const Dictionary *>(_data._mem));
 			const Dictionary &r = *(reinterpret_cast<const Dictionary *>(p_variant._data._mem));
 
-			if (!l.recursive_equal(r, p_recursion_count + 1)) {
+			if (!l.recursive_equal(r, recursion_count + 1)) {
 				return false;
 			}
 
@@ -3509,10 +3472,10 @@ bool Variant::is_read_only() const {
 	}
 }
 
-void Variant::_variant_call_error(const String &p_method, Callable::CallError &r_error) {
-	switch (r_error.error) {
+void Variant::_variant_call_error(const String &p_method, Callable::CallError &error) {
+	switch (error.error) {
 		case Callable::CallError::CALL_ERROR_INVALID_ARGUMENT: {
-			String err = "Invalid type for argument #" + itos(r_error.argument) + ", expected '" + Variant::get_type_name(Variant::Type(r_error.expected)) + "'.";
+			String err = "Invalid type for argument #" + itos(error.argument) + ", expected '" + Variant::get_type_name(Variant::Type(error.expected)) + "'.";
 			ERR_PRINT(err.utf8().get_data());
 
 		} break;
@@ -3535,36 +3498,36 @@ void Variant::construct_from_string(const String &p_string, Variant &r_value, Ob
 
 String Variant::get_construct_string() const {
 	String vars;
-	VariantWriter::write_to_string(*this, vars, false);
+	VariantWriter::write_to_string(*this, vars);
 
 	return vars;
 }
 
-String Variant::get_call_error_text(const StringName &p_method, const Variant **p_argptrs, int p_argcount, const Callable::CallError &p_ce) {
-	return get_call_error_text(nullptr, p_method, p_argptrs, p_argcount, p_ce);
+String Variant::get_call_error_text(const StringName &p_method, const Variant **p_argptrs, int p_argcount, const Callable::CallError &ce) {
+	return get_call_error_text(nullptr, p_method, p_argptrs, p_argcount, ce);
 }
 
-String Variant::get_call_error_text(Object *p_base, const StringName &p_method, const Variant **p_argptrs, int p_argcount, const Callable::CallError &p_ce) {
+String Variant::get_call_error_text(Object *p_base, const StringName &p_method, const Variant **p_argptrs, int p_argcount, const Callable::CallError &ce) {
 	String err_text;
 
-	if (p_ce.error == Callable::CallError::CALL_ERROR_INVALID_ARGUMENT) {
-		int errorarg = p_ce.argument;
+	if (ce.error == Callable::CallError::CALL_ERROR_INVALID_ARGUMENT) {
+		int errorarg = ce.argument;
 		if (p_argptrs) {
-			err_text = "Cannot convert argument " + itos(errorarg + 1) + " from " + Variant::get_type_name(p_argptrs[errorarg]->get_type()) + " to " + Variant::get_type_name(Variant::Type(p_ce.expected));
+			err_text = "Cannot convert argument " + itos(errorarg + 1) + " from " + Variant::get_type_name(p_argptrs[errorarg]->get_type()) + " to " + Variant::get_type_name(Variant::Type(ce.expected));
 		} else {
-			err_text = "Cannot convert argument " + itos(errorarg + 1) + " from [missing argptr, type unknown] to " + Variant::get_type_name(Variant::Type(p_ce.expected));
+			err_text = "Cannot convert argument " + itos(errorarg + 1) + " from [missing argptr, type unknown] to " + Variant::get_type_name(Variant::Type(ce.expected));
 		}
-	} else if (p_ce.error == Callable::CallError::CALL_ERROR_TOO_MANY_ARGUMENTS) {
-		err_text = "Method expected " + itos(p_ce.expected) + " argument(s), but called with " + itos(p_argcount);
-	} else if (p_ce.error == Callable::CallError::CALL_ERROR_TOO_FEW_ARGUMENTS) {
-		err_text = "Method expected " + itos(p_ce.expected) + " argument(s), but called with " + itos(p_argcount);
-	} else if (p_ce.error == Callable::CallError::CALL_ERROR_INVALID_METHOD) {
+	} else if (ce.error == Callable::CallError::CALL_ERROR_TOO_MANY_ARGUMENTS) {
+		err_text = "Method expected " + itos(ce.expected) + " argument(s), but called with " + itos(p_argcount);
+	} else if (ce.error == Callable::CallError::CALL_ERROR_TOO_FEW_ARGUMENTS) {
+		err_text = "Method expected " + itos(ce.expected) + " argument(s), but called with " + itos(p_argcount);
+	} else if (ce.error == Callable::CallError::CALL_ERROR_INVALID_METHOD) {
 		err_text = "Method not found";
-	} else if (p_ce.error == Callable::CallError::CALL_ERROR_INSTANCE_IS_NULL) {
+	} else if (ce.error == Callable::CallError::CALL_ERROR_INSTANCE_IS_NULL) {
 		err_text = "Instance is null";
-	} else if (p_ce.error == Callable::CallError::CALL_ERROR_METHOD_NOT_CONST) {
+	} else if (ce.error == Callable::CallError::CALL_ERROR_METHOD_NOT_CONST) {
 		err_text = "Method not const in const instance";
-	} else if (p_ce.error == Callable::CallError::CALL_OK) {
+	} else if (ce.error == Callable::CallError::CALL_OK) {
 		return "Call OK";
 	}
 
@@ -3580,7 +3543,7 @@ String Variant::get_call_error_text(Object *p_base, const StringName &p_method, 
 	return "'" + base_text + String(p_method) + "': " + err_text;
 }
 
-String Variant::get_callable_error_text(const Callable &p_callable, const Variant **p_argptrs, int p_argcount, const Callable::CallError &p_ce) {
+String Variant::get_callable_error_text(const Callable &p_callable, const Variant **p_argptrs, int p_argcount, const Callable::CallError &ce) {
 	Vector<Variant> binds;
 	p_callable.get_bound_arguments_ref(binds);
 
@@ -3597,12 +3560,11 @@ String Variant::get_callable_error_text(const Callable &p_callable, const Varian
 		for (int i = 0; i < binds.size(); i++) {
 			argptrs.write[i + p_argcount - args_unbound] = &binds[i];
 		}
-		return get_call_error_text(p_callable.get_object(), p_callable.get_method(), (const Variant **)argptrs.ptr(), argptrs.size(), p_ce);
+		return get_call_error_text(p_callable.get_object(), p_callable.get_method(), (const Variant **)argptrs.ptr(), argptrs.size(), ce);
 	}
 }
 
 void Variant::register_types() {
-	_register_variant_gdtypes();
 	_register_variant_operators();
 	_register_variant_methods();
 	_register_variant_setters_getters();
@@ -3616,5 +3578,4 @@ void Variant::unregister_types() {
 	_unregister_variant_setters_getters();
 	_unregister_variant_destructors();
 	_unregister_variant_utility_functions();
-	_unregister_variant_gdtypes();
 }

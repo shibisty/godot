@@ -37,6 +37,7 @@
 #include "core/templates/rb_map.h"
 #include "core/templates/rb_set.h"
 #include "core/templates/rid_owner.h"
+#include "core/variant/dictionary.h"
 #include "core/variant/type_info.h"
 #include "core/variant/typed_array.h"
 #include "servers/display/display_server_enums.h"
@@ -85,6 +86,7 @@ private:
 	RenderingContextDriver *context = nullptr;
 	RenderingDeviceDriver *driver = nullptr;
 	RenderingContextDriver::Device device;
+	uint32_t physical_device_index = 0; // Mariner E8: index of `device` in the context's device list.
 
 	bool local_device_processing = false;
 	bool is_main_instance = false;
@@ -94,8 +96,7 @@ protected:
 
 #ifndef DISABLE_DEPRECATED
 	RID _shader_create_from_bytecode_bind_compat_79606(const Vector<uint8_t> &p_shader_binary);
-	RID _texture_create_from_extension_bind_compat_105570(TextureType p_type, DataFormat p_format, TextureSamples p_samples, BitField<RenderingDevice::TextureUsageBits> p_usage, uint64_t p_image, uint64_t p_width, uint64_t p_height, uint64_t p_depth, uint64_t p_layers);
-	RID _texture_create_shared_from_slice_bind_compat_121937(const Ref<RDTextureView> &p_view, RID p_with_texture, uint32_t p_layer, uint32_t p_mipmap, uint32_t p_mipmaps = 1, TextureSliceType p_slice_type = TEXTURE_SLICE_2D);
+	RID _texture_create_from_extension_compat_105570(TextureType p_type, DataFormat p_format, TextureSamples p_samples, BitField<RenderingDevice::TextureUsageBits> p_usage, uint64_t p_image, uint64_t p_width, uint64_t p_height, uint64_t p_depth, uint64_t p_layers);
 	static void _bind_compatibility_methods();
 #endif
 
@@ -126,7 +127,6 @@ private:
 	void _add_dependency(RID p_id, RID p_depends_on);
 	void _remove_dependency(RID p_id, RID p_depends_on);
 	void _free_dependencies(RID p_id);
-	void _replace_dependency(RID p_dependent, RID p_old_dependency, RID p_new_dependency);
 
 private:
 	/***************************/
@@ -187,13 +187,10 @@ private:
 		RDD::BufferID driver_id;
 		uint32_t size = 0;
 		BitField<RDD::BufferUsageBits> usage = {};
-		RDD::MemoryAllocationType alloc_type = {};
 		RDG::ResourceTracker *draw_tracker = nullptr;
 		int32_t transfer_worker_index = -1;
 		uint64_t transfer_worker_operation = 0;
 	};
-
-	RDD::MemoryAllocationType _get_buffer_alloc_type(bool p_has_initial_data, Thread::ID p_thread_id) const;
 
 	Buffer *_get_buffer_from_owner(RID p_buffer);
 	Error _buffer_initialize(Buffer *p_buffer, Span<uint8_t> p_data, uint32_t p_required_align = 32);
@@ -308,7 +305,6 @@ public:
 		CALLBACK_RESOURCE_USAGE_ATTACHMENT_DEPTH_STENCIL_READ_WRITE,
 		CALLBACK_RESOURCE_USAGE_ATTACHMENT_FRAGMENT_SHADING_RATE_READ,
 		CALLBACK_RESOURCE_USAGE_ATTACHMENT_FRAGMENT_DENSITY_MAP_READ,
-		CALLBACK_RESOURCE_USAGE_ATTACHMENT_RASTERIZATION_RATE_MAP_READ,
 		CALLBACK_RESOURCE_USAGE_GENERAL,
 		CALLBACK_RESOURCE_USAGE_ACCELERATION_STRUCTURE_READ,
 		CALLBACK_RESOURCE_USAGE_ACCELERATION_STRUCTURE_READ_WRITE,
@@ -425,7 +421,7 @@ public:
 	void _texture_copy_shared(RID p_src_texture_rid, Texture *p_src_texture, RID p_dst_texture_rid, Texture *p_dst_texture);
 	void _texture_create_reinterpret_buffer(Texture *p_texture);
 	void _texture_check_pending_clear(RID p_texture_rid, Texture *p_texture);
-	void _texture_clear_color(RID p_texture_rid, Texture *p_texture, const Color &p_color, uint32_t p_base_mipmap, uint32_t p_mipmaps, uint32_t p_base_layer, uint32_t p_layers);
+	void _texture_clear_color(RID p_texture_rid, Texture *p_texture, const Color &p_color, uint32_t p_base_mipmap, uint32_t p_mipmaps, uint32_t p_base_layer, uint32_t p_layers, RenderingDeviceGraph *p_graph = nullptr);
 	void _texture_clear_depth_stencil(RID p_texture_rid, Texture *p_texture, float p_depth, uint8_t p_stencil, uint32_t p_base_mipmap, uint32_t p_mipmaps, uint32_t p_base_layer, uint32_t p_layers);
 	uint32_t _texture_vrs_method_to_usage_bits() const;
 	void _texture_ensure_shareable_format(RID p_texture, const DataFormat &p_shareable_format);
@@ -499,7 +495,6 @@ public:
 		VRS_METHOD_NONE,
 		VRS_METHOD_FRAGMENT_SHADING_RATE,
 		VRS_METHOD_FRAGMENT_DENSITY_MAP,
-		VRS_METHOD_RASTERIZATION_RATE_MAP,
 	};
 
 private:
@@ -865,6 +860,8 @@ public:
 		BUFFER_CREATION_AS_STORAGE_BIT = (1 << 1),
 		BUFFER_CREATION_DYNAMIC_PERSISTENT_BIT = (1 << 2),
 		BUFFER_CREATION_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT = (1 << 3),
+		// Mariner E6: the buffer may be used by the asynchronous compute queue (see async_compute_begin()).
+		BUFFER_CREATION_ASYNC_COMPUTE_BIT = (1 << 4),
 	};
 
 	enum StorageBufferUsage {
@@ -954,6 +951,8 @@ private:
 	};
 
 	String _shader_uniform_debug(RID p_shader, int p_set = -1);
+	// Mariner E7: validation and descriptor binding shared by the draw_list_draw_mesh_tasks* calls.
+	bool _draw_list_prepare_mesh_tasks();
 
 	RID_Owner<Shader, true> shader_owner;
 
@@ -1174,10 +1173,7 @@ private:
 		Vector<RID> acceleration_structures; // Used for validation.
 		InvalidationCallback invalidated_callback = nullptr;
 		void *invalidated_callback_userdata = nullptr;
-
-		// Stored for uniform set re-creation during texture replacement.
-		LocalVector<Uniform> bound_uniforms;
-		bool is_linear_pool = false;
+		uint64_t created_frame = 0; // Mariner E6: frames_drawn at creation.
 	};
 
 	RID_Owner<UniformSet, true> uniform_set_owner;
@@ -1306,8 +1302,6 @@ public:
 
 	void update_pipeline_cache(bool p_closing = false);
 
-	_FORCE_INLINE_ bool is_pipeline_cache_enabled() const { return pipeline_cache_enabled; }
-
 private:
 	/****************/
 	/**** SCREEN ****/
@@ -1324,6 +1318,8 @@ public:
 	int screen_get_height(DisplayServerEnums::WindowID p_screen = DisplayServerEnums::MAIN_WINDOW_ID) const;
 	int screen_get_pre_rotation_degrees(DisplayServerEnums::WindowID p_screen = DisplayServerEnums::MAIN_WINDOW_ID) const;
 	FramebufferFormatID screen_get_framebuffer_format(DisplayServerEnums::WindowID p_screen = DisplayServerEnums::MAIN_WINDOW_ID) const;
+	// Format of the screen's swap chain images, DATA_FORMAT_MAX if the screen was never prepared (not bound).
+	DataFormat screen_get_data_format(DisplayServerEnums::WindowID p_screen = DisplayServerEnums::MAIN_WINDOW_ID) const;
 	ColorSpace screen_get_color_space(DisplayServerEnums::WindowID p_screen = DisplayServerEnums::MAIN_WINDOW_ID) const;
 	bool screen_get_hdr_output_supported(DisplayServerEnums::WindowID p_screen = DisplayServerEnums::MAIN_WINDOW_ID) const;
 	Error screen_free(DisplayServerEnums::WindowID p_screen = DisplayServerEnums::MAIN_WINDOW_ID);
@@ -1397,6 +1393,9 @@ public:
 	};
 
 	Error blas_build(RID p_blas);
+	bool acceleration_structure_is_valid(RID p_acceleration_structure) const { return acceleration_structure_owner.owns(p_acceleration_structure); }
+	// Refit a BLAS created with ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT after its vertex data changed (same topology).
+	Error blas_update(RID p_blas);
 	Error tlas_build(RID p_tlas, Span<AccelerationStructureInstance> p_instances);
 
 private:
@@ -1471,6 +1470,9 @@ private:
 			RID vertex_array;
 			RID index_array;
 			uint32_t draw_count = 0;
+			// Mariner E7: the bound pipeline draws with task/mesh shaders (draw_list_draw_mesh_tasks*).
+			bool pipeline_uses_mesh_shader = false;
+			bool pipeline_uses_task_shader = false;
 		} state;
 
 #ifdef DEBUG_ENABLED
@@ -1570,7 +1572,14 @@ public:
 	void draw_list_draw(DrawListID p_list, bool p_use_indices, uint32_t p_instances = 1, uint32_t p_procedural_vertices = 0);
 	void draw_list_draw_indirect(DrawListID p_list, bool p_use_indices, RID p_buffer, uint32_t p_offset = 0, uint32_t p_draw_count = 1, uint32_t p_stride = 0);
 
-	void draw_list_set_viewport(DrawListID p_list, const Rect2i &p_rect);
+	// Mariner E7: mesh shading. The bound render pipeline must use a mesh shader (optionally with a task shader).
+	// Indirect buffers hold VkDrawMeshTasksIndirectCommandEXT entries (3 x uint32: group counts X, Y, Z).
+	static constexpr uint32_t MESH_TASKS_INDIRECT_COMMAND_SIZE = 12;
+	void draw_list_draw_mesh_tasks(DrawListID p_list, uint32_t p_group_count_x, uint32_t p_group_count_y = 1, uint32_t p_group_count_z = 1);
+	void draw_list_draw_mesh_tasks_indirect(DrawListID p_list, RID p_buffer, uint32_t p_offset = 0, uint32_t p_draw_count = 1, uint32_t p_stride = 0);
+	void draw_list_draw_mesh_tasks_indirect_count(DrawListID p_list, RID p_buffer, uint32_t p_offset, RID p_count_buffer, uint32_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride = 0);
+
+	void draw_list_set_viewport(DrawListID p_list, const Rect2 &p_rect);
 	void draw_list_enable_scissor(DrawListID p_list, const Rect2 &p_rect);
 	void draw_list_disable_scissor(DrawListID p_list);
 
@@ -1682,6 +1691,18 @@ private:
 
 	ComputeList compute_list;
 	ComputeList::State compute_list_barrier_state;
+	// Mariner E6: graph the active compute list records into (the main draw graph or the async compute graph).
+	RenderingDeviceGraph *compute_list_graph = nullptr;
+
+	ComputeListID _compute_list_begin(RenderingDeviceGraph *p_graph);
+	void _compute_list_bind_compute_pipeline(ComputeListID p_list, RID p_compute_pipeline);
+	void _compute_list_bind_uniform_set(ComputeListID p_list, RID p_uniform_set, uint32_t p_index);
+	void _compute_list_set_push_constant_data(ComputeListID p_list, const void *p_data, uint32_t p_data_size);
+	void _compute_list_dispatch(ComputeListID p_list, uint32_t p_x_groups, uint32_t p_y_groups, uint32_t p_z_groups);
+	void _compute_list_dispatch_threads(ComputeListID p_list, uint32_t p_x_threads, uint32_t p_y_threads, uint32_t p_z_threads);
+	void _compute_list_dispatch_indirect(ComputeListID p_list, RID p_buffer, uint32_t p_offset);
+	void _compute_list_add_barrier(ComputeListID p_list);
+	void _compute_list_end();
 
 public:
 	ComputeListID compute_list_begin();
@@ -1761,12 +1782,134 @@ private:
 
 	RenderingDeviceGraph draw_graph;
 
-#ifdef DEBUG_ENABLED
-	bool draw_graph_reorder_commands = true;
-	bool draw_graph_full_barriers = false;
+	/******************************************/
+	/**** ASYNC COMPUTE (Mariner patch E6) ****/
+	/******************************************/
 
-	void _configure_draw_graph_flags();
-#endif
+	// Work recorded between async_compute_begin() and async_compute_end() (compute lists, buffer/texture copies,
+	// updates, clears and asynchronous downloads of resources created with TEXTURE_USAGE_ASYNC_COMPUTE_BIT or
+	// BUFFER_CREATION_ASYNC_COMPUTE_BIT) goes to a second graph and is submitted to a compute-only queue at the end
+	// of the frame. Frame N's async work waits for the main queue's frame N-1 and the main queue's frame N+1 waits
+	// for it (timeline semaphores), so it overlaps the main queue's frame N. Anything that can't run there safely
+	// falls back to the main graph (see AsyncComputeFallback); the main queue waits for the async work of the same
+	// frame when it uses a resource the async graph used in that frame.
+
+public:
+	enum AsyncComputeFallback {
+		ASYNC_COMPUTE_ROUTE_ASYNC, // Runs on the async compute queue.
+		ASYNC_COMPUTE_FALLBACK_NO_SCOPE, // Outside async_compute_begin() / async_compute_end(): the main queue as usual.
+		ASYNC_COMPUTE_FALLBACK_UNSUPPORTED, // No async compute queue (device, driver, local device or project setting).
+		ASYNC_COMPUTE_FALLBACK_DISABLED, // Disabled at runtime (async_compute_set_enabled(false)).
+		ASYNC_COMPUTE_FALLBACK_RESOURCE_NOT_SHARED, // A resource was created without the async compute flag.
+		ASYNC_COMPUTE_FALLBACK_UNSUPPORTED_RESOURCE, // Acceleration structures, format fallback copies, pending first-use clears, invalid RIDs.
+		ASYNC_COMPUTE_FALLBACK_NEW_UNIFORM_SET, // Uniform set created this frame (its uploads are only waited for by the main queue).
+		ASYNC_COMPUTE_FALLBACK_PENDING_UPLOAD, // A resource still has a pending upload on the transfer queue.
+		ASYNC_COMPUTE_FALLBACK_USED_BY_MAIN_QUEUE, // The main queue already used a resource in this frame.
+		ASYNC_COMPUTE_FALLBACK_MAX
+	};
+
+	struct AsyncComputeRouteQuery {
+		bool in_scope = false;
+		bool supported = false;
+		bool enabled = false;
+		bool all_shared = true;
+		bool unsupported_resource = false;
+		bool new_uniform_set = false;
+		bool pending_upload = false;
+		bool used_by_main_queue = false;
+	};
+
+	// Where work goes, in the order the conditions are checked (pure function, also used by the tests).
+	static AsyncComputeFallback async_compute_route(const AsyncComputeRouteQuery &p_query);
+	static const char *async_compute_fallback_name(AsyncComputeFallback p_fallback);
+
+	bool async_compute_begin();
+	void async_compute_end();
+	bool async_compute_is_supported() const;
+	void async_compute_set_enabled(bool p_enabled);
+	bool async_compute_is_enabled() const;
+	bool async_compute_is_active() const;
+	Dictionary async_compute_get_info() const;
+
+private:
+	struct AsyncComputeListOp {
+		enum Type {
+			TYPE_BIND_PIPELINE,
+			TYPE_BIND_UNIFORM_SET,
+			TYPE_SET_PUSH_CONSTANT,
+			TYPE_DISPATCH,
+			TYPE_DISPATCH_THREADS,
+			TYPE_DISPATCH_INDIRECT,
+			TYPE_BARRIER,
+		};
+
+		Type type = TYPE_DISPATCH;
+		RID rid;
+		uint32_t args[3] = {};
+		uint32_t data_offset = 0;
+	};
+
+	struct AsyncComputeStats {
+		uint32_t lists_async = 0;
+		uint32_t lists_main = 0;
+		uint32_t ops_async = 0;
+		uint32_t ops_main = 0;
+		uint32_t dispatches_async = 0;
+		bool submitted = false;
+		bool serialized = false;
+		AsyncComputeFallback last_fallback = ASYNC_COMPUTE_ROUTE_ASYNC;
+	};
+
+	struct AsyncCompute {
+		bool supported = false;
+		SafeFlag enabled;
+		bool scope_active = false;
+		String unsupported_reason;
+		RDD::CommandQueueFamilyID queue_family;
+		RDD::CommandQueueID queue;
+		RDD::SemaphoreID main_timeline;
+		RDD::SemaphoreID async_timeline;
+		uint64_t main_timeline_value = 0; // Last value signaled by the main queue.
+		uint64_t async_timeline_value = 0; // Last value signaled by the async compute queue.
+		uint64_t pending_main_wait = 0; // Async value the next main submission must wait for (previous frame's work).
+		uint64_t main_wait_value = 0; // Async value the main submission of this frame waits for.
+		bool timestamps = false;
+
+		// Compute list recorded between async_compute_begin() and _end(): replayed into the chosen graph at
+		// compute_list_end(), once all its resources are known.
+		bool list_deferred = false;
+		LocalVector<AsyncComputeListOp> list_ops;
+		LocalVector<uint8_t> list_data;
+
+		uint32_t warned_mask = 0;
+		AsyncComputeStats frame_stats;
+		AsyncComputeStats last_frame_stats;
+		uint64_t total_lists_async = 0;
+		uint64_t total_lists_main = 0;
+		uint64_t total_ops_async = 0;
+		uint64_t total_ops_main = 0;
+		uint64_t total_submissions = 0;
+		uint64_t serialized_frames = 0;
+		uint64_t fallback_counts[ASYNC_COMPUTE_FALLBACK_MAX] = {};
+		AsyncComputeFallback last_fallback = ASYNC_COMPUTE_ROUTE_ASYNC;
+		double gpu_time_usec = 0.0;
+	} async_compute;
+
+	RenderingDeviceGraph async_graph;
+
+	Error _async_compute_initialize();
+	void _async_compute_finalize();
+	void _async_compute_note(AsyncComputeFallback p_route, bool p_list);
+	void _async_compute_check_tracker(AsyncComputeRouteQuery &r_query, const RDG::ResourceTracker *p_tracker) const;
+	void _async_compute_check_texture(AsyncComputeRouteQuery &r_query, const Texture *p_texture);
+	void _async_compute_check_buffer(AsyncComputeRouteQuery &r_query, const Buffer *p_buffer) const;
+	void _async_compute_check_uniform_set(AsyncComputeRouteQuery &r_query, RID p_uniform_set);
+	AsyncComputeRouteQuery _async_compute_query() const;
+	// Graph for a transfer operation on the given resources (nullptr entries are ignored).
+	RenderingDeviceGraph *_async_compute_graph_for(const Texture *p_texture_a, const Texture *p_texture_b, const Buffer *p_buffer_a, const Buffer *p_buffer_b);
+	void _compute_list_replay_deferred();
+	void _async_compute_record_frame();
+	void _async_compute_submit_frame();
 
 	/**************************/
 	/**** QUEUE MANAGEMENT ****/
@@ -1848,6 +1991,16 @@ private:
 		// splitting the final render pass to the swapchain into its own cmd buffer.
 		RDG::CommandBufferPool command_buffer_pool;
 
+		// Mariner E6: async compute queue command buffer, completion fence and GPU time stamps of the frame.
+		RDD::CommandPoolID async_command_pool;
+		RDD::CommandBufferID async_command_buffer;
+		RDG::CommandBufferPool async_command_buffer_pool;
+		RDD::FenceID async_fence;
+		bool async_fence_signaled = false;
+		bool async_recorded = false;
+		RDD::QueryPoolID async_timestamp_pool;
+		bool async_timestamps_written = false;
+
 		struct Timestamp {
 			String description;
 			uint64_t value = 0;
@@ -1884,8 +2037,8 @@ public:
 private:
 	void _free_pending_resources(int p_frame);
 
-	SafeNumeric<uint64_t> texture_memory;
-	SafeNumeric<uint64_t> buffer_memory;
+	uint64_t texture_memory = 0;
+	uint64_t buffer_memory = 0;
 
 protected:
 	void execute_chained_cmds(bool p_present_swap_chain,
@@ -1909,13 +2062,13 @@ public:
 #endif
 
 public:
-	Error initialize(RenderingContextDriver *p_context, DisplayServerEnums::WindowID p_main_window = DisplayServerEnums::INVALID_WINDOW_ID);
+	// Mariner E8: p_device_index >= 0 creates the device on that physical device (local devices only).
+	Error initialize(RenderingContextDriver *p_context, DisplayServerEnums::WindowID p_main_window = DisplayServerEnums::INVALID_WINDOW_ID, int32_t p_device_index = -1);
 	void finalize();
 
 	void _set_max_fps(int p_max_fps);
 
 	void free_rid(RID p_rid);
-	void texture_replace_rid(RID p_old_texture, RID p_new_texture);
 #ifndef DISABLE_DEPRECATED
 	[[deprecated("Use `free_rid()` instead.")]] void free(RID p_rid) {
 		free_rid(p_rid);
@@ -1955,6 +2108,12 @@ public:
 	uint64_t get_memory_usage(MemoryType p_type) const;
 
 	RenderingDevice *create_local_device();
+
+	// Mariner E8: compute on another physical GPU (e.g. the integrated one next to a discrete GPU).
+	RenderingDevice *create_local_device_on(int32_t p_device_index);
+	TypedArray<Dictionary> get_physical_devices() const;
+	uint32_t get_device_index() const { return physical_device_index; }
+	static Dictionary physical_device_to_dictionary(uint32_t p_index, const RenderingContextDriver::Device &p_device, const RenderingContextDriver::DeviceInfo &p_info, bool p_is_main, const String &p_api);
 
 	void set_resource_name(RID p_id, const String &p_name);
 
@@ -2006,7 +2165,7 @@ private:
 
 	RID _texture_create(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view, const TypedArray<PackedByteArray> &p_data = Array());
 	RID _texture_create_shared(const Ref<RDTextureView> &p_view, RID p_with_texture);
-	RID _texture_create_shared_from_slice(const Ref<RDTextureView> &p_view, RID p_with_texture, uint32_t p_layer, uint32_t p_mipmap, uint32_t p_mipmaps = 1, TextureSliceType p_slice_type = TEXTURE_SLICE_2D, uint32_t p_layers = 0);
+	RID _texture_create_shared_from_slice(const Ref<RDTextureView> &p_view, RID p_with_texture, uint32_t p_layer, uint32_t p_mipmap, uint32_t p_mipmaps = 1, TextureSliceType p_slice_type = TEXTURE_SLICE_2D);
 	Ref<RDTextureFormat> _texture_get_format(RID p_rd_texture);
 
 	FramebufferFormatID _framebuffer_format_create(const TypedArray<RDAttachmentFormat> &p_attachments, uint32_t p_view_count);

@@ -497,7 +497,9 @@ public:
 			for (int i = 0; i < blocks.size(); i++) {
 				memfree(blocks[i].memory);
 			}
-			memdelete(copy_back_buffer);
+			if (copy_back_buffer) {
+				memdelete(copy_back_buffer);
+			}
 		}
 	};
 

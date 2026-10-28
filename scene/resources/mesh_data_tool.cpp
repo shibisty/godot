@@ -80,53 +80,39 @@ Error MeshDataTool::create_from_surface(const Ref<ArrayMesh> &p_mesh, int p_surf
 	material = p_mesh->surface_get_material(p_surface);
 
 	const Vector3 *vr = varray.ptr();
-	Vector<Vector3> vector_nr;
-	Vector<real_t> vector_ta;
-	Vector<Vector2> vector_uv;
-	Vector<Vector2> vector_uv2;
-	Vector<Color> vector_col;
-	Vector<int> vector_bo;
-	Vector<float> vector_we;
 
 	const Vector3 *nr = nullptr;
 	if (arrays[Mesh::ARRAY_NORMAL].get_type() != Variant::NIL) {
-		vector_nr = arrays[Mesh::ARRAY_NORMAL].operator Vector<Vector3>();
-		nr = vector_nr.ptr();
+		nr = arrays[Mesh::ARRAY_NORMAL].operator Vector<Vector3>().ptr();
 	}
 
 	const real_t *ta = nullptr;
 	if (arrays[Mesh::ARRAY_TANGENT].get_type() != Variant::NIL) {
-		vector_ta = arrays[Mesh::ARRAY_TANGENT].operator Vector<real_t>();
-		ta = vector_ta.ptr();
+		ta = arrays[Mesh::ARRAY_TANGENT].operator Vector<real_t>().ptr();
 	}
 
 	const Vector2 *uv = nullptr;
 	if (arrays[Mesh::ARRAY_TEX_UV].get_type() != Variant::NIL) {
-		vector_uv = arrays[Mesh::ARRAY_TEX_UV].operator Vector<Vector2>();
-		uv = vector_uv.ptr();
+		uv = arrays[Mesh::ARRAY_TEX_UV].operator Vector<Vector2>().ptr();
 	}
 	const Vector2 *uv2 = nullptr;
 	if (arrays[Mesh::ARRAY_TEX_UV2].get_type() != Variant::NIL) {
-		vector_uv2 = arrays[Mesh::ARRAY_TEX_UV2].operator Vector<Vector2>();
-		uv2 = vector_uv2.ptr();
+		uv2 = arrays[Mesh::ARRAY_TEX_UV2].operator Vector<Vector2>().ptr();
 	}
 
 	const Color *col = nullptr;
 	if (arrays[Mesh::ARRAY_COLOR].get_type() != Variant::NIL) {
-		vector_col = arrays[Mesh::ARRAY_COLOR].operator Vector<Color>();
-		col = vector_col.ptr();
+		col = arrays[Mesh::ARRAY_COLOR].operator Vector<Color>().ptr();
 	}
 
 	const int *bo = nullptr;
 	if (arrays[Mesh::ARRAY_BONES].get_type() != Variant::NIL) {
-		vector_bo = arrays[Mesh::ARRAY_BONES].operator Vector<int>();
-		bo = vector_bo.ptr();
+		bo = arrays[Mesh::ARRAY_BONES].operator Vector<int>().ptr();
 	}
 
 	const float *we = nullptr;
 	if (arrays[Mesh::ARRAY_WEIGHTS].get_type() != Variant::NIL) {
-		vector_we = arrays[Mesh::ARRAY_WEIGHTS].operator Vector<float>();
-		we = vector_we.ptr();
+		we = arrays[Mesh::ARRAY_WEIGHTS].operator Vector<float>().ptr();
 	}
 
 	vertices.resize(vcount);

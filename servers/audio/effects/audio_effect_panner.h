@@ -39,8 +39,6 @@ class AudioEffectPannerInstance : public AudioEffectInstance {
 	friend class AudioEffectPanner;
 	Ref<AudioEffectPanner> base;
 
-	float mix_pan = 0;
-
 public:
 	virtual void process(const AudioFrame *p_src_frames, AudioFrame *p_dst_frames, int p_frame_count) override;
 };

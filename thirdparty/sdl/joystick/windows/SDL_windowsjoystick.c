@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -416,15 +416,11 @@ void WINDOWS_JoystickDetect(void)
     while (pCurList) {
         JoyStick_DeviceData *pListNext = NULL;
 
-#ifdef SDL_HAPTIC_DINPUT
-#ifdef SDL_JOYSTICK_XINPUT
         if (!pCurList->bXInputDevice) {
+#ifdef SDL_HAPTIC_DINPUT
             SDL_DINPUT_HapticMaybeRemoveDevice(&pCurList->dxdevice);
+#endif
         }
-#else
-        SDL_DINPUT_HapticMaybeRemoveDevice(&pCurList->dxdevice);
-#endif
-#endif
 
         SDL_PrivateJoystickRemoved(pCurList->nInstanceID);
 
@@ -436,15 +432,11 @@ void WINDOWS_JoystickDetect(void)
 
     for (pCurList = SYS_Joystick; pCurList; pCurList = pCurList->pNext) {
         if (pCurList->send_add_event) {
-#ifdef SDL_HAPTIC_DINPUT
-#ifdef SDL_JOYSTICK_XINPUT
             if (!pCurList->bXInputDevice) {
+#ifdef SDL_HAPTIC_DINPUT
                 SDL_DINPUT_HapticMaybeAddDevice(&pCurList->dxdevice);
+#endif
             }
-#else
-            SDL_DINPUT_HapticMaybeAddDevice(&pCurList->dxdevice);
-#endif
-#endif
 
             SDL_PrivateJoystickAdded(pCurList->nInstanceID);
 
@@ -497,18 +489,16 @@ static int WINDOWS_JoystickGetDeviceSteamVirtualGamepadSlot(int device_index)
         device = device->pNext;
     }
 
-#ifdef SDL_JOYSTICK_XINPUT
     if (device->bXInputDevice) {
         // The slot for XInput devices can change as controllers are seated
         return SDL_XINPUT_GetSteamVirtualGamepadSlot(device->XInputUserId);
+    } else {
+        return device->steam_virtual_gamepad_slot;
     }
-#endif
-    return device->steam_virtual_gamepad_slot;
 }
 
 static int WINDOWS_JoystickGetDevicePlayerIndex(int device_index)
 {
-#ifdef SDL_JOYSTICK_XINPUT
     JoyStick_DeviceData *device = SYS_Joystick;
     int index;
 
@@ -517,9 +507,6 @@ static int WINDOWS_JoystickGetDevicePlayerIndex(int device_index)
     }
 
     return device->bXInputDevice ? (int)device->XInputUserId : -1;
-#else
-    return -1;
-#endif
 }
 
 static void WINDOWS_JoystickSetDevicePlayerIndex(int device_index, int player_index)
@@ -573,22 +560,20 @@ static bool WINDOWS_JoystickOpen(SDL_Joystick *joystick, int device_index)
     }
     joystick->hwdata->guid = device->guid;
 
-#ifdef SDL_JOYSTICK_XINPUT
     if (device->bXInputDevice) {
         return SDL_XINPUT_JoystickOpen(joystick, device);
+    } else {
+        return SDL_DINPUT_JoystickOpen(joystick, device);
     }
-#endif
-    return SDL_DINPUT_JoystickOpen(joystick, device);
 }
 
 static bool WINDOWS_JoystickRumble(SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble)
 {
-#ifdef SDL_JOYSTICK_XINPUT
     if (joystick->hwdata->bXInputDevice) {
         return SDL_XINPUT_JoystickRumble(joystick, low_frequency_rumble, high_frequency_rumble);
+    } else {
+        return SDL_DINPUT_JoystickRumble(joystick, low_frequency_rumble, high_frequency_rumble);
     }
-#endif
-    return SDL_DINPUT_JoystickRumble(joystick, low_frequency_rumble, high_frequency_rumble);
 }
 
 static bool WINDOWS_JoystickRumbleTriggers(SDL_Joystick *joystick, Uint16 left_rumble, Uint16 right_rumble)
@@ -617,27 +602,21 @@ static void WINDOWS_JoystickUpdate(SDL_Joystick *joystick)
         return;
     }
 
-#ifdef SDL_JOYSTICK_XINPUT
     if (joystick->hwdata->bXInputDevice) {
         SDL_XINPUT_JoystickUpdate(joystick);
-        return;
+    } else {
+        SDL_DINPUT_JoystickUpdate(joystick);
     }
-#endif
-    SDL_DINPUT_JoystickUpdate(joystick);
 }
 
 // Function to close a joystick after use
 static void WINDOWS_JoystickClose(SDL_Joystick *joystick)
 {
-#ifdef SDL_JOYSTICK_XINPUT
     if (joystick->hwdata->bXInputDevice) {
         SDL_XINPUT_JoystickClose(joystick);
     } else {
         SDL_DINPUT_JoystickClose(joystick);
     }
-#else
-    SDL_DINPUT_JoystickClose(joystick);
-#endif
 
     SDL_free(joystick->hwdata);
 }

@@ -34,6 +34,7 @@
 #include "core/object/ref_counted.h"
 
 class EditorInterface;
+class EditorNode;
 class Node;
 
 class EditorScript : public RefCounted {
@@ -45,11 +46,11 @@ protected:
 	GDVIRTUAL0_REQUIRED(_run)
 
 public:
-#ifndef DISABLE_DEPRECATED
 	void add_root_node(Node *p_node);
+#ifndef DISABLE_DEPRECATED
 	Node *get_scene() const;
-	EditorInterface *get_editor_interface() const;
 #endif // DISABLE_DEPRECATED
+	EditorInterface *get_editor_interface() const;
 
 	virtual void run();
 };

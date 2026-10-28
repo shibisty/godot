@@ -99,7 +99,6 @@ public:
 
 	void start();
 
-	virtual Error get_entropy(uint8_t *r_buffer, int p_bytes) override;
 	virtual void alert(const String &p_alert, const String &p_title = "ALERT!") override;
 
 	virtual Vector<String> get_system_fonts() const override;
@@ -124,7 +123,6 @@ public:
 	virtual String get_bundle_resource_dir() const override;
 
 	virtual String get_locale() const override;
-	virtual Vector<String> get_preferred_locales() const override;
 
 	virtual String get_unique_id() const override;
 	virtual String get_processor_name() const override;
@@ -134,9 +132,6 @@ public:
 	virtual bool _check_internal_feature_support(const String &p_feature) override;
 
 	virtual Error setup_remote_filesystem(const String &p_server_host, int p_port, const String &p_password, String &r_project_path) override;
-
-	void audio_driver_start();
-	void audio_driver_stop();
 
 	void on_focus_out();
 	void on_focus_in();

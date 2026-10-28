@@ -135,7 +135,7 @@ public:
 // It is safe to use multiple PagedArrays from different threads, sharing a single PagedArrayPool
 
 template <typename T>
-class _WARN_UNUSED_ PagedArray {
+class PagedArray {
 	PagedArrayPool<T> *page_pool = nullptr;
 
 	T **page_data = nullptr;

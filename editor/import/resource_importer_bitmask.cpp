@@ -77,7 +77,10 @@ Error ResourceImporterBitMap::import(ResourceUID::ID p_source_id, const String &
 	float threshold = p_options["threshold"];
 	Ref<Image> image;
 	image.instantiate();
-	RETURN_IF_ERROR(ImageLoader::load_image(p_source_file, image));
+	Error err = ImageLoader::load_image(p_source_file, image);
+	if (err != OK) {
+		return err;
+	}
 
 	int w = image->get_width();
 	int h = image->get_height();

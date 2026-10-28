@@ -1,3 +1,5 @@
+GH-79311
+--------
 Validate extension JSON: API was removed: classes/GraphNode/methods/get_connection_input_color
 Validate extension JSON: API was removed: classes/GraphNode/methods/get_connection_input_count
 Validate extension JSON: API was removed: classes/GraphNode/methods/get_connection_input_height

@@ -6,11 +6,12 @@
 
 JPH_SUPPRESS_WARNINGS_STD_BEGIN
 #include <mutex>
+#include <chrono>
 JPH_SUPPRESS_WARNINGS_STD_END
 
 #include <Jolt/Core/NonCopyable.h>
 #include <Jolt/Core/TickCounter.h>
-#include <Jolt/Core/UnorderedMapFwd.h>
+#include <Jolt/Core/UnorderedMap.h>
 
 #if defined(JPH_EXTERNAL_PROFILE)
 
@@ -175,7 +176,7 @@ private:
 
 	std::mutex					mLock;																///< Lock that protects mThreads
 	uint64						mReferenceTick;														///< Tick count at the start of the frame
-	uint64						mReferenceTime;														///< Time at the start of the frame in microseconds
+	std::chrono::high_resolution_clock::time_point mReferenceTime;									///< Time at the start of the frame
 	Array<ProfileThread *>		mThreads;															///< List of all active threads
 	bool						mDump = false;														///< When true, the samples are dumped next frame
 	String						mDumpTag;															///< When not empty, this overrides the auto incrementing number of the dump filename

@@ -290,11 +290,11 @@
 
 									 DisplayServer *display_server = DisplayServer::get_singleton();
 									 if (display_server) {
-										 int out = DisplayServerEnums::SENSOR_ORIENTATION_UNDEFINED;
+										 int out = 0;
 										 if (UIInterfaceOrientationIsPortrait(orientation)) {
-											 out = DisplayServerEnums::SENSOR_ORIENTATION_PORTRAIT;
+											 out = 1;
 										 } else if (UIInterfaceOrientationIsLandscape(orientation)) {
-											 out = DisplayServerEnums::SENSOR_ORIENTATION_LANDSCAPE;
+											 out = 2;
 										 }
 										 display_server->emit_signal("orientation_changed", out);
 									 }

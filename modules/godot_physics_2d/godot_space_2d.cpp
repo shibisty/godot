@@ -56,7 +56,7 @@ _FORCE_INLINE_ static bool _can_collide_with(GodotCollisionObject2D *p_object, u
 	return true;
 }
 
-int GodotPhysicsDirectSpaceState2D::intersect_point(const PS2DT::PointParameters &p_parameters, PS2DT::ShapeResult *r_results, int p_result_max) {
+int GodotPhysicsDirectSpaceState2D::intersect_point(const PointParameters &p_parameters, ShapeResult *r_results, int p_result_max) {
 	if (p_result_max <= 0) {
 		return 0;
 	}
@@ -103,6 +103,9 @@ int GodotPhysicsDirectSpaceState2D::intersect_point(const PS2DT::PointParameters
 		}
 
 		r_results[cc].collider_id = col_obj->get_instance_id();
+		if (r_results[cc].collider_id.is_valid()) {
+			r_results[cc].collider = ObjectDB::get_instance(r_results[cc].collider_id);
+		}
 		r_results[cc].rid = col_obj->get_self();
 		r_results[cc].shape = shape_idx;
 
@@ -112,7 +115,7 @@ int GodotPhysicsDirectSpaceState2D::intersect_point(const PS2DT::PointParameters
 	return cc;
 }
 
-bool GodotPhysicsDirectSpaceState2D::intersect_ray(const PS2DT::RayParameters &p_parameters, PS2DT::RayResult &r_result) {
+bool GodotPhysicsDirectSpaceState2D::intersect_ray(const RayParameters &p_parameters, RayResult &r_result) {
 	ERR_FAIL_COND_V(space->locked, false);
 
 	Vector2 begin, end;
@@ -191,6 +194,9 @@ bool GodotPhysicsDirectSpaceState2D::intersect_ray(const PS2DT::RayParameters &p
 	ERR_FAIL_NULL_V(res_obj, false); // Shouldn't happen but silences warning.
 
 	r_result.collider_id = res_obj->get_instance_id();
+	if (r_result.collider_id.is_valid()) {
+		r_result.collider = ObjectDB::get_instance(r_result.collider_id);
+	}
 	r_result.normal = res_normal;
 	r_result.position = res_point;
 	r_result.rid = res_obj->get_self();
@@ -199,7 +205,7 @@ bool GodotPhysicsDirectSpaceState2D::intersect_ray(const PS2DT::RayParameters &p
 	return true;
 }
 
-int GodotPhysicsDirectSpaceState2D::intersect_shape(const PS2DT::ShapeParameters &p_parameters, PS2DT::ShapeResult *r_results, int p_result_max) {
+int GodotPhysicsDirectSpaceState2D::intersect_shape(const ShapeParameters &p_parameters, ShapeResult *r_results, int p_result_max) {
 	if (p_result_max <= 0) {
 		return 0;
 	}
@@ -236,6 +242,9 @@ int GodotPhysicsDirectSpaceState2D::intersect_shape(const PS2DT::ShapeParameters
 		}
 
 		r_results[cc].collider_id = col_obj->get_instance_id();
+		if (r_results[cc].collider_id.is_valid()) {
+			r_results[cc].collider = ObjectDB::get_instance(r_results[cc].collider_id);
+		}
 		r_results[cc].rid = col_obj->get_self();
 		r_results[cc].shape = shape_idx;
 
@@ -245,7 +254,7 @@ int GodotPhysicsDirectSpaceState2D::intersect_shape(const PS2DT::ShapeParameters
 	return cc;
 }
 
-bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p_parameters, real_t &p_closest_safe, real_t &p_closest_unsafe) {
+bool GodotPhysicsDirectSpaceState2D::cast_motion(const ShapeParameters &p_parameters, real_t &p_closest_safe, real_t &p_closest_unsafe) {
 	GodotShape2D *shape = GodotPhysicsServer2D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
@@ -328,7 +337,7 @@ bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p
 	return true;
 }
 
-bool GodotPhysicsDirectSpaceState2D::collide_shape(const PS2DT::ShapeParameters &p_parameters, Vector2 *r_results, int p_result_max, int &r_result_count) {
+bool GodotPhysicsDirectSpaceState2D::collide_shape(const ShapeParameters &p_parameters, Vector2 *r_results, int p_result_max, int &r_result_count) {
 	if (p_result_max <= 0) {
 		return false;
 	}
@@ -429,7 +438,7 @@ static void _rest_cbk_result(const Vector2 &p_point_A, const Vector2 &p_point_B,
 	rd->best_local_shape = rd->local_shape;
 }
 
-bool GodotPhysicsDirectSpaceState2D::rest_info(const PS2DT::ShapeParameters &p_parameters, PS2DT::ShapeRestInfo *r_info) {
+bool GodotPhysicsDirectSpaceState2D::rest_info(const ShapeParameters &p_parameters, ShapeRestInfo *r_info) {
 	GodotShape2D *shape = GodotPhysicsServer2D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
@@ -524,7 +533,7 @@ int GodotSpace2D::_cull_aabb_for_body(GodotBody2D *p_body, const Rect2 &p_aabb) 
 	return amount;
 }
 
-bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionParameters &p_parameters, PS2DT::MotionResult *r_result) {
+bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PhysicsServer2D::MotionParameters &p_parameters, PhysicsServer2D::MotionResult *r_result) {
 	//give me back regular physics engine logic
 	//this is madness
 	//and most people using this function will think
@@ -556,7 +565,7 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 
 	if (!shapes_found) {
 		if (r_result) {
-			*r_result = PS2DT::MotionResult();
+			*r_result = PhysicsServer2D::MotionResult();
 			r_result->travel = p_parameters.motion;
 		}
 		return false;
@@ -636,7 +645,7 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 
 						if (col_obj->get_type() == GodotCollisionObject2D::TYPE_BODY) {
 							const GodotBody2D *b = static_cast<const GodotBody2D *>(col_obj);
-							if (b->get_mode() == PS2DE::BODY_MODE_KINEMATIC || b->get_mode() == PS2DE::BODY_MODE_RIGID) {
+							if (b->get_mode() == PhysicsServer2D::BODY_MODE_KINEMATIC || b->get_mode() == PhysicsServer2D::BODY_MODE_RIGID) {
 								//fix for moving platforms (kinematic and dynamic), margin is increased by how much it moved in the given direction
 								Vector2 lv = b->get_linear_velocity();
 								//compute displacement from linear velocity
@@ -745,7 +754,7 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 
 			// Colliding separation rays allows to properly snap to the ground,
 			// otherwise it's not needed in regular motion.
-			if (!p_parameters.collide_separation_ray && (body_shape->get_type() == PS2DE::SHAPE_SEPARATION_RAY)) {
+			if (!p_parameters.collide_separation_ray && (body_shape->get_type() == PhysicsServer2D::SHAPE_SEPARATION_RAY)) {
 				// When slide on slope is on, separation ray shape acts like a regular shape.
 				if (!static_cast<GodotSeparationRayShape2D *>(body_shape)->get_slide_on_slope()) {
 					continue;
@@ -941,7 +950,7 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 
 					if (col_obj->get_type() == GodotCollisionObject2D::TYPE_BODY) {
 						const GodotBody2D *b = static_cast<const GodotBody2D *>(col_obj);
-						if (b->get_mode() == PS2DE::BODY_MODE_KINEMATIC || b->get_mode() == PS2DE::BODY_MODE_RIGID) {
+						if (b->get_mode() == PhysicsServer2D::BODY_MODE_KINEMATIC || b->get_mode() == PhysicsServer2D::BODY_MODE_RIGID) {
 							//fix for moving platforms (kinematic and dynamic), margin is increased by how much it moved in the given direction
 							Vector2 lv = b->get_linear_velocity();
 							//compute displacement from linear velocity
@@ -1135,57 +1144,57 @@ void GodotSpace2D::update() {
 	broadphase->update();
 }
 
-void GodotSpace2D::set_param(PS2DE::SpaceParameter p_param, real_t p_value) {
+void GodotSpace2D::set_param(PhysicsServer2D::SpaceParameter p_param, real_t p_value) {
 	switch (p_param) {
-		case PS2DE::SPACE_PARAM_CONTACT_RECYCLE_RADIUS:
+		case PhysicsServer2D::SPACE_PARAM_CONTACT_RECYCLE_RADIUS:
 			contact_recycle_radius = p_value;
 			break;
-		case PS2DE::SPACE_PARAM_CONTACT_MAX_SEPARATION:
+		case PhysicsServer2D::SPACE_PARAM_CONTACT_MAX_SEPARATION:
 			contact_max_separation = p_value;
 			break;
-		case PS2DE::SPACE_PARAM_CONTACT_MAX_ALLOWED_PENETRATION:
+		case PhysicsServer2D::SPACE_PARAM_CONTACT_MAX_ALLOWED_PENETRATION:
 			contact_max_allowed_penetration = p_value;
 			break;
-		case PS2DE::SPACE_PARAM_CONTACT_DEFAULT_BIAS:
+		case PhysicsServer2D::SPACE_PARAM_CONTACT_DEFAULT_BIAS:
 			contact_bias = p_value;
 			break;
-		case PS2DE::SPACE_PARAM_BODY_LINEAR_VELOCITY_SLEEP_THRESHOLD:
+		case PhysicsServer2D::SPACE_PARAM_BODY_LINEAR_VELOCITY_SLEEP_THRESHOLD:
 			body_linear_velocity_sleep_threshold = p_value;
 			break;
-		case PS2DE::SPACE_PARAM_BODY_ANGULAR_VELOCITY_SLEEP_THRESHOLD:
+		case PhysicsServer2D::SPACE_PARAM_BODY_ANGULAR_VELOCITY_SLEEP_THRESHOLD:
 			body_angular_velocity_sleep_threshold = p_value;
 			break;
-		case PS2DE::SPACE_PARAM_BODY_TIME_TO_SLEEP:
+		case PhysicsServer2D::SPACE_PARAM_BODY_TIME_TO_SLEEP:
 			body_time_to_sleep = p_value;
 			break;
-		case PS2DE::SPACE_PARAM_CONSTRAINT_DEFAULT_BIAS:
+		case PhysicsServer2D::SPACE_PARAM_CONSTRAINT_DEFAULT_BIAS:
 			constraint_bias = p_value;
 			break;
-		case PS2DE::SPACE_PARAM_SOLVER_ITERATIONS:
+		case PhysicsServer2D::SPACE_PARAM_SOLVER_ITERATIONS:
 			solver_iterations = p_value;
 			break;
 	}
 }
 
-real_t GodotSpace2D::get_param(PS2DE::SpaceParameter p_param) const {
+real_t GodotSpace2D::get_param(PhysicsServer2D::SpaceParameter p_param) const {
 	switch (p_param) {
-		case PS2DE::SPACE_PARAM_CONTACT_RECYCLE_RADIUS:
+		case PhysicsServer2D::SPACE_PARAM_CONTACT_RECYCLE_RADIUS:
 			return contact_recycle_radius;
-		case PS2DE::SPACE_PARAM_CONTACT_MAX_SEPARATION:
+		case PhysicsServer2D::SPACE_PARAM_CONTACT_MAX_SEPARATION:
 			return contact_max_separation;
-		case PS2DE::SPACE_PARAM_CONTACT_MAX_ALLOWED_PENETRATION:
+		case PhysicsServer2D::SPACE_PARAM_CONTACT_MAX_ALLOWED_PENETRATION:
 			return contact_max_allowed_penetration;
-		case PS2DE::SPACE_PARAM_CONTACT_DEFAULT_BIAS:
+		case PhysicsServer2D::SPACE_PARAM_CONTACT_DEFAULT_BIAS:
 			return contact_bias;
-		case PS2DE::SPACE_PARAM_BODY_LINEAR_VELOCITY_SLEEP_THRESHOLD:
+		case PhysicsServer2D::SPACE_PARAM_BODY_LINEAR_VELOCITY_SLEEP_THRESHOLD:
 			return body_linear_velocity_sleep_threshold;
-		case PS2DE::SPACE_PARAM_BODY_ANGULAR_VELOCITY_SLEEP_THRESHOLD:
+		case PhysicsServer2D::SPACE_PARAM_BODY_ANGULAR_VELOCITY_SLEEP_THRESHOLD:
 			return body_angular_velocity_sleep_threshold;
-		case PS2DE::SPACE_PARAM_BODY_TIME_TO_SLEEP:
+		case PhysicsServer2D::SPACE_PARAM_BODY_TIME_TO_SLEEP:
 			return body_time_to_sleep;
-		case PS2DE::SPACE_PARAM_CONSTRAINT_DEFAULT_BIAS:
+		case PhysicsServer2D::SPACE_PARAM_CONSTRAINT_DEFAULT_BIAS:
 			return constraint_bias;
-		case PS2DE::SPACE_PARAM_SOLVER_ITERATIONS:
+		case PhysicsServer2D::SPACE_PARAM_SOLVER_ITERATIONS:
 			return solver_iterations;
 	}
 	return 0;

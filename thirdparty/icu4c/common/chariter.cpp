@@ -73,8 +73,8 @@ textLength(that.textLength), pos(that.pos), begin(that.begin), end(that.end)
 {
 }
 
-CharacterIterator&
-CharacterIterator::operator=(const CharacterIterator& that) U_LIFETIME_BOUND {
+CharacterIterator &
+CharacterIterator::operator=(const CharacterIterator &that) {
     ForwardCharacterIterator::operator=(that);
     textLength = that.textLength;
     pos = that.pos;

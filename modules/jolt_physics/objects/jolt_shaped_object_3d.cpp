@@ -45,11 +45,10 @@ bool JoltShapedObject3D::_is_big() const {
 }
 
 JPH::ShapeRefC JoltShapedObject3D::_try_build_shape(bool p_optimize_compound) {
-	bool has_back_face_collision = is_area();
 	int built_shapes = 0;
 
 	for (JoltShapeInstance3D &shape : shapes) {
-		if (shape.is_enabled() && shape.try_build(has_back_face_collision)) {
+		if (shape.is_enabled() && shape.try_build()) {
 			built_shapes += 1;
 		}
 	}
@@ -71,6 +70,10 @@ JPH::ShapeRefC JoltShapedObject3D::_try_build_shape(bool p_optimize_compound) {
 		Vector3 actual_scale = scale;
 		JOLT_ENSURE_SCALE_VALID(result, actual_scale, vformat("Failed to correctly scale body '%s'.", to_string()));
 		result = JoltShape3D::with_scale(result, actual_scale);
+	}
+
+	if (is_area()) {
+		result = JoltShape3D::with_double_sided(result, true);
 	}
 
 	return result;

@@ -1,2 +1,2 @@
 func test():
-	Mesh.this_does_not_exist # Does not exist
+	TileSet.this_does_not_exist # Does not exist

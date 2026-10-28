@@ -6,7 +6,8 @@
 
 #include <Jolt/Physics/SoftBody/SoftBodyCreationSettings.h>
 #include <Jolt/ObjectStream/TypeDeclarations.h>
-#include <Jolt/Core/StreamUtils.h>
+#include <Jolt/Core/StreamIn.h>
+#include <Jolt/Core/StreamOut.h>
 
 JPH_NAMESPACE_BEGIN
 

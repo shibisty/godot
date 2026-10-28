@@ -39,7 +39,7 @@ public:
 
     void setTo(const UnicodeString &s, int32_t val, UnicodeString &strings, UErrorCode &errorCode);
 
-    UnicodeString getString(const UnicodeString& strings U_LIFETIME_BOUND) const {
+    UnicodeString getString(const UnicodeString &strings) const {
         int32_t length=strings[stringOffset];
         return strings.tempSubString(stringOffset+1, length);
     }
@@ -94,10 +94,8 @@ UCharsTrieBuilder::~UCharsTrieBuilder() {
     uprv_free(uchars);
 }
 
-UCharsTrieBuilder&
-UCharsTrieBuilder::add(const UnicodeString& s,
-                       int32_t value,
-                       UErrorCode& errorCode) U_LIFETIME_BOUND {
+UCharsTrieBuilder &
+UCharsTrieBuilder::add(const UnicodeString &s, int32_t value, UErrorCode &errorCode) {
     if(U_FAILURE(errorCode)) {
         return *this;
     }
@@ -160,10 +158,9 @@ UCharsTrieBuilder::build(UStringTrieBuildOption buildOption, UErrorCode &errorCo
     return newTrie;
 }
 
-UnicodeString&
-UCharsTrieBuilder::buildUnicodeString(UStringTrieBuildOption buildOption,
-                                      UnicodeString& result U_LIFETIME_BOUND,
-                                      UErrorCode& errorCode) U_LIFETIME_BOUND {
+UnicodeString &
+UCharsTrieBuilder::buildUnicodeString(UStringTrieBuildOption buildOption, UnicodeString &result,
+                                      UErrorCode &errorCode) {
     buildUChars(buildOption, errorCode);
     if(U_SUCCESS(errorCode)) {
         result.setTo(false, uchars+(ucharsCapacity-ucharsLength), ucharsLength);

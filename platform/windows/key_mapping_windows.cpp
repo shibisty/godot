@@ -397,7 +397,7 @@ Key KeyMappingWindows::get_keysym(unsigned int p_code) {
 	if (key) {
 		return *key;
 	}
-	return Key::NONE;
+	return Key::UNKNOWN;
 }
 
 unsigned int KeyMappingWindows::get_scancode(Key p_keycode) {

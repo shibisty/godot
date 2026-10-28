@@ -29,7 +29,6 @@
 #include "mutex.h"
 #include "norm2allmodes.h"
 #include "normalizer2impl.h"
-#include "putilimp.h"
 #include "uassert.h"
 #include "ucln_cmn.h"
 
@@ -85,10 +84,10 @@ Normalizer2::isNormalizedUTF8(StringPiece s, UErrorCode &errorCode) const {
 class NoopNormalizer2 : public Normalizer2 {
     virtual ~NoopNormalizer2();
 
-    virtual UnicodeString&
-    normalize(const UnicodeString& src,
-              UnicodeString& dest U_LIFETIME_BOUND,
-              UErrorCode& errorCode) const override {
+    virtual UnicodeString &
+    normalize(const UnicodeString &src,
+              UnicodeString &dest,
+              UErrorCode &errorCode) const override {
         if(U_SUCCESS(errorCode)) {
             if(&dest!=&src) {
                 dest=src;
@@ -115,10 +114,10 @@ class NoopNormalizer2 : public Normalizer2 {
         }
     }
 
-    virtual UnicodeString&
-    normalizeSecondAndAppend(UnicodeString& first U_LIFETIME_BOUND,
-                             const UnicodeString& second,
-                             UErrorCode& errorCode) const override {
+    virtual UnicodeString &
+    normalizeSecondAndAppend(UnicodeString &first,
+                             const UnicodeString &second,
+                             UErrorCode &errorCode) const override {
         if(U_SUCCESS(errorCode)) {
             if(&first!=&second) {
                 first.append(second);
@@ -128,10 +127,10 @@ class NoopNormalizer2 : public Normalizer2 {
         }
         return first;
     }
-    virtual UnicodeString&
-    append(UnicodeString& first U_LIFETIME_BOUND,
-           const UnicodeString& second,
-           UErrorCode& errorCode) const override {
+    virtual UnicodeString &
+    append(UnicodeString &first,
+           const UnicodeString &second,
+           UErrorCode &errorCode) const override {
         if(U_SUCCESS(errorCode)) {
             if(&first!=&second) {
                 first.append(second);
@@ -204,8 +203,8 @@ const Normalizer2 *Normalizer2Factory::getNoopInstance(UErrorCode &errorCode) {
     return noopSingleton;
 }
 
-const Normalizer2Impl*
-Normalizer2Factory::getImpl(const Normalizer2* norm2 U_LIFETIME_BOUND) {
+const Normalizer2Impl *
+Normalizer2Factory::getImpl(const Normalizer2 *norm2) {
     return &((Normalizer2WithImpl *)norm2)->impl;
 }
 
@@ -387,13 +386,8 @@ normalizeSecondAndAppend(const UNormalizer2 *norm2,
             // Avoid duplicate argument checking and support NUL-terminated src.
             UnicodeString safeMiddle;
             {
-                int32_t destCapacity;
                 ReorderingBuffer buffer(n2wi->impl, firstString);
-                if(uprv_add32_overflow(firstLength, secondLength, &destCapacity) ||
-                        uprv_add32_overflow(destCapacity, 1, &destCapacity)) {
-                    firstString.setToBogus();
-                    *pErrorCode=U_MEMORY_ALLOCATION_ERROR;
-                } else if(buffer.init(destCapacity, *pErrorCode)) {  // destCapacity>=-1
+                if(buffer.init(firstLength+secondLength+1, *pErrorCode)) {  // destCapacity>=-1
                     n2wi->normalizeAndAppend(second, secondLength>=0 ? second+secondLength : nullptr,
                                              doNormalize, safeMiddle, buffer, *pErrorCode);
                 }

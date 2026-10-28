@@ -98,6 +98,7 @@ private:
 
 	int title_fullsize_cache = 0;
 	int tag_size_cache = 0;
+	int window_size_cache = 0;
 
 protected:
 	void _notification(int p_what);
@@ -113,15 +114,15 @@ public:
 	void set_unsupported_features(PackedStringArray p_features);
 
 	bool should_load_project_icon() const;
-	bool is_older_version() const { return version_match_type == VersionMatchType::PROJECT_USES_OLDER_MAJOR || version_match_type == VersionMatchType::PROJECT_USES_OLDER_MINOR; }
 	void set_selected(bool p_selected, bool p_hide_focus = false);
 
 	void set_is_favorite(bool p_favorite);
 	void set_is_missing(bool p_missing);
 	void set_is_grayed(bool p_grayed);
+	void set_project_title_index(int p_title_index);
 	void set_project_title_autowrap();
 
-	void resize_project_title(const int p_title_size);
+	void resize_project_title();
 
 	ProjectListItemControl();
 };
@@ -219,15 +220,14 @@ public:
 		String get_last_edited_string() const;
 	};
 
-	int title_size_cache = 0;
-	int window_size_cache = 0;
+	HashMap<int, int> title_size_cache;
+	int project_title_index_count = -1;
 
 private:
 	String _config_path;
 	ConfigFile _config;
 
 	Vector<Item> _projects;
-	static inline HashMap<String, int> modified_time_cache;
 
 	int _icon_load_index = 0;
 	bool project_opening_initiated = false;
@@ -269,7 +269,6 @@ private:
 	// Project list items.
 
 	void _create_project_item_control(int p_index);
-	void _update_project_control_translatable_fields(const Item &item);
 	void _toggle_project(int p_index);
 	void _remove_project(int p_index, bool p_update_settings);
 

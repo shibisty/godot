@@ -50,6 +50,7 @@ void ImageTexture::reload_from_file() {
 		set_image(img);
 	} else {
 		Resource::reload_from_file();
+		notify_property_list_changed();
 		emit_changed();
 	}
 }
@@ -83,6 +84,7 @@ void ImageTexture::set_image(const Ref<Image> &p_image) {
 		RID new_texture = RenderingServer::get_singleton()->texture_2d_create(p_image);
 		RenderingServer::get_singleton()->texture_replace(texture, new_texture);
 	}
+	notify_property_list_changed();
 	emit_changed();
 
 	image_stored = true;
@@ -104,6 +106,7 @@ void ImageTexture::update(const Ref<Image> &p_image) {
 
 	RS::get_singleton()->texture_2d_update(texture, p_image);
 
+	notify_property_list_changed();
 	emit_changed();
 
 	alpha_cache.unref();

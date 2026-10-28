@@ -32,10 +32,12 @@
 #include "render_scene_buffers_rd.compat.inc"
 
 #include "core/object/class_db.h"
+#include "servers/rendering/renderer_compositor.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/rendering_device_binds.h"
 #include "servers/rendering/rendering_server.h" // IWYU pragma: keep // Needed to bind RSE enums.
 #include "servers/rendering/rendering_server_enums.h"
+#include "servers/rendering/rendering_server_globals.h"
 
 RenderSceneBuffersRD::RenderSceneBuffersRD() {
 }
@@ -80,6 +82,156 @@ void RenderSceneBuffersRD::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_screen_space_aa"), &RenderSceneBuffersRD::get_screen_space_aa);
 	ClassDB::bind_method(D_METHOD("get_use_taa"), &RenderSceneBuffersRD::get_use_taa);
 	ClassDB::bind_method(D_METHOD("get_use_debanding"), &RenderSceneBuffersRD::get_use_debanding);
+
+	// Raytracing scene (Viewport.raytracing_scene_enabled).
+	ClassDB::bind_method(D_METHOD("has_raytracing_scene"), &RenderSceneBuffersRD::has_raytracing_scene);
+	ClassDB::bind_method(D_METHOD("get_raytracing_tlas"), &RenderSceneBuffersRD::get_raytracing_tlas);
+	ClassDB::bind_method(D_METHOD("get_raytracing_instance_buffer"), &RenderSceneBuffersRD::get_raytracing_instance_buffer);
+	ClassDB::bind_method(D_METHOD("get_raytracing_material_buffer"), &RenderSceneBuffersRD::get_raytracing_material_buffer);
+	ClassDB::bind_method(D_METHOD("get_raytracing_instance_count"), &RenderSceneBuffersRD::get_raytracing_instance_count);
+	ClassDB::bind_method(D_METHOD("get_raytracing_textures"), &RenderSceneBuffersRD::get_raytracing_textures);
+	ClassDB::bind_method(D_METHOD("get_raytracing_texture_uniform_set", "shader", "set"), &RenderSceneBuffersRD::get_raytracing_texture_uniform_set);
+
+	// Late opaque pass (render_mode opaque_late).
+	ClassDB::bind_method(D_METHOD("has_opaque_late_textures"), &RenderSceneBuffersRD::has_opaque_late_textures);
+	ClassDB::bind_method(D_METHOD("get_opaque_late_color", "layer"), &RenderSceneBuffersRD::get_opaque_late_color);
+	ClassDB::bind_method(D_METHOD("get_opaque_late_depth", "layer"), &RenderSceneBuffersRD::get_opaque_late_depth);
+}
+
+bool RenderSceneBuffersRD::has_opaque_late_textures() const {
+	return opaque_late_frame == RSG::rasterizer->get_frame_number() && has_texture(RB_SCOPE_BUFFERS, RB_TEX_OPAQUE_LATE_COLOR) && has_texture(RB_SCOPE_BUFFERS, RB_TEX_OPAQUE_LATE_DEPTH);
+}
+
+RID RenderSceneBuffersRD::get_opaque_late_color(uint32_t p_layer) {
+	if (!has_opaque_late_textures()) {
+		return RID();
+	}
+	ERR_FAIL_UNSIGNED_INDEX_V(p_layer, view_count, RID());
+	return get_texture_slice(RB_SCOPE_BUFFERS, RB_TEX_OPAQUE_LATE_COLOR, p_layer, 0);
+}
+
+RID RenderSceneBuffersRD::get_opaque_late_depth(uint32_t p_layer) {
+	if (!has_opaque_late_textures()) {
+		return RID();
+	}
+	ERR_FAIL_UNSIGNED_INDEX_V(p_layer, view_count, RID());
+	return get_texture_slice(RB_SCOPE_BUFFERS, RB_TEX_OPAQUE_LATE_DEPTH, p_layer, 0);
+}
+
+void RenderSceneBuffersRD::free_raytracing_scene() {
+	RD *rd = RD::get_singleton();
+	RaytracingScene &rts = raytracing_scene;
+	for (const RaytracingScene::TextureSet &ts : rts.texture_sets) {
+		if (ts.uniform_set.is_valid() && rd->uniform_set_is_valid(ts.uniform_set)) {
+			rd->free_rid(ts.uniform_set);
+		}
+	}
+	rts.texture_sets.clear();
+	if (rts.tlas.is_valid()) {
+		rd->free_rid(rts.tlas);
+	}
+	if (rts.instance_buffer.is_valid()) {
+		rd->free_rid(rts.instance_buffer);
+	}
+	if (rts.material_buffer.is_valid()) {
+		rd->free_rid(rts.material_buffer);
+	}
+	rts = RaytracingScene();
+}
+
+void RenderSceneBuffersRD::free_pathtracing() {
+	RD *rd = RD::get_singleton();
+	Pathtracing &pt = pathtracing;
+	if (pt.accum.is_valid()) {
+		rd->free_rid(pt.accum);
+	}
+	if (pt.depth.is_valid()) {
+		rd->free_rid(pt.depth);
+	}
+	if (pt.light_buffer.is_valid()) {
+		rd->free_rid(pt.light_buffer);
+	}
+	if (pt.params_buffer.is_valid()) {
+		rd->free_rid(pt.params_buffer);
+	}
+	pt = Pathtracing();
+	pathtracing_published_samples.set(0);
+}
+
+bool RenderSceneBuffersRD::has_raytracing_scene() const {
+	return raytracing_scene.tlas.is_valid() && raytracing_scene.frame == RSG::rasterizer->get_frame_number();
+}
+
+RID RenderSceneBuffersRD::get_raytracing_tlas() const {
+	return has_raytracing_scene() ? raytracing_scene.tlas : RID();
+}
+
+RID RenderSceneBuffersRD::get_raytracing_instance_buffer() const {
+	return has_raytracing_scene() ? raytracing_scene.instance_buffer : RID();
+}
+
+RID RenderSceneBuffersRD::get_raytracing_material_buffer() const {
+	return has_raytracing_scene() ? raytracing_scene.material_buffer : RID();
+}
+
+uint32_t RenderSceneBuffersRD::get_raytracing_instance_count() const {
+	return has_raytracing_scene() ? raytracing_scene.instance_count : 0;
+}
+
+TypedArray<RID> RenderSceneBuffersRD::get_raytracing_textures() const {
+	TypedArray<RID> ret;
+	if (!has_raytracing_scene()) {
+		return ret;
+	}
+	ret.resize(raytracing_scene.textures.size());
+	for (int i = 0; i < raytracing_scene.textures.size(); i++) {
+		ret[i] = raytracing_scene.textures[i];
+	}
+	return ret;
+}
+
+RID RenderSceneBuffersRD::get_raytracing_texture_uniform_set(RID p_shader, uint32_t p_set) {
+	ERR_FAIL_COND_V_MSG(!has_raytracing_scene(), RID(), "No raytracing scene this frame (enable Viewport.raytracing_scene_enabled and the rendering/raytracing/scene_acceleration_structures project setting; requires Vulkan with ray query support).");
+	ERR_FAIL_COND_V(raytracing_scene.textures.is_empty(), RID());
+	RD *rd = RD::get_singleton();
+	RaytracingScene &rts = raytracing_scene;
+
+	for (uint32_t i = 0; i < rts.texture_sets.size(); i++) {
+		RaytracingScene::TextureSet &ts = rts.texture_sets[i];
+		if (ts.shader != p_shader || ts.set != p_set) {
+			continue;
+		}
+		if (ts.version == rts.textures_version && ts.uniform_set.is_valid() && rd->uniform_set_is_valid(ts.uniform_set)) {
+			return ts.uniform_set;
+		}
+		if (ts.uniform_set.is_valid() && rd->uniform_set_is_valid(ts.uniform_set)) {
+			rd->free_rid(ts.uniform_set);
+		}
+		rts.texture_sets.remove_at_unordered(i);
+		break;
+	}
+
+	// Binding 0 of the set must be a runtime-sized `texture2D textures[]` (the only binding of the set).
+	RD::Uniform u;
+	u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+	u.binding = 0;
+	for (int i = 0; i < rts.textures.size(); i++) {
+		RID tex = rts.textures[i];
+		if (!rd->texture_is_valid(tex)) {
+			tex = rts.textures[0];
+		}
+		u.append_id(tex);
+	}
+	RID uniform_set = rd->uniform_set_create(Vector<RD::Uniform>{ u }, p_shader, p_set);
+	ERR_FAIL_COND_V_MSG(uniform_set.is_null(), RID(), "Could not create the raytracing texture set: binding 0 of the set must be the only binding, declared as `layout(set = N, binding = 0) uniform texture2D textures[];`.");
+
+	RaytracingScene::TextureSet ts;
+	ts.shader = p_shader;
+	ts.set = p_set;
+	ts.version = rts.textures_version;
+	ts.uniform_set = uniform_set;
+	rts.texture_sets.push_back(ts);
+	return uniform_set;
 }
 
 void RenderSceneBuffersRD::update_sizes(NamedTexture &p_named_texture) {
@@ -107,7 +259,7 @@ void RenderSceneBuffersRD::update_samplers() {
 	float computed_mipmap_bias = texture_mipmap_bias;
 
 	if (use_taa || (RSE::scaling_3d_mode_type(scaling_3d_mode) == RSE::VIEWPORT_SCALING_3D_TYPE_TEMPORAL)) {
-		// Use negative mipmap LOD bias when TAA or FSR2 is enabled to compensate for loss of sharpness.
+		// Use negative mipmap LOD bias when TAA, FSR2 or DLSS is enabled to compensate for loss of sharpness.
 		// This restores sharpness in still images to be roughly at the same level as without TAA,
 		// but moving scenes will still be blurrier.
 		computed_mipmap_bias -= 0.5;
@@ -136,6 +288,9 @@ void RenderSceneBuffersRD::cleanup() {
 	}
 	named_textures.clear();
 
+	free_raytracing_scene();
+	free_pathtracing();
+
 	// Clear weight_buffer / blur textures.
 	for (WeightBuffers &weight_buffer : weight_buffers) {
 		if (weight_buffer.weight.is_valid()) {
@@ -163,6 +318,7 @@ void RenderSceneBuffersRD::configure(const RenderSceneBuffersConfiguration *p_co
 	view_count = p_config->get_view_count();
 
 	scaling_3d_mode = p_config->get_scaling_3d_mode();
+	upscaler_ready = true;
 	msaa_3d = p_config->get_msaa_3d();
 	screen_space_aa = p_config->get_screen_space_aa();
 
@@ -171,6 +327,7 @@ void RenderSceneBuffersRD::configure(const RenderSceneBuffersConfiguration *p_co
 	anisotropic_filtering_level = p_config->get_anisotropic_filtering_level();
 	use_taa = p_config->get_use_taa();
 	use_debanding = p_config->get_use_debanding();
+	frame_generation = p_config->get_use_frame_generation();
 
 	ERR_FAIL_COND_MSG(view_count == 0, "Must have at least 1 view");
 
@@ -225,6 +382,7 @@ void RenderSceneBuffersRD::configure_for_reflections(const Size2i p_reflection_s
 	screen_space_aa = RSE::VIEWPORT_SCREEN_SPACE_AA_DISABLED;
 	use_taa = false;
 	use_debanding = false;
+	frame_generation = false;
 	view_count = 1;
 
 	// cleanout any old buffers we had.
@@ -444,20 +602,19 @@ RID RenderSceneBuffersRD::get_texture_slice_view(const StringName &p_context, co
 
 	// asking the whole thing? just return the original
 	RD::TextureView default_view = RD::TextureView();
-	RD::TextureSliceType slice_type = (p_layers > 1 ? RD::TEXTURE_SLICE_2D_ARRAY : RD::TEXTURE_SLICE_2D);
-	if (p_layer == 0 && p_mipmap == 0 && named_texture.format.array_layers == p_layers && named_texture.format.mipmaps == p_mipmaps && p_view == default_view && ((named_texture.format.texture_type == RD::TEXTURE_TYPE_2D && slice_type == RD::TEXTURE_SLICE_2D) || (named_texture.format.texture_type == RD::TEXTURE_TYPE_2D_ARRAY && slice_type == RD::TEXTURE_SLICE_2D_ARRAY))) {
+	if (p_layer == 0 && p_mipmap == 0 && named_texture.format.array_layers == p_layers && named_texture.format.mipmaps == p_mipmaps && p_view == default_view) {
 		return named_texture.texture;
 	}
 
 	// see if we have this
-	NTSliceKey slice_key(p_layer, p_layers, p_mipmap, p_mipmaps, p_view, slice_type);
+	NTSliceKey slice_key(p_layer, p_layers, p_mipmap, p_mipmaps, p_view);
 	if (named_texture.slices.has(slice_key)) {
 		return named_texture.slices[slice_key];
 	}
 
 	// create our slice
 	RID &slice = named_texture.slices[slice_key];
-	slice = RD::get_singleton()->texture_create_shared_from_slice(p_view, named_texture.texture, p_layer, p_mipmap, p_mipmaps, slice_type, p_layers);
+	slice = RD::get_singleton()->texture_create_shared_from_slice(p_view, named_texture.texture, p_layer, p_mipmap, p_mipmaps, p_layers > 1 ? RD::TEXTURE_SLICE_2D_ARRAY : RD::TEXTURE_SLICE_2D, p_layers);
 
 	Array arr = {
 		p_context,

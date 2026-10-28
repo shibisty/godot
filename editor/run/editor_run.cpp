@@ -111,7 +111,6 @@ Error EditorRun::run(const String &p_scene, const String &p_write_movie, const V
 		}
 	}
 
-#ifndef ANDROID_ENABLED
 	WindowPlacement window_placement = get_window_placement();
 	if (window_placement.position != Point2i(INT_MAX, INT_MAX)) {
 		args.push_back("--position");
@@ -123,7 +122,6 @@ Error EditorRun::run(const String &p_scene, const String &p_write_movie, const V
 	} else if (window_placement.force_fullscreen) {
 		args.push_back("--fullscreen");
 	}
-#endif
 
 	List<String> breakpoints;
 	EditorNode::get_editor_data().get_editor_breakpoints(&breakpoints);
@@ -169,13 +167,6 @@ Error EditorRun::run(const String &p_scene, const String &p_write_movie, const V
 		if (instance_starting_callback) {
 			instance_starting_callback(i, instance_args);
 		}
-
-#ifdef ANDROID_ENABLED
-		// Each run instance is mapped to a specific process on Android, so for multiple instances run, we need to
-		// specify which process to use by specifying the run instance number.
-		instance_args.push_back("--run_instance");
-		instance_args.push_back(itos(i));
-#endif
 
 		if (OS::get_singleton()->is_stdout_verbose()) {
 			PackedStringArray output;

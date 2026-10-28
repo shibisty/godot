@@ -36,7 +36,6 @@
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/string/fuzzy_search.h"
-#include "core/templates/fixed_vector.h"
 #include "editor/docks/filesystem_dock.h"
 #include "editor/editor_node.h"
 #include "editor/editor_string_names.h"
@@ -47,12 +46,15 @@
 #include "editor/inspector/multi_node_edit.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/themes/editor_scale.h"
+#include "scene/gui/center_container.h"
 #include "scene/gui/check_button.h"
 #include "scene/gui/flow_container.h"
 #include "scene/gui/line_edit.h"
+#include "scene/gui/margin_container.h"
 #include "scene/gui/panel_container.h"
 #include "scene/gui/separator.h"
 #include "scene/gui/texture_rect.h"
+#include "scene/gui/tree.h"
 
 void HighlightedLabel::draw_substr_rects(const Vector2i &p_substr, Vector2 p_offset, int p_line_limit, int line_spacing) {
 	for (int i = get_lines_skipped(); i < p_line_limit; i++) {
@@ -365,33 +367,37 @@ QuickOpenResultContainer::QuickOpenResultContainer() {
 
 	{
 		// Results section
-		MarginContainer *mc = memnew(MarginContainer);
-		mc->set_theme_type_variation("NoBorderHorizontalWindow");
-		mc->set_h_size_flags(Control::SIZE_EXPAND_FILL);
-		mc->set_v_size_flags(Control::SIZE_EXPAND_FILL);
-		add_child(mc);
+		panel_container = memnew(PanelContainer);
+		panel_container->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+		add_child(panel_container);
 
 		{
 			// No search results
-			no_results_container = memnew(PanelContainer);
-			mc->add_child(no_results_container);
+			no_results_container = memnew(CenterContainer);
+			no_results_container->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			no_results_container->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+			panel_container->add_child(no_results_container);
 
 			no_results_label = memnew(Label);
 			no_results_label->set_focus_mode(FOCUS_ACCESSIBILITY);
 			no_results_label->add_theme_font_size_override(SceneStringName(font_size), 24 * EDSCALE);
-			no_results_label->set_h_size_flags(Control::SIZE_SHRINK_CENTER);
-			no_results_label->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
 			no_results_container->add_child(no_results_label);
 			no_results_container->hide();
 		}
 
 		{
+			MarginContainer *mc = memnew(MarginContainer);
+			mc->set_theme_type_variation("NoBorderHorizontalWindow");
+			mc->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			mc->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+			panel_container->add_child(mc);
+
 			// Search results
 			scroll_container = memnew(ScrollContainer);
 			scroll_container->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
 			scroll_container->set_scroll_hint_mode(ScrollContainer::SCROLL_HINT_MODE_ALL);
 			scroll_container->hide();
-			mc->add_child(scroll_container);
+			panel_container->add_child(scroll_container);
 
 			list = memnew(VBoxContainer);
 			list->set_h_size_flags(Control::SIZE_EXPAND_FILL);
@@ -712,15 +718,15 @@ QuickOpenResultCandidate QuickOpenResultCandidate::from_uid(const ResourceUID::I
 	return candidate;
 }
 
-QuickOpenResultCandidate QuickOpenResultCandidate::from_result(Ref<FuzzySearchMatch> p_result, bool &r_success) {
-	ResourceUID::ID uid = EditorFileSystem::get_singleton()->get_file_uid(p_result->get_target());
+QuickOpenResultCandidate QuickOpenResultCandidate::from_result(const FuzzySearchResult &p_result, bool &r_success) {
+	ResourceUID::ID uid = EditorFileSystem::get_singleton()->get_file_uid(p_result.target);
 
 	QuickOpenResultCandidate candidate = from_uid(uid, r_success);
 	if (!r_success) {
 		return QuickOpenResultCandidate();
 	}
 
-	candidate.result = p_result;
+	candidate.result = &p_result;
 	return candidate;
 }
 
@@ -738,22 +744,6 @@ void QuickOpenResultContainer::_add_candidate(QuickOpenResultCandidate &p_candid
 	}
 
 	String file_path = ResourceUID::get_singleton()->get_id_path(p_candidate.uid);
-
-	// Verify that a PackedScene is actually a "real" Scene if in a Open Scene context.
-	if (base_types.size() == 1 && base_types[0] == SNAME("PackedScene")) {
-		static FixedVector<String, 3> valid_extensions = { "tscn", "scn", "res" };
-		bool is_valid_type = false;
-		for (const String &ext : valid_extensions) {
-			if (file_path.has_extension(ext)) {
-				is_valid_type = true;
-				break;
-			}
-		}
-		if (!is_valid_type) {
-			return;
-		}
-	}
-
 	EditorResourcePreview::PreviewItem item = EditorResourcePreview::get_singleton()->get_resource_preview_if_available(file_path);
 	if (item.preview.is_valid()) {
 		p_candidate.thumbnail = item.preview;
@@ -774,18 +764,18 @@ void QuickOpenResultContainer::update_results() {
 	candidates.clear();
 	candidates_uids.clear();
 
-	if (max_total_results != 0) {
-		if (query.is_empty()) {
-			_use_default_candidates();
-		} else {
-			_score_and_sort_candidates();
-		}
+	if (query.is_empty()) {
+		_use_default_candidates();
+	} else {
+		_score_and_sort_candidates();
 	}
 
 	_update_result_items(MIN(candidates.size(), max_total_results), 0);
 }
 
 void QuickOpenResultContainer::_use_default_candidates() {
+	HashSet<ResourceUID::ID> existing_uids;
+
 	Vector<ResourceUID::ID> *history = _get_history();
 	if (history) {
 		for (const ResourceUID::ID &uid : *history) {
@@ -816,15 +806,15 @@ void QuickOpenResultContainer::_use_default_candidates() {
 	}
 }
 
-Vector<Ref<FuzzySearchMatch>> QuickOpenResultContainer::_get_fuzzy_search_results() {
+void QuickOpenResultContainer::_update_fuzzy_search_results() {
 	FuzzySearch fuzzy_search;
-	fuzzy_search.set_start_offset(6); // Don't match against "res://" at the start of each filepath.
-	fuzzy_search.set_case_sensitive(!query.is_lowercase());
-	fuzzy_search.set_max_results(max_total_results);
+	fuzzy_search.start_offset = 6; // Don't match against "res://" at the start of each filepath.
+	fuzzy_search.set_query(query);
+	fuzzy_search.max_results = max_total_results;
 	bool fuzzy_matching = EDITOR_GET("filesystem/quick_open_dialog/enable_fuzzy_matching");
 	int max_misses = EDITOR_GET("filesystem/quick_open_dialog/max_fuzzy_misses");
-	fuzzy_search.set_use_exact_tokens(!fuzzy_matching);
-	fuzzy_search.set_max_misses(fuzzy_matching ? max_misses : 0);
+	fuzzy_search.allow_subsequences = fuzzy_matching;
+	fuzzy_search.max_misses = fuzzy_matching ? max_misses : 0;
 
 	PackedStringArray paths;
 	paths.reserve_exact(uids.size());
@@ -833,11 +823,13 @@ Vector<Ref<FuzzySearchMatch>> QuickOpenResultContainer::_get_fuzzy_search_result
 		paths.push_back(ResourceUID::get_singleton()->get_id_path(uid));
 	}
 
-	return fuzzy_search.search_all(query, paths);
+	fuzzy_search.search_all(paths, search_results);
 }
 
 void QuickOpenResultContainer::_score_and_sort_candidates() {
-	for (const Ref<FuzzySearchMatch> &result : _get_fuzzy_search_results()) {
+	_update_fuzzy_search_results();
+
+	for (const FuzzySearchResult &result : search_results) {
 		bool success;
 		QuickOpenResultCandidate candidate = QuickOpenResultCandidate::from_result(result, success);
 		if (!success) {
@@ -1191,9 +1183,7 @@ void QuickOpenResultContainer::_notification(int p_what) {
 			file_context_menu->set_item_icon(FILE_SHOW_IN_FILESYSTEM, get_editor_theme_icon(SNAME("ShowInFileSystem")));
 			file_context_menu->set_item_icon(FILE_SHOW_IN_FILE_MANAGER, get_editor_theme_icon(SNAME("Filesystem")));
 
-			Ref<StyleBox> tree_style = get_theme_stylebox(SceneStringName(panel), SNAME("Tree"));
-			no_results_container->add_theme_style_override(SceneStringName(panel), tree_style);
-			scroll_container->add_theme_style_override(SceneStringName(panel), tree_style);
+			panel_container->add_theme_style_override(SceneStringName(panel), get_theme_stylebox(SceneStringName(panel), SNAME("Tree")));
 
 			if (content_display_mode == QuickOpenDisplayMode::LIST) {
 				display_mode_toggle->set_button_icon(get_editor_theme_icon(SNAME("FileThumbnail")));
@@ -1371,11 +1361,11 @@ void QuickOpenResultListItem::set_content(const QuickOpenResultCandidate &p_cand
 	name->reset_highlights();
 	path->reset_highlights();
 
-	if (p_highlight && p_candidate.result.is_valid()) {
-		for (const FuzzyTokenMatch &match : p_candidate.result->get_token_matches()) {
+	if (p_highlight && p_candidate.result != nullptr) {
+		for (const FuzzyTokenMatch &match : p_candidate.result->token_matches) {
 			for (const Vector2i &interval : match.substrings) {
-				path->add_highlight(_get_path_interval(interval, p_candidate.result->get_dir_index()));
-				name->add_highlight(_get_name_interval(interval, p_candidate.result->get_dir_index()));
+				path->add_highlight(_get_path_interval(interval, p_candidate.result->dir_index));
+				name->add_highlight(_get_name_interval(interval, p_candidate.result->dir_index));
 			}
 		}
 	}
@@ -1443,10 +1433,10 @@ void QuickOpenResultGridItem::set_content(const QuickOpenResultCandidate &p_cand
 	name->set_tooltip_text(file_path);
 	name->reset_highlights();
 
-	if (p_highlight && p_candidate.result.is_valid()) {
-		for (const FuzzyTokenMatch &match : p_candidate.result->get_token_matches()) {
+	if (p_highlight && p_candidate.result != nullptr) {
+		for (const FuzzyTokenMatch &match : p_candidate.result->token_matches) {
 			for (const Vector2i &interval : match.substrings) {
-				name->add_highlight(_get_name_interval(interval, p_candidate.result->get_dir_index()));
+				name->add_highlight(_get_name_interval(interval, p_candidate.result->dir_index));
 			}
 		}
 	}

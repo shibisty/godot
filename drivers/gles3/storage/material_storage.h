@@ -435,7 +435,6 @@ struct TexBlitShaderData : public ShaderData {
 		BLEND_MODE_SUB,
 		BLEND_MODE_MUL,
 		BLEND_MODE_DISABLED,
-		BLEND_MODE_PREMULTIPLIED_ALPHA,
 	};
 
 	bool valid;
@@ -476,9 +475,7 @@ MaterialData *_create_tex_blit_material_func(ShaderData *p_shader);
 /* Global shader uniform structs */
 struct GlobalShaderUniforms {
 	enum {
-		BUFFER_DIRTY_REGION_SIZE = 1024, // Minimum supported width by OpenGL 3.3. Do not change.
-		TEXTURE_WIDTH = BUFFER_DIRTY_REGION_SIZE,
-		TEXTURE_WIDTH_SHIFT = 10,
+		BUFFER_DIRTY_REGION_SIZE = 1024
 	};
 	struct Variable {
 		HashSet<RID> texture_materials; // materials using this
@@ -520,7 +517,7 @@ struct GlobalShaderUniforms {
 	List<RID> materials_using_buffer;
 	List<RID> materials_using_texture;
 
-	GLuint texture = GLuint(0);
+	GLuint buffer = GLuint(0);
 	Value *buffer_values = nullptr;
 	ValueUsage *buffer_usage = nullptr;
 	bool *buffer_dirty_regions = nullptr;
@@ -642,7 +639,7 @@ public:
 	virtual void global_shader_parameters_instance_free(RID p_instance) override;
 	virtual void global_shader_parameters_instance_update(RID p_instance, int p_index, const Variant &p_value, int p_flags_count = 0) override;
 
-	GLuint global_shader_parameters_get_texture() const;
+	GLuint global_shader_parameters_get_uniform_buffer() const;
 
 	/* SHADER API */
 

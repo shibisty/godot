@@ -56,15 +56,9 @@ void EditorZoomWidget::_update_zoom_label() {
 	zoom_reset->set_text(zoom_text);
 }
 
-void EditorZoomWidget::_button_zoom_by(int p_direction) {
-	bool by_integer = Input::get_singleton()->is_key_pressed(Key::ALT);
-	// Integer mode steps one scaling factor at a time.
-	set_zoom_by_increments(p_direction * (by_integer ? 1 : 6), by_integer);
-	emit_signal(SNAME("zoom_changed"), zoom);
-}
-
 void EditorZoomWidget::_button_zoom_minus() {
-	_button_zoom_by(-1);
+	set_zoom_by_increments(-6, Input::get_singleton()->is_key_pressed(Key::ALT));
+	emit_signal(SNAME("zoom_changed"), zoom);
 }
 
 void EditorZoomWidget::_button_zoom_reset() {
@@ -73,7 +67,8 @@ void EditorZoomWidget::_button_zoom_reset() {
 }
 
 void EditorZoomWidget::_button_zoom_plus() {
-	_button_zoom_by(1);
+	set_zoom_by_increments(6, Input::get_singleton()->is_key_pressed(Key::ALT));
+	emit_signal(SNAME("zoom_changed"), zoom);
 }
 
 float EditorZoomWidget::get_zoom() {

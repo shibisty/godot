@@ -128,8 +128,6 @@ public:
 				uint32_t multimesh_has_custom_data : 1;
 				uint32_t fog_use_legacy_blending : 1;
 				uint32_t cluster_has_area_light : 1;
-				uint32_t use_lightmap_specular : 1;
-				uint32_t material_feedback : 1;
 			};
 		};
 
@@ -265,6 +263,8 @@ public:
 		bool uses_depth_texture = false;
 		bool uses_normal_texture = false;
 		bool uses_time = false;
+		bool uses_transparent_motion_vectors = false; // Mariner: render_mode motion_vectors_transparent
+		bool uses_opaque_late = false; // Mariner: render_mode opaque_late
 		bool uses_vertex_time = false;
 		bool uses_fragment_time = false;
 		bool writes_modelview_or_projection = false;
@@ -282,7 +282,9 @@ public:
 		uint32_t index = 0;
 
 		_FORCE_INLINE_ bool uses_alpha_pass() const {
-			bool has_read_screen_alpha = uses_screen_texture || uses_depth_texture || uses_normal_texture;
+			// Mariner: opaque_late materials read the screen/depth textures of the opaque scene drawn before them,
+			// so reading them does not make the material transparent.
+			bool has_read_screen_alpha = !uses_opaque_late && (uses_screen_texture || uses_depth_texture || uses_normal_texture);
 			bool has_base_alpha = (uses_alpha && (!uses_alpha_clip || uses_alpha_antialiasing)) || has_read_screen_alpha;
 			bool has_blend_alpha = uses_blend_alpha;
 			bool has_alpha = has_base_alpha || has_blend_alpha;
@@ -349,7 +351,6 @@ public:
 	SceneForwardClusteredShaderRD shader;
 	ShaderCompiler compiler;
 	bool emulate_point_size = false;
-	bool depth_prepass_enabled = false;
 
 	RID default_shader;
 	RID default_material;
@@ -358,12 +359,10 @@ public:
 	RID debug_shadow_splits_material_shader;
 	RID debug_shadow_splits_material;
 	RID default_shader_rd;
-	RID default_multiview_shader_rd; // This is lazily initialized, use "get_default_shader_rd" instead.
 	RID default_shader_sdfgi_rd;
 
 	RID default_vec4_xform_buffer;
 	RID default_vec4_xform_uniform_set;
-	RID default_material_feedback_buffer;
 
 	RID shadow_sampler;
 
@@ -390,7 +389,6 @@ public:
 	bool is_multiview_shader_group_enabled() const;
 	bool is_advanced_shader_group_enabled(bool p_multiview) const;
 	uint32_t get_pipeline_compilations(RSE::PipelineSource p_source);
-	RID get_default_shader_rd(bool p_is_multiview = false);
 };
 
 } // namespace RendererSceneRenderImplementation

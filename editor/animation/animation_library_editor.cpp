@@ -1024,7 +1024,6 @@ AnimationLibraryEditor::AnimationLibraryEditor() {
 	add_child(vb);
 
 	error_dialog = memnew(AcceptDialog);
-	error_dialog->set_flag(Window::FLAG_RESIZE_DISABLED, true);
 	error_dialog->set_title(TTRC("Error:"));
 	add_child(error_dialog);
 }

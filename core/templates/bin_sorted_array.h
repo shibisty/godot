@@ -34,7 +34,7 @@
 #include "core/templates/paged_array.h"
 
 template <typename T>
-class _WARN_UNUSED_ BinSortedArray {
+class BinSortedArray {
 	PagedArray<T> array;
 	LocalVector<uint64_t> bin_limits;
 

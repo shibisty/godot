@@ -24,27 +24,28 @@
 #define _TVG_SVG_LOADER_H_
 
 #include "tvgTaskScheduler.h"
-#include "tvgSvgCommon.h"
+#include "tvgSvgLoaderCommon.h"
 
-struct SvgLoader : ImageLoader, Task
+class SvgLoader : public ImageLoader, public Task
 {
-    SvgParserContext ctx;
+public:
     string svgPath = "";
     char* content = nullptr;
     uint32_t size = 0;
+
+    SvgLoaderData loaderData;
     Scene* root = nullptr;
 
-    SvgLoader() : ImageLoader(FileType::Svg) {}
+    bool copy = false;
+
+    SvgLoader();
     ~SvgLoader();
 
-    Result open(const char* path, const LoaderOps& ops) override;
-    Result open(const char* data, uint32_t size, const LoaderOps& ops) override;
+    bool open(const char* path) override;
+    bool open(const char* data, uint32_t size, const char* rpath, bool copy) override;
     bool resize(Paint* paint, float w, float h) override;
     bool read() override;
     bool close() override;
-
-    const AccessorEntity* access(uint32_t id) override;
-    void access(AccessorCallback& cb) override;
 
     Paint* paint() override;
 
@@ -54,7 +55,7 @@ private:
     AspectRatioMeetOrSlice meetOrSlice = AspectRatioMeetOrSlice::Meet;
     Box vbox{};
 
-    Result header();
+    bool header();
     void clear(bool all = true);
     void run(unsigned tid) override;
 };

@@ -32,6 +32,7 @@
 
 #include "core/templates/a_hash_map.h"
 #include "core/templates/hash_map.h"
+#include "core/templates/hash_set.h"
 #include "core/templates/paged_allocator.h"
 #include "core/templates/rb_map.h"
 #include "core/templates/self_list.h"
@@ -51,7 +52,6 @@ namespace D3D12MA {
 class Allocation;
 class Allocator;
 class VirtualBlock;
-class Pool;
 }; // namespace D3D12MA
 
 struct IDXGIAdapter;
@@ -92,10 +92,6 @@ class RenderingDeviceDriverD3D12 : public RenderingDeviceDriver {
 	struct ShaderCapabilities {
 		D3D_SHADER_MODEL shader_model = (D3D_SHADER_MODEL)0;
 		bool native_16bit_ops = false;
-
-		_FORCE_INLINE_ bool buffer_device_address_supported() const {
-			return shader_model >= D3D_SHADER_MODEL_6_6;
-		}
 	};
 
 	struct FormatCapabilities {
@@ -108,8 +104,6 @@ class RenderingDeviceDriverD3D12 : public RenderingDeviceDriver {
 
 	struct MiscFeaturesSupport {
 		bool depth_bounds_supported = false;
-		bool uma_supported = false;
-		bool gpu_upload_heap_supported = false;
 	};
 
 	struct SamplerCapabilities {
@@ -139,7 +133,6 @@ class RenderingDeviceDriverD3D12 : public RenderingDeviceDriver {
 	struct DescriptorHeap {
 		struct Allocation {
 			uint64_t virtual_alloc_handle = {}; // This is the handle value in "D3D12MA::VirtualAllocation".
-			uint64_t offset = UINT64_MAX;
 			D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle = {};
 			D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle = {};
 		};
@@ -176,11 +169,7 @@ class RenderingDeviceDriverD3D12 : public RenderingDeviceDriver {
 	};
 
 	DescriptorHeap resource_descriptor_heap;
-	BinaryMutex resource_descriptor_heap_mutex;
-
 	DescriptorHeap sampler_descriptor_heap;
-	BinaryMutex sampler_descriptor_heap_mutex;
-
 	CPUDescriptorHeapPool resource_descriptor_heap_pool;
 	CPUDescriptorHeapPool rtv_descriptor_heap_pool;
 	CPUDescriptorHeapPool dsv_descriptor_heap_pool;
@@ -212,11 +201,6 @@ private:
 
 	Microsoft::WRL::ComPtr<D3D12MA::Allocator> allocator;
 
-	// These pools allow UPLOAD and READBACK heap types to bypass runtime validation
-	// for GPU features that are supported in practice, such as ALLOW_UNORDERED_ACCESS.
-	Microsoft::WRL::ComPtr<D3D12MA::Pool> custom_upload_pool;
-	Microsoft::WRL::ComPtr<D3D12MA::Pool> custom_readback_pool;
-
 	/******************/
 	/**** RESOURCE ****/
 	/******************/
@@ -226,6 +210,9 @@ private:
 			// As many subresources as mipmaps * layers; planes (for depth-stencil) are tracked together.
 			TightLocalVector<D3D12_RESOURCE_STATES> subresource_states; // Used only if not a view.
 			uint32_t last_batch_with_uav_barrier = 0;
+			// Mariner E6: shared with the async compute queue. With legacy barriers, such resources are put back
+			// to COMMON at the end of every command list, so any queue type can pick them up.
+			bool async_compute_shared = false;
 		};
 
 		ID3D12Resource *resource = nullptr; // Non-null even if not owned.
@@ -268,7 +255,6 @@ private:
 		D3D12_GPU_VIRTUAL_ADDRESS gpu_virtual_address = {};
 		DataFormat texel_format = DATA_FORMAT_MAX;
 		uint64_t size = 0;
-		DescriptorHeap::Allocation device_address_uav_alloc = {};
 		struct {
 			bool is_dynamic : 1; // Only used for tracking (e.g. Vulkan needs these checks).
 		} flags = {};
@@ -330,8 +316,6 @@ private:
 	UINT _compute_subresource_from_layers(TextureInfo *p_texture, const TextureSubresourceLayers &p_layers, uint32_t p_layer_offset);
 
 	void _discard_texture_subresources(const TextureInfo *p_tex_info, const CommandBufferInfo *p_cmd_buf_info);
-
-	bool _data_format_is_compressed(DataFormat p_format);
 
 protected:
 	virtual bool _unordered_access_supported_by_format(DataFormat p_format);
@@ -438,12 +422,22 @@ private:
 
 	struct CommandQueueInfo {
 		Microsoft::WRL::ComPtr<ID3D12CommandQueue> d3d_queue;
+		// Mariner E6: fence waits/signals for the next execution with command lists.
+		LocalVector<Pair<ID3D12Fence *, uint64_t>> pending_timeline_waits;
+		LocalVector<Pair<ID3D12Fence *, uint64_t>> pending_timeline_signals;
 	};
 
 public:
 	virtual CommandQueueID command_queue_create(CommandQueueFamilyID p_cmd_queue_family, bool p_identify_as_main_queue = false) override;
 	virtual Error command_queue_execute_and_present(CommandQueueID p_cmd_queue, VectorView<SemaphoreID> p_wait_semaphores, VectorView<CommandBufferID> p_cmd_buffers, VectorView<SemaphoreID> p_cmd_semaphores, FenceID p_cmd_fence, VectorView<SwapChainID> p_swap_chains) override;
 	virtual void command_queue_free(CommandQueueID p_cmd_queue) override;
+
+	// Mariner E6: async compute.
+	virtual bool timeline_semaphore_is_supported() override;
+	virtual SemaphoreID timeline_semaphore_create() override;
+	virtual void timeline_semaphore_free(SemaphoreID p_semaphore) override;
+	virtual void command_queue_add_timeline_wait(CommandQueueID p_cmd_queue, SemaphoreID p_semaphore, uint64_t p_value) override;
+	virtual void command_queue_add_timeline_signal(CommandQueueID p_cmd_queue, SemaphoreID p_semaphore, uint64_t p_value) override;
 
 private:
 	// ----- POOL -----
@@ -502,7 +496,6 @@ private:
 		// Store a self list reference to be used by the command pool.
 		SelfList<CommandBufferInfo> command_buffer_info_elem{ this };
 
-		D3D12_COMMAND_LIST_TYPE list_type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> cmd_allocator;
 		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> cmd_list;
 		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList1> cmd_list_1;
@@ -528,6 +521,10 @@ private:
 		LocalVector<D3D12_RESOURCE_BARRIER> res_barriers;
 		uint32_t res_barriers_count = 0;
 		uint32_t res_barriers_batch = 0;
+
+		// Mariner E6: async compute shared resources transitioned in this command list (legacy barriers).
+		LocalVector<ResourceInfo *> async_compute_resources;
+		HashSet<ResourceInfo::States *> async_compute_states;
 
 		CPUDescriptorHeapPool::Allocation uav_alloc;
 		CPUDescriptorHeapPool::Allocation rtv_alloc;
@@ -686,7 +683,7 @@ private:
 		SamplerDescriptorHeapAllocation *sampler_descriptor_heap_alloc = nullptr;
 
 		struct DynamicBuffer {
-			const BufferDynamicInfo *info = nullptr;
+			BufferDynamicInfo const *info = nullptr;
 			uint32_t binding = UINT_MAX;
 		};
 
@@ -807,6 +804,11 @@ public:
 	virtual void command_render_draw_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, uint32_t p_draw_count, uint32_t p_stride) override final;
 	virtual void command_render_draw_indirect_count(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, BufferID p_count_buffer, uint64_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride) override final;
 
+	// Mariner E7: mesh shading is not supported by this driver (SUPPORTS_MESH_SHADER is false).
+	virtual void command_render_draw_mesh_tasks(CommandBufferID p_cmd_buffer, uint32_t p_group_count_x, uint32_t p_group_count_y, uint32_t p_group_count_z) override final;
+	virtual void command_render_draw_mesh_tasks_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, uint32_t p_draw_count, uint32_t p_stride) override final;
+	virtual void command_render_draw_mesh_tasks_indirect_count(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, BufferID p_count_buffer, uint64_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride) override final;
+
 	// Buffer binding.
 	virtual void command_render_bind_vertex_buffers(CommandBufferID p_cmd_buffer, uint32_t p_binding_count, const BufferID *p_buffers, const uint64_t *p_offsets, uint64_t p_dynamic_offsets) override final;
 	virtual void command_render_bind_index_buffer(CommandBufferID p_cmd_buffer, BufferID p_buffer, IndexBufferFormat p_format, uint64_t p_offset) override final;
@@ -916,6 +918,7 @@ public:
 	/**** DEBUG *****/
 	/****************/
 	virtual void command_insert_breadcrumb(CommandBufferID p_cmd_buffer, uint32_t p_data) override final;
+	virtual void *command_buffer_get_native_handle(CommandBufferID p_cmd_buffer) override final;
 
 	/********************/
 	/**** SUBMISSION ****/

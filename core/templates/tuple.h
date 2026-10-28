@@ -80,9 +80,9 @@ struct Tuple<T, Rest...> : Tuple<Rest...> {
 	Tuple() = default;
 
 	template <typename F, typename... R>
-	_FORCE_INLINE_ Tuple(F &&p_first, R &&...p_rest) :
-			Tuple<Rest...>(std::forward<R>(p_rest)...),
-			value(std::forward<F>(p_first)) {}
+	_FORCE_INLINE_ Tuple(F &&f, R &&...rest) :
+			Tuple<Rest...>(std::forward<R>(rest)...),
+			value(std::forward<F>(f)) {}
 };
 
 // Tuple is zero-constructible if and only if all constrained types are zero-constructible.
@@ -94,8 +94,8 @@ struct TupleGet;
 
 template <typename First, typename... Rest>
 struct TupleGet<0, Tuple<First, Rest...>> {
-	_FORCE_INLINE_ static First &tuple_get(Tuple<First, Rest...> &p_tuple) {
-		return p_tuple.value;
+	_FORCE_INLINE_ static First &tuple_get(Tuple<First, Rest...> &t) {
+		return t.value;
 	}
 };
 
@@ -106,17 +106,17 @@ struct TupleGet<0, Tuple<First, Rest...>> {
 
 template <size_t I, typename First, typename... Rest>
 struct TupleGet<I, Tuple<First, Rest...>> {
-	_FORCE_INLINE_ static auto &tuple_get(Tuple<First, Rest...> &p_tuple) {
-		return TupleGet<I - 1, Tuple<Rest...>>::tuple_get(static_cast<Tuple<Rest...> &>(p_tuple));
+	_FORCE_INLINE_ static auto &tuple_get(Tuple<First, Rest...> &t) {
+		return TupleGet<I - 1, Tuple<Rest...>>::tuple_get(static_cast<Tuple<Rest...> &>(t));
 	}
 };
 
 template <size_t I, typename... Types>
-_FORCE_INLINE_ auto &tuple_get(Tuple<Types...> &p_tuple) {
-	return TupleGet<I, Tuple<Types...>>::tuple_get(p_tuple);
+_FORCE_INLINE_ auto &tuple_get(Tuple<Types...> &t) {
+	return TupleGet<I, Tuple<Types...>>::tuple_get(t);
 }
 
 template <size_t I, typename... Types>
-_FORCE_INLINE_ const auto &tuple_get(const Tuple<Types...> &p_tuple) {
-	return TupleGet<I, Tuple<Types...>>::tuple_get(p_tuple);
+_FORCE_INLINE_ const auto &tuple_get(const Tuple<Types...> &t) {
+	return TupleGet<I, Tuple<Types...>>::tuple_get(t);
 }

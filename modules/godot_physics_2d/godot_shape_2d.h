@@ -30,11 +30,7 @@
 
 #pragma once
 
-#include "core/math/rect2.h"
-#include "core/math/transform_2d.h"
-#include "core/templates/hash_map.h"
-#include "core/templates/rid.h"
-#include "servers/physics_2d/physics_server_2d_enums.h"
+#include "servers/physics_2d/physics_server_2d.h"
 
 class GodotShape2D;
 
@@ -65,7 +61,7 @@ public:
 	_FORCE_INLINE_ void set_self(const RID &p_self) { self = p_self; }
 	_FORCE_INLINE_ RID get_self() const { return self; }
 
-	virtual PS2DE::ShapeType get_type() const = 0;
+	virtual PhysicsServer2D::ShapeType get_type() const = 0;
 
 	_FORCE_INLINE_ Rect2 get_aabb() const { return aabb; }
 	_FORCE_INLINE_ bool is_configured() const { return configured; }
@@ -155,7 +151,7 @@ public:
 	_FORCE_INLINE_ Vector2 get_normal() const { return normal; }
 	_FORCE_INLINE_ real_t get_d() const { return d; }
 
-	virtual PS2DE::ShapeType get_type() const override { return PS2DE::SHAPE_WORLD_BOUNDARY; }
+	virtual PhysicsServer2D::ShapeType get_type() const override { return PhysicsServer2D::SHAPE_WORLD_BOUNDARY; }
 
 	virtual void project_rangev(const Vector2 &p_normal, const Transform2D &p_transform, real_t &r_min, real_t &r_max) const override { project_range(p_normal, p_transform, r_min, r_max); }
 	virtual void get_supports(const Vector2 &p_normal, Vector2 *r_supports, int &r_amount) const override;
@@ -192,7 +188,7 @@ public:
 	_FORCE_INLINE_ real_t get_length() const { return length; }
 	_FORCE_INLINE_ bool get_slide_on_slope() const { return slide_on_slope; }
 
-	virtual PS2DE::ShapeType get_type() const override { return PS2DE::SHAPE_SEPARATION_RAY; }
+	virtual PhysicsServer2D::ShapeType get_type() const override { return PhysicsServer2D::SHAPE_SEPARATION_RAY; }
 
 	virtual bool allows_one_way_collision() const override { return false; }
 
@@ -231,7 +227,7 @@ public:
 	_FORCE_INLINE_ const Vector2 &get_b() const { return b; }
 	_FORCE_INLINE_ const Vector2 &get_normal() const { return n; }
 
-	virtual PS2DE::ShapeType get_type() const override { return PS2DE::SHAPE_SEGMENT; }
+	virtual PhysicsServer2D::ShapeType get_type() const override { return PhysicsServer2D::SHAPE_SEGMENT; }
 
 	_FORCE_INLINE_ Vector2 get_xformed_normal(const Transform2D &p_xform) const {
 		return (p_xform.xform(b) - p_xform.xform(a)).normalized().orthogonal();
@@ -271,7 +267,7 @@ class GodotCircleShape2D : public GodotShape2D {
 public:
 	_FORCE_INLINE_ const real_t &get_radius() const { return radius; }
 
-	virtual PS2DE::ShapeType get_type() const override { return PS2DE::SHAPE_CIRCLE; }
+	virtual PhysicsServer2D::ShapeType get_type() const override { return PhysicsServer2D::SHAPE_CIRCLE; }
 
 	virtual void project_rangev(const Vector2 &p_normal, const Transform2D &p_transform, real_t &r_min, real_t &r_max) const override { project_range(p_normal, p_transform, r_min, r_max); }
 	virtual void get_supports(const Vector2 &p_normal, Vector2 *r_supports, int &r_amount) const override;
@@ -304,7 +300,7 @@ class GodotRectangleShape2D : public GodotShape2D {
 public:
 	_FORCE_INLINE_ const Vector2 &get_half_extents() const { return half_extents; }
 
-	virtual PS2DE::ShapeType get_type() const override { return PS2DE::SHAPE_RECTANGLE; }
+	virtual PhysicsServer2D::ShapeType get_type() const override { return PhysicsServer2D::SHAPE_RECTANGLE; }
 
 	virtual void project_rangev(const Vector2 &p_normal, const Transform2D &p_transform, real_t &r_min, real_t &r_max) const override { project_range(p_normal, p_transform, r_min, r_max); }
 	virtual void get_supports(const Vector2 &p_normal, Vector2 *r_supports, int &r_amount) const override;
@@ -378,7 +374,7 @@ public:
 	_FORCE_INLINE_ const real_t &get_radius() const { return radius; }
 	_FORCE_INLINE_ const real_t &get_height() const { return height; }
 
-	virtual PS2DE::ShapeType get_type() const override { return PS2DE::SHAPE_CAPSULE; }
+	virtual PhysicsServer2D::ShapeType get_type() const override { return PhysicsServer2D::SHAPE_CAPSULE; }
 
 	virtual void project_rangev(const Vector2 &p_normal, const Transform2D &p_transform, real_t &r_min, real_t &r_max) const override { project_range(p_normal, p_transform, r_min, r_max); }
 	virtual void get_supports(const Vector2 &p_normal, Vector2 *r_supports, int &r_amount) const override;
@@ -431,7 +427,7 @@ public:
 		return (p_xform.xform(b) - p_xform.xform(a)).normalized().orthogonal();
 	}
 
-	virtual PS2DE::ShapeType get_type() const override { return PS2DE::SHAPE_CONVEX_POLYGON; }
+	virtual PhysicsServer2D::ShapeType get_type() const override { return PhysicsServer2D::SHAPE_CONVEX_POLYGON; }
 
 	virtual void project_rangev(const Vector2 &p_normal, const Transform2D &p_transform, real_t &r_min, real_t &r_max) const override { project_range(p_normal, p_transform, r_min, r_max); }
 	virtual void get_supports(const Vector2 &p_normal, Vector2 *r_supports, int &r_amount) const override;
@@ -508,7 +504,7 @@ class GodotConcavePolygonShape2D : public GodotConcaveShape2D {
 	int _generate_bvh(BVH *p_bvh, int p_len, int p_depth);
 
 public:
-	virtual PS2DE::ShapeType get_type() const override { return PS2DE::SHAPE_CONCAVE_POLYGON; }
+	virtual PhysicsServer2D::ShapeType get_type() const override { return PhysicsServer2D::SHAPE_CONCAVE_POLYGON; }
 
 	virtual void project_rangev(const Vector2 &p_normal, const Transform2D &p_transform, real_t &r_min, real_t &r_max) const override {
 		r_min = 0;

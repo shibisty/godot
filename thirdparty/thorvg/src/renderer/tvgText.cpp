@@ -23,6 +23,7 @@
 
 #include "tvgText.h"
 
+
 Text::Text() = default;
 
 
@@ -46,23 +47,47 @@ Result Text::size(float size) noexcept
 
 Result Text::load(const char* filename) noexcept
 {
-    LoaderOps ops = {Type::Text, Ownership::Transfer};
-    auto ret = Result::InvalidArguments;
-    return LoaderMgr::loader(filename, ops, ret) ? Result::Success: ret;
+#ifdef THORVG_FILE_IO_SUPPORT
+    bool invalid; //invalid path
+    auto loader = LoaderMgr::loader(filename, &invalid);
+    if (loader) {
+        if (loader->sharing > 0) --loader->sharing;   //font loading doesn't mean sharing.
+        return Result::Success;
+    } else {
+        if (invalid) return Result::InvalidArguments;
+        else return Result::NonSupport;
+    }
+#else
+    TVGLOG("RENDERER", "FILE IO is disabled!");
+    return Result::NonSupport;
+#endif
 }
 
 
 Result Text::load(const char* name, const char* data, uint32_t size, const char* mimeType, bool copy) noexcept
 {
-    return TextImpl::load(name, data, size, mimeType, copy ? Ownership::Copy : Ownership::Borrow);
+    if (!name || (size == 0 && data)) return Result::InvalidArguments;
+
+    //unload font
+    if (!data) {
+        if (LoaderMgr::retrieve(LoaderMgr::font(name))) return Result::Success;
+        return Result::InsufficientCondition;
+    }
+
+    if (!LoaderMgr::loader(name, data, size, mimeType, copy)) return Result::NonSupport;
+    return Result::Success;
 }
 
 
 Result Text::unload(const char* filename) noexcept
 {
-    if (!filename) return Result::InvalidArguments;
+#ifdef THORVG_FILE_IO_SUPPORT
     if (LoaderMgr::retrieve(filename)) return Result::Success;
     return Result::InsufficientCondition;
+#else
+    TVGLOG("RENDERER", "FILE IO is disabled!");
+    return Result::NonSupport;
+#endif
 }
 
 
@@ -136,9 +161,10 @@ Result Text::metrics(TextMetrics& metrics) const noexcept
     return to<TextImpl>(this)->metrics(metrics);
 }
 
-Result Text::metrics(const char* ch, GlyphMetrics& metrics, const char** next) const noexcept
+
+Result Text::metrics(const char* ch, GlyphMetrics& metrics) const noexcept
 {
-    return to<TextImpl>(this)->metrics(ch, metrics, next);
+    return to<TextImpl>(this)->metrics(ch, metrics);
 }
 
 

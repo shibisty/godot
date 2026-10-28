@@ -26,7 +26,7 @@
 U_NAMESPACE_BEGIN
 
 UnicodeString& 
-UnicodeString::trim() U_LIFETIME_BOUND
+UnicodeString::trim()
 {
   if(isBogus()) {
     return *this;

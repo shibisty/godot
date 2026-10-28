@@ -136,8 +136,6 @@ protected:
 
 public:
 	Variant instantiate_selected();
-	template <typename T>
-	T *instantiate_selected() { return Object::cast_to<T>(instantiate_selected().get_validated_object()); }
 	String get_selected_type();
 	String get_selected_type_name();
 

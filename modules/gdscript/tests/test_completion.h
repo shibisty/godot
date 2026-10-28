@@ -32,7 +32,6 @@
 
 #ifdef TOOLS_ENABLED
 
-#include "../editor/gdscript_editor_language.h"
 #include "../gdscript.h"
 #include "gdscript_test_runner.h"
 
@@ -53,7 +52,7 @@
 
 namespace GDScriptTests {
 
-static bool match_option(const Dictionary p_expected, const EditorLanguage::CompletionOption p_got) {
+static bool match_option(const Dictionary p_expected, const ScriptLanguage::CodeCompletionOption p_got) {
 	if (p_expected.get("display", p_got.display) != p_got.display) {
 		return false;
 	}
@@ -133,8 +132,6 @@ static void test_directory(const String &p_dir) {
 			EditorSettings::get_singleton()->set_setting("text_editor/completion/use_single_quotes", conf.get_value("input", "use_single_quotes", false));
 			EditorSettings::get_singleton()->set_setting("text_editor/completion/add_node_path_literals", conf.get_value("input", "add_node_path_literals", false));
 			EditorSettings::get_singleton()->set_setting("text_editor/completion/add_string_name_literals", conf.get_value("input", "add_string_name_literals", false));
-			EditorSettings::get_singleton()->set_setting("text_editor/completion/add_type_hints", conf.get_value("input", "add_type_hints", true));
-			EditorSettings::get_singleton()->set_setting("text_editor/behavior/indent/size", conf.get_value("input", "indent_size", 4));
 
 			List<Dictionary> include;
 			to_dict_list(conf.get_value("output", "include", Array()), include);
@@ -142,7 +139,7 @@ static void test_directory(const String &p_dir) {
 			List<Dictionary> exclude;
 			to_dict_list(conf.get_value("output", "exclude", Array()), exclude);
 
-			List<EditorLanguage::CompletionOption> options;
+			List<ScriptLanguage::CodeCompletionOption> options;
 			String call_hint;
 			bool forced;
 
@@ -187,11 +184,11 @@ static void test_directory(const String &p_dir) {
 				owner->set_script(scr);
 			}
 
-			GDScriptEditorLanguage::get_singleton()->complete_code(code, res_path, owner, &options, forced, call_hint);
+			GDScriptLanguage::get_singleton()->complete_code(code, res_path, owner, &options, forced, call_hint);
 			ERR_PRINT_ON;
 
 			String contains_excluded;
-			for (EditorLanguage::CompletionOption &option : options) {
+			for (ScriptLanguage::CodeCompletionOption &option : options) {
 				for (const Dictionary &E : exclude) {
 					if (match_option(E, option)) {
 						contains_excluded = option.display;
@@ -210,7 +207,7 @@ static void test_directory(const String &p_dir) {
 				}
 			}
 			CHECK_MESSAGE(contains_excluded.is_empty(), "Autocompletion suggests illegal option '", contains_excluded, "' for '", path.path_join(next), "'.");
-			CHECK_MESSAGE(include.is_empty(), "An autocompletion option is missing for '", path.path_join(next), "'.");
+			CHECK(include.is_empty());
 
 			String expected_call_hint = conf.get_value("output", "call_hint", call_hint);
 			bool expected_forced = conf.get_value("output", "forced", forced);
@@ -218,7 +215,9 @@ static void test_directory(const String &p_dir) {
 			CHECK(expected_call_hint == call_hint);
 			CHECK(expected_forced == forced);
 
-			memdelete(scene);
+			if (scene) {
+				memdelete(scene);
+			}
 		}
 		next = dir->get_next();
 	}
@@ -262,6 +261,8 @@ static void setup_global_classes(const String &p_dir) {
 
 TEST_SUITE("[Modules][GDScript][Completion]") {
 	TEST_CASE("[Editor] Check suggestion list") {
+		// Set all editor settings that code completion relies on.
+		EditorSettings::get_singleton()->set_setting("text_editor/completion/use_single_quotes", false);
 		init_language("modules/gdscript/tests/scripts");
 
 		setup_global_classes("modules/gdscript/tests/scripts/completion");

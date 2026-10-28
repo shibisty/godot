@@ -135,7 +135,7 @@ String ConfigFile::encode_to_text() const {
 
 		for (const KeyValue<String, Variant> &F : E.value) {
 			String vstr;
-			VariantWriter::write_to_string(F.value, vstr, true);
+			VariantWriter::write_to_string(F.value, vstr);
 			sb.append(F.key.property_name_encode() + "=" + vstr + "\n");
 		}
 	}
@@ -188,22 +188,22 @@ Error ConfigFile::save_encrypted_pass(const String &p_path, const String &p_pass
 	return _internal_save(fae);
 }
 
-Error ConfigFile::_internal_save(Ref<FileAccess> p_file) {
+Error ConfigFile::_internal_save(Ref<FileAccess> file) {
 	bool first = true;
 	for (const KeyValue<String, HashMap<String, Variant>> &E : values) {
 		if (first) {
 			first = false;
 		} else {
-			p_file->store_string("\n");
+			file->store_string("\n");
 		}
 		if (!E.key.is_empty()) {
-			p_file->store_string("[" + E.key.replace("]", "\\]") + "]\n\n");
+			file->store_string("[" + E.key.replace("]", "\\]") + "]\n\n");
 		}
 
 		for (const KeyValue<String, Variant> &F : E.value) {
 			String vstr;
-			VariantWriter::write_to_string(F.value, vstr, true);
-			p_file->store_string(F.key.property_name_encode() + "=" + vstr + "\n");
+			VariantWriter::write_to_string(F.value, vstr);
+			file->store_string(F.key.property_name_encode() + "=" + vstr + "\n");
 		}
 	}
 
@@ -256,9 +256,9 @@ Error ConfigFile::load_encrypted_pass(const String &p_path, const String &p_pass
 	return _internal_load(p_path, fae);
 }
 
-Error ConfigFile::_internal_load(const String &p_path, Ref<FileAccess> p_file) {
+Error ConfigFile::_internal_load(const String &p_path, Ref<FileAccess> f) {
 	VariantParser::StreamFile stream;
-	stream.f = p_file;
+	stream.f = f;
 
 	Error err = _parse(p_path, &stream);
 

@@ -30,12 +30,17 @@
 
 #pragma once
 
-#import "drivers/apple_embedded/godot_renderer.h"
-
 #import <UIKit/UIKit.h>
 
-@interface GDTViewRenderer : GDTRenderer
+@protocol GDTViewRendererProtocol <NSObject>
 
+@property(assign, readonly, nonatomic) BOOL hasFinishedSetup;
+
+- (BOOL)setupView:(UIView *)view;
 - (void)renderOnView:(UIView *)view;
+
+@end
+
+@interface GDTViewRenderer : NSObject <GDTViewRendererProtocol>
 
 @end

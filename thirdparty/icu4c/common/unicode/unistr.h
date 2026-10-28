@@ -1739,7 +1739,7 @@ public:
    * @return a read-only alias UnicodeString object for the substring
    * @stable ICU 4.4
    */
-  UnicodeString tempSubString(int32_t start=0, int32_t length=INT32_MAX) const U_LIFETIME_BOUND;
+  UnicodeString tempSubString(int32_t start=0, int32_t length=INT32_MAX) const;
 
   /**
    * Create a temporary substring for the specified range.
@@ -1751,8 +1751,7 @@ public:
    * @return a read-only alias UnicodeString object for the substring
    * @stable ICU 4.4
    */
-  inline UnicodeString tempSubStringBetween(int32_t start,
-                                            int32_t limit = INT32_MAX) const U_LIFETIME_BOUND;
+  inline UnicodeString tempSubStringBetween(int32_t start, int32_t limit=INT32_MAX) const;
 
   /**
    * Convert the UnicodeString to UTF-8 and write the result
@@ -1780,8 +1779,8 @@ public:
    * @stable ICU 4.2
    * @see toUTF8
    */
-  template <typename StringClass>
-  StringClass& toUTF8String(StringClass& result U_LIFETIME_BOUND) const {
+  template<typename StringClass>
+  StringClass &toUTF8String(StringClass &result) const {
     StringByteSink<StringClass> sbs(&result, length());
     toUTF8(sbs);
     return result;
@@ -1980,7 +1979,7 @@ public:
    * @stable ICU 2.0
    * @see fastCopyFrom
    */
-  UnicodeString& operator=(const UnicodeString& srcText) U_LIFETIME_BOUND;
+  UnicodeString &operator=(const UnicodeString &srcText);
 
   /**
    * Almost the same as the assignment operator.
@@ -2007,7 +2006,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.4
    */
-  UnicodeString& fastCopyFrom(const UnicodeString& src) U_LIFETIME_BOUND;
+  UnicodeString &fastCopyFrom(const UnicodeString &src);
 
   /**
    * Assignment operator. Replaces the characters in this UnicodeString
@@ -2019,8 +2018,8 @@ public:
    * @return a reference to this
    * @stable ICU 76
    */
-  template <typename S, typename = std::enable_if_t<ConvertibleToU16StringView<S>>>
-  inline UnicodeString& operator=(const S& src) U_LIFETIME_BOUND {
+  template<typename S, typename = std::enable_if_t<ConvertibleToU16StringView<S>>>
+  inline UnicodeString &operator=(const S &src) {
     unBogus();
     return doReplace(0, length(), internal::toU16StringView(src));
   }
@@ -2033,7 +2032,7 @@ public:
    * @return *this
    * @stable ICU 56
    */
-  UnicodeString& operator=(UnicodeString&& src) noexcept U_LIFETIME_BOUND;
+  UnicodeString &operator=(UnicodeString &&src) noexcept;
 
   /**
    * Swap strings.
@@ -2060,7 +2059,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& operator=(char16_t ch) U_LIFETIME_BOUND;
+  inline UnicodeString& operator= (char16_t ch);
 
   /**
    * Assignment operator.  Replace the characters in this UnicodeString
@@ -2069,7 +2068,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& operator=(UChar32 ch) U_LIFETIME_BOUND;
+  inline UnicodeString& operator= (UChar32 ch);
 
   /**
    * Set the text in the UnicodeString object to the characters
@@ -2082,7 +2081,8 @@ public:
    * @return a reference to this
    * @stable ICU 2.2
    */
-  inline UnicodeString& setTo(const UnicodeString& srcText, int32_t srcStart) U_LIFETIME_BOUND;
+  inline UnicodeString& setTo(const UnicodeString& srcText,
+               int32_t srcStart);
 
   /**
    * Set the text in the UnicodeString object to the characters
@@ -2098,8 +2098,8 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& setTo(const UnicodeString& srcText,
-                              int32_t srcStart,
-                              int32_t srcLength) U_LIFETIME_BOUND;
+               int32_t srcStart,
+               int32_t srcLength);
 
   /**
    * Set the text in the UnicodeString object to the characters in
@@ -2109,7 +2109,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& setTo(const UnicodeString& srcText) U_LIFETIME_BOUND;
+  inline UnicodeString& setTo(const UnicodeString& srcText);
 
   /**
    * Set the characters in the UnicodeString object to the characters
@@ -2119,7 +2119,8 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& setTo(const char16_t* srcChars, int32_t srcLength) U_LIFETIME_BOUND;
+  inline UnicodeString& setTo(const char16_t *srcChars,
+               int32_t srcLength);
 
   /**
    * Set the characters in the UnicodeString object to the code unit
@@ -2129,7 +2130,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& setTo(char16_t srcChar) U_LIFETIME_BOUND;
+  inline UnicodeString& setTo(char16_t srcChar);
 
   /**
    * Set the characters in the UnicodeString object to the code point
@@ -2139,7 +2140,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& setTo(UChar32 srcChar) U_LIFETIME_BOUND;
+  inline UnicodeString& setTo(UChar32 srcChar);
 
   /**
    * Aliasing setTo() function, analogous to the readonly-aliasing char16_t* constructor.
@@ -2164,9 +2165,9 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  UnicodeString& setTo(UBool isTerminated,
-                       ConstChar16Ptr text U_LIFETIME_BOUND,
-                       int32_t textLength) U_LIFETIME_BOUND;
+  UnicodeString &setTo(UBool isTerminated,
+                       ConstChar16Ptr text,
+                       int32_t textLength);
 
   /**
    * Aliasing setTo() function, analogous to the writable-aliasing char16_t* constructor.
@@ -2187,9 +2188,9 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  UnicodeString& setTo(char16_t* buffer U_LIFETIME_BOUND,
+  UnicodeString &setTo(char16_t *buffer,
                        int32_t buffLength,
-                       int32_t buffCapacity) U_LIFETIME_BOUND;
+                       int32_t buffCapacity);
 
   /**
    * Make this UnicodeString object invalid.
@@ -2239,7 +2240,9 @@ public:
    * @return A reference to this
    * @stable ICU 2.0
    */
-  UnicodeString& setCharAt(int32_t offset, char16_t ch) U_LIFETIME_BOUND;
+  UnicodeString& setCharAt(int32_t offset,
+               char16_t ch);
+
 
   /* Append operations */
 
@@ -2250,7 +2253,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& operator+=(char16_t ch) U_LIFETIME_BOUND;
+ inline  UnicodeString& operator+= (char16_t ch);
 
   /**
    * Append operator. Append the code point `ch` to the UnicodeString
@@ -2259,7 +2262,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& operator+=(UChar32 ch) U_LIFETIME_BOUND;
+ inline  UnicodeString& operator+= (UChar32 ch);
 
   /**
    * Append operator. Append the characters in `srcText` to the
@@ -2268,7 +2271,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& operator+=(const UnicodeString& srcText) U_LIFETIME_BOUND;
+  inline UnicodeString& operator+= (const UnicodeString& srcText);
 
   /**
    * Append operator. Appends the characters in `src`
@@ -2280,8 +2283,8 @@ public:
    * @return a reference to this
    * @stable ICU 76
    */
-  template <typename S, typename = std::enable_if_t<ConvertibleToU16StringView<S>>>
-  inline UnicodeString& operator+=(const S& src) U_LIFETIME_BOUND {
+  template<typename S, typename = std::enable_if_t<ConvertibleToU16StringView<S>>>
+  inline UnicodeString& operator+=(const S &src) {
     return doAppend(internal::toU16StringView(src));
   }
 
@@ -2300,8 +2303,8 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& append(const UnicodeString& srcText,
-                               int32_t srcStart,
-                               int32_t srcLength) U_LIFETIME_BOUND;
+            int32_t srcStart,
+            int32_t srcLength);
 
   /**
    * Append the characters in `srcText` to the UnicodeString object.
@@ -2310,7 +2313,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& append(const UnicodeString& srcText) U_LIFETIME_BOUND;
+  inline UnicodeString& append(const UnicodeString& srcText);
 
   /**
    * Append the characters in `srcChars` in the range
@@ -2325,9 +2328,9 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& append(const char16_t* srcChars,
-                               int32_t srcStart,
-                               int32_t srcLength) U_LIFETIME_BOUND;
+  inline UnicodeString& append(const char16_t *srcChars,
+            int32_t srcStart,
+            int32_t srcLength);
 
   /**
    * Append the characters in `srcChars` to the UnicodeString object.
@@ -2338,7 +2341,8 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& append(ConstChar16Ptr srcChars, int32_t srcLength) U_LIFETIME_BOUND;
+  inline UnicodeString& append(ConstChar16Ptr srcChars,
+            int32_t srcLength);
 
   /**
    * Appends the characters in `src`
@@ -2350,8 +2354,8 @@ public:
    * @return a reference to this
    * @stable ICU 76
    */
-  template <typename S, typename = std::enable_if_t<ConvertibleToU16StringView<S>>>
-  inline UnicodeString& append(const S& src) U_LIFETIME_BOUND {
+  template<typename S, typename = std::enable_if_t<ConvertibleToU16StringView<S>>>
+  inline UnicodeString& append(const S &src) {
     return doAppend(internal::toU16StringView(src));
   }
 
@@ -2361,7 +2365,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& append(char16_t srcChar) U_LIFETIME_BOUND;
+  inline UnicodeString& append(char16_t srcChar);
 
   /**
    * Append the code point `srcChar` to the UnicodeString object.
@@ -2369,7 +2373,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  UnicodeString& append(UChar32 srcChar) U_LIFETIME_BOUND;
+  UnicodeString& append(UChar32 srcChar);
 
 #ifndef U_HIDE_DRAFT_API
   /**
@@ -2398,9 +2402,9 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& insert(int32_t start,
-                               const UnicodeString& srcText,
-                               int32_t srcStart,
-                               int32_t srcLength) U_LIFETIME_BOUND;
+            const UnicodeString& srcText,
+            int32_t srcStart,
+            int32_t srcLength);
 
   /**
    * Insert the characters in `srcText` into the UnicodeString object
@@ -2410,7 +2414,8 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& insert(int32_t start, const UnicodeString& srcText) U_LIFETIME_BOUND;
+  inline UnicodeString& insert(int32_t start,
+            const UnicodeString& srcText);
 
   /**
    * Insert the characters in `srcChars` in the range
@@ -2426,9 +2431,9 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& insert(int32_t start,
-                               const char16_t* srcChars,
-                               int32_t srcStart,
-                               int32_t srcLength) U_LIFETIME_BOUND;
+            const char16_t *srcChars,
+            int32_t srcStart,
+            int32_t srcLength);
 
   /**
    * Insert the characters in `srcChars` into the UnicodeString object
@@ -2440,8 +2445,8 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& insert(int32_t start,
-                               ConstChar16Ptr srcChars,
-                               int32_t srcLength) U_LIFETIME_BOUND;
+            ConstChar16Ptr srcChars,
+            int32_t srcLength);
 
   /**
    * Insert the code unit `srcChar` into the UnicodeString object at
@@ -2451,7 +2456,8 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& insert(int32_t start, char16_t srcChar) U_LIFETIME_BOUND;
+  inline UnicodeString& insert(int32_t start,
+            char16_t srcChar);
 
   /**
    * Insert the code point `srcChar` into the UnicodeString object at
@@ -2461,7 +2467,9 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& insert(int32_t start, UChar32 srcChar) U_LIFETIME_BOUND;
+  inline UnicodeString& insert(int32_t start,
+            UChar32 srcChar);
+
 
   /* Replace operations */
 
@@ -2483,10 +2491,10 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& replace(int32_t start,
-                                int32_t length,
-                                const UnicodeString& srcText,
-                                int32_t srcStart,
-                                int32_t srcLength) U_LIFETIME_BOUND;
+             int32_t length,
+             const UnicodeString& srcText,
+             int32_t srcStart,
+             int32_t srcLength);
 
   /**
    * Replace the characters in the range
@@ -2501,8 +2509,8 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& replace(int32_t start,
-                                int32_t length,
-                                const UnicodeString& srcText) U_LIFETIME_BOUND;
+             int32_t length,
+             const UnicodeString& srcText);
 
   /**
    * Replace the characters in the range
@@ -2522,10 +2530,10 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& replace(int32_t start,
-                                int32_t length,
-                                const char16_t* srcChars,
-                                int32_t srcStart,
-                                int32_t srcLength) U_LIFETIME_BOUND;
+             int32_t length,
+             const char16_t *srcChars,
+             int32_t srcStart,
+             int32_t srcLength);
 
   /**
    * Replace the characters in the range
@@ -2540,9 +2548,9 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& replace(int32_t start,
-                                int32_t length,
-                                ConstChar16Ptr srcChars,
-                                int32_t srcLength) U_LIFETIME_BOUND;
+             int32_t length,
+             ConstChar16Ptr srcChars,
+             int32_t srcLength);
 
   /**
    * Replace the characters in the range
@@ -2555,7 +2563,9 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& replace(int32_t start, int32_t length, char16_t srcChar) U_LIFETIME_BOUND;
+  inline UnicodeString& replace(int32_t start,
+             int32_t length,
+             char16_t srcChar);
 
   /**
    * Replace the characters in the range
@@ -2568,7 +2578,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  UnicodeString& replace(int32_t start, int32_t length, UChar32 srcChar) U_LIFETIME_BOUND;
+  UnicodeString& replace(int32_t start, int32_t length, UChar32 srcChar);
 
   /**
    * Replace the characters in the range [`start`, `limit`)
@@ -2580,8 +2590,8 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& replaceBetween(int32_t start,
-                                       int32_t limit,
-                                       const UnicodeString& srcText) U_LIFETIME_BOUND;
+                int32_t limit,
+                const UnicodeString& srcText);
 
   /**
    * Replace the characters in the range [`start`, `limit`)
@@ -2598,10 +2608,10 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& replaceBetween(int32_t start,
-                                       int32_t limit,
-                                       const UnicodeString& srcText,
-                                       int32_t srcStart,
-                                       int32_t srcLimit) U_LIFETIME_BOUND;
+                int32_t limit,
+                const UnicodeString& srcText,
+                int32_t srcStart,
+                int32_t srcLimit);
 
   /**
    * Replace a substring of this object with the given text.
@@ -2647,7 +2657,7 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& findAndReplace(const UnicodeString& oldText,
-                                       const UnicodeString& newText) U_LIFETIME_BOUND;
+                const UnicodeString& newText);
 
   /**
    * Replace all occurrences of characters in oldText with characters
@@ -2661,9 +2671,9 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& findAndReplace(int32_t start,
-                                       int32_t length,
-                                       const UnicodeString& oldText,
-                                       const UnicodeString& newText) U_LIFETIME_BOUND;
+                int32_t length,
+                const UnicodeString& oldText,
+                const UnicodeString& newText);
 
   /**
    * Replace all occurrences of characters in oldText in the range
@@ -2683,13 +2693,13 @@ public:
    * @stable ICU 2.0
    */
   UnicodeString& findAndReplace(int32_t start,
-                                int32_t length,
-                                const UnicodeString& oldText,
-                                int32_t oldStart,
-                                int32_t oldLength,
-                                const UnicodeString& newText,
-                                int32_t newStart,
-                                int32_t newLength) U_LIFETIME_BOUND;
+                int32_t length,
+                const UnicodeString& oldText,
+                int32_t oldStart,
+                int32_t oldLength,
+                const UnicodeString& newText,
+                int32_t newStart,
+                int32_t newLength);
 
 
   /* Remove operations */
@@ -2702,7 +2712,7 @@ public:
    * @see setToBogus
    * @stable ICU 2.0
    */
-  inline UnicodeString& remove() U_LIFETIME_BOUND;
+  inline UnicodeString& remove();
 
   /**
    * Remove the characters in the range
@@ -2713,7 +2723,7 @@ public:
    * @stable ICU 2.0
    */
   inline UnicodeString& remove(int32_t start,
-                               int32_t length = static_cast<int32_t>(INT32_MAX)) U_LIFETIME_BOUND;
+                               int32_t length = static_cast<int32_t>(INT32_MAX));
 
   /**
    * Remove the characters in the range
@@ -2723,8 +2733,8 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString&
-  removeBetween(int32_t start, int32_t limit = static_cast<int32_t>(INT32_MAX)) U_LIFETIME_BOUND;
+  inline UnicodeString& removeBetween(int32_t start,
+                                      int32_t limit = static_cast<int32_t>(INT32_MAX));
 
   /**
    * Retain only the characters in the range
@@ -2735,7 +2745,7 @@ public:
    * @return a reference to this
    * @stable ICU 4.4
    */
-  inline UnicodeString& retainBetween(int32_t start, int32_t limit = INT32_MAX) U_LIFETIME_BOUND;
+  inline UnicodeString &retainBetween(int32_t start, int32_t limit = INT32_MAX);
 
   /* Length operations */
 
@@ -2780,7 +2790,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  UnicodeString& trim() U_LIFETIME_BOUND;
+  UnicodeString& trim();
 
   /* Miscellaneous operations */
 
@@ -2789,7 +2799,7 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& reverse() U_LIFETIME_BOUND;
+  inline UnicodeString& reverse();
 
   /**
    * Reverse the range [`start`, `start + length`) in
@@ -2799,7 +2809,8 @@ public:
    * @return a reference to this
    * @stable ICU 2.0
    */
-  inline UnicodeString& reverse(int32_t start, int32_t length) U_LIFETIME_BOUND;
+  inline UnicodeString& reverse(int32_t start,
+             int32_t length);
 
   /**
    * Convert the characters in this to UPPER CASE following the conventions of
@@ -2807,7 +2818,7 @@ public:
    * @return A reference to this.
    * @stable ICU 2.0
    */
-  UnicodeString& toUpper() U_LIFETIME_BOUND;
+  UnicodeString& toUpper();
 
   /**
    * Convert the characters in this to UPPER CASE following the conventions of
@@ -2816,7 +2827,7 @@ public:
    * @return A reference to this.
    * @stable ICU 2.0
    */
-  UnicodeString& toUpper(const Locale& locale) U_LIFETIME_BOUND;
+  UnicodeString& toUpper(const Locale& locale);
 
   /**
    * Convert the characters in this to lower case following the conventions of
@@ -2824,7 +2835,7 @@ public:
    * @return A reference to this.
    * @stable ICU 2.0
    */
-  UnicodeString& toLower() U_LIFETIME_BOUND;
+  UnicodeString& toLower();
 
   /**
    * Convert the characters in this to lower case following the conventions of
@@ -2833,7 +2844,7 @@ public:
    * @return A reference to this.
    * @stable ICU 2.0
    */
-  UnicodeString& toLower(const Locale& locale) U_LIFETIME_BOUND;
+  UnicodeString& toLower(const Locale& locale);
 
 #if !UCONFIG_NO_BREAK_ITERATION
 
@@ -2863,7 +2874,7 @@ public:
    * @return A reference to this.
    * @stable ICU 2.1
    */
-  UnicodeString& toTitle(BreakIterator* titleIter) U_LIFETIME_BOUND;
+  UnicodeString &toTitle(BreakIterator *titleIter);
 
   /**
    * Titlecase this string.
@@ -2892,7 +2903,7 @@ public:
    * @return A reference to this.
    * @stable ICU 2.1
    */
-  UnicodeString& toTitle(BreakIterator* titleIter, const Locale& locale) U_LIFETIME_BOUND;
+  UnicodeString &toTitle(BreakIterator *titleIter, const Locale &locale);
 
   /**
    * Titlecase this string, with options.
@@ -2924,9 +2935,7 @@ public:
    * @return A reference to this.
    * @stable ICU 3.8
    */
-  UnicodeString& toTitle(BreakIterator* titleIter,
-                         const Locale& locale,
-                         uint32_t options) U_LIFETIME_BOUND;
+  UnicodeString &toTitle(BreakIterator *titleIter, const Locale &locale, uint32_t options);
 
 #endif
 
@@ -2943,7 +2952,7 @@ public:
    * @return A reference to this.
    * @stable ICU 2.0
    */
-  UnicodeString& foldCase(uint32_t options = 0 /*U_FOLD_CASE_DEFAULT*/) U_LIFETIME_BOUND;
+  UnicodeString &foldCase(uint32_t options=0 /*U_FOLD_CASE_DEFAULT*/);
 
   //========================================
   // Access to the internal buffer
@@ -2992,7 +3001,7 @@ public:
    * @see getTerminatedBuffer()
    * @stable ICU 2.0
    */
-  char16_t* getBuffer(int32_t minCapacity) U_LIFETIME_BOUND;
+  char16_t *getBuffer(int32_t minCapacity);
 
   /**
    * Release a read/write buffer on a UnicodeString object with an
@@ -3046,7 +3055,7 @@ public:
    * @see getTerminatedBuffer()
    * @stable ICU 2.0
    */
-  inline const char16_t* getBuffer() const U_LIFETIME_BOUND;
+  inline const char16_t *getBuffer() const;
 
   /**
    * Get a read-only pointer to the internal buffer,
@@ -3081,7 +3090,7 @@ public:
    * @see getBuffer()
    * @stable ICU 2.2
    */
-  const char16_t* getTerminatedBuffer() U_LIFETIME_BOUND;
+  const char16_t *getTerminatedBuffer();
 
   /**
    * Converts to a std::u16string_view.
@@ -3362,7 +3371,7 @@ public:
    * @stable ICU 2.0
    */
   UnicodeString(UBool isTerminated,
-                ConstChar16Ptr text U_LIFETIME_BOUND,
+                ConstChar16Ptr text,
                 int32_t textLength);
 
   /**
@@ -3383,7 +3392,7 @@ public:
    * @param buffCapacity The size of `buffer` in char16_ts.
    * @stable ICU 2.0
    */
-  UnicodeString(char16_t* buffer U_LIFETIME_BOUND, int32_t buffLength, int32_t buffCapacity);
+  UnicodeString(char16_t *buffer, int32_t buffLength, int32_t buffCapacity);
 
 #if !U_CHAR16_IS_TYPEDEF
   /**
@@ -3394,7 +3403,7 @@ public:
    * @param buffCapacity buffer capacity
    * @stable ICU 59
    */
-  UnicodeString(uint16_t* buffer U_LIFETIME_BOUND, int32_t buffLength, int32_t buffCapacity) :
+  UnicodeString(uint16_t *buffer, int32_t buffLength, int32_t buffCapacity) :
       UnicodeString(Char16Ptr(buffer), buffLength, buffCapacity) {}
 #endif
 
@@ -3408,7 +3417,7 @@ public:
    * @param buffCapacity buffer capacity
    * @stable ICU 59
    */
-  UnicodeString(wchar_t* buffer U_LIFETIME_BOUND, int32_t buffLength, int32_t buffCapacity) :
+  UnicodeString(wchar_t *buffer, int32_t buffLength, int32_t buffCapacity) :
       UnicodeString(Char16Ptr(buffer), buffLength, buffCapacity) {}
 #endif
 
@@ -3649,8 +3658,8 @@ public:
    * @param text The string view to alias for the UnicodeString.
    * @stable ICU 76
    */
-  template <typename S, typename = std::enable_if_t<ConvertibleToU16StringView<S>>>
-  static inline UnicodeString readOnlyAlias(const S& text U_LIFETIME_BOUND) {
+  template<typename S, typename = std::enable_if_t<ConvertibleToU16StringView<S>>>
+  static inline UnicodeString readOnlyAlias(const S &text) {
     return readOnlyAliasFromU16StringView(internal::toU16StringView(text));
   }
 
@@ -3673,7 +3682,7 @@ public:
    * @param text The UnicodeString to alias.
    * @stable ICU 76
    */
-  static inline UnicodeString readOnlyAlias(const UnicodeString& text U_LIFETIME_BOUND) {
+  static inline UnicodeString readOnlyAlias(const UnicodeString &text) {
     return readOnlyAliasFromUnicodeString(text);
   }
 
@@ -3804,11 +3813,11 @@ protected:
   virtual UChar32 getChar32At(int32_t offset) const override;
 
 private:
-  static UnicodeString readOnlyAliasFromU16StringView(std::u16string_view text U_LIFETIME_BOUND);
-  static UnicodeString readOnlyAliasFromUnicodeString(const UnicodeString& text U_LIFETIME_BOUND);
+  static UnicodeString readOnlyAliasFromU16StringView(std::u16string_view text);
+  static UnicodeString readOnlyAliasFromUnicodeString(const UnicodeString &text);
 
   // For char* constructors. Could be made public.
-  UnicodeString& setToUTF8(StringPiece utf8) U_LIFETIME_BOUND;
+  UnicodeString &setToUTF8(StringPiece utf8);
   // For extract(char*).
   // We could make a toUTF8(target, capacity, errorCode) public but not
   // this version: New API will be cleaner if we make callers create substrings
@@ -3910,35 +3919,32 @@ private:
   inline char16_t doCharAt(int32_t offset)  const;
 
   UnicodeString& doReplace(int32_t start,
-                           int32_t length,
-                           const UnicodeString& srcText,
-                           int32_t srcStart,
-                           int32_t srcLength) U_LIFETIME_BOUND;
+               int32_t length,
+               const UnicodeString& srcText,
+               int32_t srcStart,
+               int32_t srcLength);
 
   UnicodeString& doReplace(int32_t start,
-                           int32_t length,
-                           const char16_t* srcChars,
-                           int32_t srcStart,
-                           int32_t srcLength) U_LIFETIME_BOUND;
-  UnicodeString& doReplace(int32_t start, int32_t length, std::u16string_view src) U_LIFETIME_BOUND;
+               int32_t length,
+               const char16_t *srcChars,
+               int32_t srcStart,
+               int32_t srcLength);
+  UnicodeString& doReplace(int32_t start, int32_t length, std::u16string_view src);
 
-  UnicodeString& doAppend(const UnicodeString& src,
-                          int32_t srcStart,
-                          int32_t srcLength) U_LIFETIME_BOUND;
-  UnicodeString& doAppend(const char16_t* srcChars,
-                          int32_t srcStart,
-                          int32_t srcLength) U_LIFETIME_BOUND;
-  UnicodeString& doAppend(std::u16string_view src) U_LIFETIME_BOUND;
+  UnicodeString& doAppend(const UnicodeString& src, int32_t srcStart, int32_t srcLength);
+  UnicodeString& doAppend(const char16_t *srcChars, int32_t srcStart, int32_t srcLength);
+  UnicodeString& doAppend(std::u16string_view src);
 
-  UnicodeString& doReverse(int32_t start, int32_t length) U_LIFETIME_BOUND;
+  UnicodeString& doReverse(int32_t start,
+               int32_t length);
 
   // calculate hash code
   int32_t doHashCode() const;
 
   // get pointer to start of array
   // these do not check for kOpenGetBuffer, unlike the public getBuffer() function
-  inline char16_t* getArrayStart() U_LIFETIME_BOUND;
-  inline const char16_t* getArrayStart() const U_LIFETIME_BOUND;
+  inline char16_t* getArrayStart();
+  inline const char16_t* getArrayStart() const;
 
   inline UBool hasShortLength() const;
   inline int32_t getShortLength() const;
@@ -3971,7 +3977,7 @@ private:
   void unBogus();
 
   // implements assignment operator, copy constructor, and fastCopyFrom()
-  UnicodeString& copyFrom(const UnicodeString& src, UBool fastCopy = false) U_LIFETIME_BOUND;
+  UnicodeString &copyFrom(const UnicodeString &src, UBool fastCopy=false);
 
   // Copies just the fields without memory management.
   void copyFieldsFrom(UnicodeString &src, UBool setSrcToBogus) noexcept;
@@ -4037,12 +4043,12 @@ private:
    * The stringCaseMapper has the same type UStringCaseMapper
    * as in ustr_imp.h for ustrcase_map().
    */
-  UnicodeString& caseMap(int32_t caseLocale,
-                         uint32_t options,
+  UnicodeString &
+  caseMap(int32_t caseLocale, uint32_t options,
 #if !UCONFIG_NO_BREAK_ITERATION
-                         BreakIterator* iter,
+          BreakIterator *iter,
 #endif
-                         UStringCaseMapper* stringCaseMapper) U_LIFETIME_BOUND;
+          UStringCaseMapper *stringCaseMapper);
 
   // ref counting
   void addRef();
@@ -4218,13 +4224,13 @@ UnicodeString::pinIndices(int32_t& start,
 }
 
 inline char16_t*
-UnicodeString::getArrayStart() U_LIFETIME_BOUND {
+UnicodeString::getArrayStart() {
   return (fUnion.fFields.fLengthAndFlags&kUsingStackBuffer) ?
     fUnion.fStackFields.fBuffer : fUnion.fFields.fArray;
 }
 
 inline const char16_t*
-UnicodeString::getArrayStart() const U_LIFETIME_BOUND {
+UnicodeString::getArrayStart() const {
   return (fUnion.fFields.fLengthAndFlags&kUsingStackBuffer) ?
     fUnion.fStackFields.fBuffer : fUnion.fFields.fArray;
 }
@@ -4297,7 +4303,7 @@ UnicodeString::isBufferWritable() const
 }
 
 inline const char16_t *
-UnicodeString::getBuffer() const U_LIFETIME_BOUND {
+UnicodeString::getBuffer() const {
   if(fUnion.fFields.fLengthAndFlags&(kIsBogus|kOpenGetBuffer)) {
     return nullptr;
   } else if(fUnion.fFields.fLengthAndFlags&kUsingStackBuffer) {
@@ -4783,64 +4789,64 @@ UnicodeString::endsWith(const char16_t *srcChars,
 //========================================
 inline UnicodeString&
 UnicodeString::replace(int32_t start,
-                       int32_t _length,
-                       const UnicodeString& srcText) U_LIFETIME_BOUND
+               int32_t _length,
+               const UnicodeString& srcText)
 { return doReplace(start, _length, srcText, 0, srcText.length()); }
 
 inline UnicodeString&
 UnicodeString::replace(int32_t start,
-                       int32_t _length,
-                       const UnicodeString& srcText,
-                       int32_t srcStart,
-                       int32_t srcLength) U_LIFETIME_BOUND
+               int32_t _length,
+               const UnicodeString& srcText,
+               int32_t srcStart,
+               int32_t srcLength)
 { return doReplace(start, _length, srcText, srcStart, srcLength); }
 
 inline UnicodeString&
 UnicodeString::replace(int32_t start,
-                       int32_t _length,
-                       ConstChar16Ptr srcChars,
-                       int32_t srcLength) U_LIFETIME_BOUND
+               int32_t _length,
+               ConstChar16Ptr srcChars,
+               int32_t srcLength)
 { return doReplace(start, _length, srcChars, 0, srcLength); }
 
 inline UnicodeString&
 UnicodeString::replace(int32_t start,
-                       int32_t _length,
-                       const char16_t* srcChars,
-                       int32_t srcStart,
-                       int32_t srcLength) U_LIFETIME_BOUND
+               int32_t _length,
+               const char16_t *srcChars,
+               int32_t srcStart,
+               int32_t srcLength)
 { return doReplace(start, _length, srcChars, srcStart, srcLength); }
 
 inline UnicodeString&
 UnicodeString::replace(int32_t start,
-                       int32_t _length,
-                       char16_t srcChar) U_LIFETIME_BOUND
+               int32_t _length,
+               char16_t srcChar)
 { return doReplace(start, _length, &srcChar, 0, 1); }
 
 inline UnicodeString&
 UnicodeString::replaceBetween(int32_t start,
-                              int32_t limit,
-                              const UnicodeString& srcText) U_LIFETIME_BOUND
+                  int32_t limit,
+                  const UnicodeString& srcText)
 { return doReplace(start, limit - start, srcText, 0, srcText.length()); }
 
 inline UnicodeString&
 UnicodeString::replaceBetween(int32_t start,
-                              int32_t limit,
-                              const UnicodeString& srcText,
-                              int32_t srcStart,
-                              int32_t srcLimit) U_LIFETIME_BOUND
+                  int32_t limit,
+                  const UnicodeString& srcText,
+                  int32_t srcStart,
+                  int32_t srcLimit)
 { return doReplace(start, limit - start, srcText, srcStart, srcLimit - srcStart); }
 
 inline UnicodeString&
 UnicodeString::findAndReplace(const UnicodeString& oldText,
-                              const UnicodeString& newText) U_LIFETIME_BOUND
+                  const UnicodeString& newText)
 { return findAndReplace(0, length(), oldText, 0, oldText.length(),
             newText, 0, newText.length()); }
 
 inline UnicodeString&
 UnicodeString::findAndReplace(int32_t start,
-                              int32_t _length,
-                              const UnicodeString& oldText,
-                              const UnicodeString& newText) U_LIFETIME_BOUND
+                  int32_t _length,
+                  const UnicodeString& oldText,
+                  const UnicodeString& newText)
 { return findAndReplace(start, _length, oldText, 0, oldText.length(),
             newText, 0, newText.length()); }
 
@@ -4892,7 +4898,7 @@ UnicodeString::extractBetween(int32_t start,
 }
 
 inline UnicodeString
-UnicodeString::tempSubStringBetween(int32_t start, int32_t limit) const U_LIFETIME_BOUND {
+UnicodeString::tempSubStringBetween(int32_t start, int32_t limit) const {
     return tempSubString(start, limit - start);
 }
 
@@ -4958,17 +4964,17 @@ UnicodeString::setArray(char16_t *array, int32_t len, int32_t capacity) {
 }
 
 inline UnicodeString&
-UnicodeString::operator=(char16_t ch) U_LIFETIME_BOUND
+UnicodeString::operator= (char16_t ch)
 { return doReplace(0, length(), &ch, 0, 1); }
 
 inline UnicodeString&
-UnicodeString::operator=(UChar32 ch) U_LIFETIME_BOUND
+UnicodeString::operator= (UChar32 ch)
 { return replace(0, length(), ch); }
 
 inline UnicodeString&
 UnicodeString::setTo(const UnicodeString& srcText,
-                     int32_t srcStart,
-                     int32_t srcLength) U_LIFETIME_BOUND
+             int32_t srcStart,
+             int32_t srcLength)
 {
   unBogus();
   return doReplace(0, length(), srcText, srcStart, srcLength);
@@ -4976,7 +4982,7 @@ UnicodeString::setTo(const UnicodeString& srcText,
 
 inline UnicodeString&
 UnicodeString::setTo(const UnicodeString& srcText,
-                     int32_t srcStart) U_LIFETIME_BOUND
+             int32_t srcStart)
 {
   unBogus();
   srcText.pinIndex(srcStart);
@@ -4984,28 +4990,28 @@ UnicodeString::setTo(const UnicodeString& srcText,
 }
 
 inline UnicodeString&
-UnicodeString::setTo(const UnicodeString& srcText) U_LIFETIME_BOUND
+UnicodeString::setTo(const UnicodeString& srcText)
 {
   return copyFrom(srcText);
 }
 
 inline UnicodeString&
-UnicodeString::setTo(const char16_t* srcChars,
-                     int32_t srcLength) U_LIFETIME_BOUND
+UnicodeString::setTo(const char16_t *srcChars,
+             int32_t srcLength)
 {
   unBogus();
   return doReplace(0, length(), srcChars, 0, srcLength);
 }
 
 inline UnicodeString&
-UnicodeString::setTo(char16_t srcChar) U_LIFETIME_BOUND
+UnicodeString::setTo(char16_t srcChar)
 {
   unBogus();
   return doReplace(0, length(), &srcChar, 0, 1);
 }
 
 inline UnicodeString&
-UnicodeString::setTo(UChar32 srcChar) U_LIFETIME_BOUND
+UnicodeString::setTo(UChar32 srcChar)
 {
   unBogus();
   return replace(0, length(), srcChar);
@@ -5013,80 +5019,80 @@ UnicodeString::setTo(UChar32 srcChar) U_LIFETIME_BOUND
 
 inline UnicodeString&
 UnicodeString::append(const UnicodeString& srcText,
-                      int32_t srcStart,
-                      int32_t srcLength) U_LIFETIME_BOUND
+              int32_t srcStart,
+              int32_t srcLength)
 { return doAppend(srcText, srcStart, srcLength); }
 
 inline UnicodeString&
-UnicodeString::append(const UnicodeString& srcText) U_LIFETIME_BOUND
+UnicodeString::append(const UnicodeString& srcText)
 { return doAppend(srcText, 0, srcText.length()); }
 
 inline UnicodeString&
-UnicodeString::append(const char16_t* srcChars,
-                      int32_t srcStart,
-                      int32_t srcLength) U_LIFETIME_BOUND
+UnicodeString::append(const char16_t *srcChars,
+              int32_t srcStart,
+              int32_t srcLength)
 { return doAppend(srcChars, srcStart, srcLength); }
 
 inline UnicodeString&
 UnicodeString::append(ConstChar16Ptr srcChars,
-                      int32_t srcLength) U_LIFETIME_BOUND
+              int32_t srcLength)
 { return doAppend(srcChars, 0, srcLength); }
 
 inline UnicodeString&
-UnicodeString::append(char16_t srcChar) U_LIFETIME_BOUND
+UnicodeString::append(char16_t srcChar)
 { return doAppend(&srcChar, 0, 1); }
 
 inline UnicodeString&
-UnicodeString::operator+=(char16_t ch) U_LIFETIME_BOUND
+UnicodeString::operator+= (char16_t ch)
 { return doAppend(&ch, 0, 1); }
 
 inline UnicodeString&
-UnicodeString::operator+=(UChar32 ch) U_LIFETIME_BOUND {
+UnicodeString::operator+= (UChar32 ch) {
   return append(ch);
 }
 
 inline UnicodeString&
-UnicodeString::operator+=(const UnicodeString& srcText) U_LIFETIME_BOUND
+UnicodeString::operator+= (const UnicodeString& srcText)
 { return doAppend(srcText, 0, srcText.length()); }
 
 inline UnicodeString&
 UnicodeString::insert(int32_t start,
-                      const UnicodeString& srcText,
-                      int32_t srcStart,
-                      int32_t srcLength) U_LIFETIME_BOUND
+              const UnicodeString& srcText,
+              int32_t srcStart,
+              int32_t srcLength)
 { return doReplace(start, 0, srcText, srcStart, srcLength); }
 
 inline UnicodeString&
 UnicodeString::insert(int32_t start,
-                      const UnicodeString& srcText) U_LIFETIME_BOUND
+              const UnicodeString& srcText)
 { return doReplace(start, 0, srcText, 0, srcText.length()); }
 
 inline UnicodeString&
 UnicodeString::insert(int32_t start,
-                      const char16_t* srcChars,
-                      int32_t srcStart,
-                      int32_t srcLength) U_LIFETIME_BOUND
+              const char16_t *srcChars,
+              int32_t srcStart,
+              int32_t srcLength)
 { return doReplace(start, 0, srcChars, srcStart, srcLength); }
 
 inline UnicodeString&
 UnicodeString::insert(int32_t start,
-                      ConstChar16Ptr srcChars,
-                      int32_t srcLength) U_LIFETIME_BOUND
+              ConstChar16Ptr srcChars,
+              int32_t srcLength)
 { return doReplace(start, 0, srcChars, 0, srcLength); }
 
 inline UnicodeString&
 UnicodeString::insert(int32_t start,
-                      char16_t srcChar) U_LIFETIME_BOUND
+              char16_t srcChar)
 { return doReplace(start, 0, &srcChar, 0, 1); }
 
 inline UnicodeString&
 UnicodeString::insert(int32_t start,
-                      UChar32 srcChar) U_LIFETIME_BOUND
+              UChar32 srcChar)
 { return replace(start, 0, srcChar); }
 
 
 inline UnicodeString&
-UnicodeString::remove() U_LIFETIME_BOUND
+UnicodeString::remove()
 {
   // remove() of a bogus string makes the string empty and non-bogus
   if(isBogus()) {
@@ -5099,7 +5105,7 @@ UnicodeString::remove() U_LIFETIME_BOUND
 
 inline UnicodeString&
 UnicodeString::remove(int32_t start,
-                      int32_t _length) U_LIFETIME_BOUND
+             int32_t _length)
 {
     if(start <= 0 && _length == INT32_MAX) {
         // remove(guaranteed everything) of a bogus string makes the string empty and non-bogus
@@ -5110,11 +5116,11 @@ UnicodeString::remove(int32_t start,
 
 inline UnicodeString&
 UnicodeString::removeBetween(int32_t start,
-                             int32_t limit) U_LIFETIME_BOUND
+                int32_t limit)
 { return doReplace(start, limit - start, nullptr, 0, 0); }
 
-inline UnicodeString&
-UnicodeString::retainBetween(int32_t start, int32_t limit) U_LIFETIME_BOUND {
+inline UnicodeString &
+UnicodeString::retainBetween(int32_t start, int32_t limit) {
   truncate(limit);
   return doReplace(0, start, nullptr, 0, 0);
 }
@@ -5135,12 +5141,12 @@ UnicodeString::truncate(int32_t targetLength)
 }
 
 inline UnicodeString&
-UnicodeString::reverse() U_LIFETIME_BOUND
+UnicodeString::reverse()
 { return doReverse(0, length()); }
 
 inline UnicodeString&
 UnicodeString::reverse(int32_t start,
-                       int32_t _length) U_LIFETIME_BOUND
+               int32_t _length)
 { return doReverse(start, _length); }
 
 U_NAMESPACE_END

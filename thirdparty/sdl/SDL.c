@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -30,10 +30,6 @@
 // this checks for HAVE_DBUS_DBUS_H internally.
 #include "core/linux/SDL_dbus.h"
 
-// #if defined(SDL_PLATFORM_UNIX) && !defined(SDL_PLATFORM_ANDROID)
-// #include "core/unix/SDL_gtk.h"
-// #endif
-
 #ifdef SDL_PLATFORM_EMSCRIPTEN
 #include <emscripten.h>
 #endif
@@ -44,30 +40,19 @@
 #include "SDL_hints_c.h"
 #include "SDL_log_c.h"
 #include "SDL_properties_c.h"
-// #include "audio/SDL_sysaudio.h"
-// #include "camera/SDL_camera_c.h"
-// #include "cpuinfo/SDL_cpuinfo_c.h"
+//#include "audio/SDL_sysaudio.h"
 #include "events/SDL_events_c.h"
 #include "haptic/SDL_haptic_c.h"
 #include "joystick/SDL_gamepad_c.h"
 #include "joystick/SDL_joystick_c.h"
-// #include "render/SDL_sysrender.h"
 #include "sensor/SDL_sensor_c.h"
 #include "stdlib/SDL_getenv_c.h"
 #include "thread/SDL_thread_c.h"
-// #include "tray/SDL_tray_utils.h"
-// #include "video/SDL_pixels_c.h"
-// #include "video/SDL_surface_c.h"
-// #include "video/SDL_video_c.h"
-#ifndef SDL_FILESYSTEM_DUMMY // Godot change
-#include "filesystem/SDL_filesystem_c.h"
-#endif
-// #include "io/SDL_asyncio_c.h"
 #ifdef SDL_PLATFORM_ANDROID
 #include "core/android/SDL_android.h"
 #endif
 
-#define SDL_ALL_SUBSYSTEM_FLAGS ~0U
+#define SDL_INIT_EVERYTHING ~0U
 
 // Initialization/Cleanup routines
 #include "timer/SDL_timer_c.h"
@@ -150,7 +135,7 @@ static bool SDL_ValidMetadataProperty(const char *name)
 
 bool SDL_SetAppMetadataProperty(const char *name, const char *value)
 {
-    CHECK_PARAM(!SDL_ValidMetadataProperty(name)) {
+    if (!SDL_ValidMetadataProperty(name)) {
         return SDL_InvalidParamError("name");
     }
 
@@ -159,7 +144,7 @@ bool SDL_SetAppMetadataProperty(const char *name, const char *value)
 
 const char *SDL_GetAppMetadataProperty(const char *name)
 {
-    CHECK_PARAM(!SDL_ValidMetadataProperty(name)) {
+    if (!SDL_ValidMetadataProperty(name)) {
         SDL_InvalidParamError("name");
         return NULL;
     }
@@ -175,10 +160,7 @@ const char *SDL_GetAppMetadataProperty(const char *name)
     }
     if (!value || !*value) {
         if (SDL_strcmp(name, SDL_PROP_APP_METADATA_NAME_STRING) == 0) {
-            // value = SDL_GetExeName();
-            if (!value) {
-                value = "SDL Application";
-            }
+            value = "SDL Application";
         } else if (SDL_strcmp(name, SDL_PROP_APP_METADATA_TYPE_STRING) == 0) {
             value = "application";
         }
@@ -194,8 +176,6 @@ static bool SDL_MainIsReady = false;
 static bool SDL_MainIsReady = true;
 #endif
 static SDL_ThreadID SDL_MainThreadID = 0;
-static SDL_ThreadID SDL_EventsThreadID = 0;
-static SDL_ThreadID SDL_VideoThreadID = 0;
 static bool SDL_bInMainQuit = false;
 static Uint8 SDL_SubsystemRefCount[32];
 
@@ -244,7 +224,6 @@ static bool SDL_ShouldQuitSubsystem(Uint32 subsystem)
     return (((subsystem_index >= 0) && (SDL_SubsystemRefCount[subsystem_index] == 1)) || SDL_bInMainQuit);
 }
 
-#if !defined(SDL_VIDEO_DISABLED) || !defined(SDL_AUDIO_DISABLED) || !defined(SDL_JOYSTICK_DISABLED)
 /* Private helper to either increment's existing ref counter,
  * or fully init a new subsystem. */
 static bool SDL_InitOrIncrementSubsystem(Uint32 subsystem)
@@ -260,7 +239,6 @@ static bool SDL_InitOrIncrementSubsystem(Uint32 subsystem)
     }
     return SDL_InitSubSystem(subsystem);
 }
-#endif // !SDL_VIDEO_DISABLED || !SDL_AUDIO_DISABLED || !SDL_JOYSTICK_DISABLED
 
 void SDL_SetMainReady(void)
 {
@@ -273,21 +251,14 @@ void SDL_SetMainReady(void)
 
 bool SDL_IsMainThread(void)
 {
-    if (SDL_VideoThreadID) {
-        return (SDL_GetCurrentThreadID() == SDL_VideoThreadID);
+    if (SDL_MainThreadID == 0) {
+        // Not initialized yet?
+        return true;
     }
-    if (SDL_EventsThreadID) {
-        return (SDL_GetCurrentThreadID() == SDL_EventsThreadID);
+    if (SDL_MainThreadID == SDL_GetCurrentThreadID()) {
+        return true;
     }
-    if (SDL_MainThreadID) {
-        return (SDL_GetCurrentThreadID() == SDL_MainThreadID);
-    }
-    return true;
-}
-
-bool SDL_IsVideoThread(void)
-{
-    return (SDL_GetCurrentThreadID() == SDL_VideoThreadID);
+    return false;
 }
 
 // Initialize all the subsystems that require initialization before threads start
@@ -295,17 +266,10 @@ void SDL_InitMainThread(void)
 {
     static bool done_info = false;
 
-    // If we haven't done it by now, mark this as the main thread
-    if (SDL_MainThreadID == 0) {
-        SDL_MainThreadID = SDL_GetCurrentThreadID();
-    }
-
     SDL_InitTLSData();
     SDL_InitEnvironment();
-	SDL_InitTicks();
-#ifndef SDL_FILESYSTEM_DUMMY // Godot change
-    SDL_InitFilesystem();
-#endif
+    SDL_InitTicks();
+    //SDL_InitFilesystem();
 
     if (!done_info) {
         const char *value;
@@ -324,9 +288,7 @@ void SDL_InitMainThread(void)
 
 static void SDL_QuitMainThread(void)
 {
-#ifndef SDL_FILESYSTEM_DUMMY // Godot change
-    SDL_QuitFilesystem();
-#endif
+    //SDL_QuitFilesystem();
     SDL_QuitTicks();
     SDL_QuitEnvironment();
     SDL_QuitTLSData();
@@ -339,26 +301,6 @@ bool SDL_InitSubSystem(SDL_InitFlags flags)
     if (!SDL_MainIsReady) {
         return SDL_SetError("Application didn't initialize properly, did you include SDL_main.h in the file containing your main() function?");
     }
-
-#ifdef SDL_PLATFORM_EMSCRIPTEN
-    MAIN_THREAD_EM_ASM({
-        // make sure this generic table to hang SDL-specific Javascript stuff is available at init time.
-        if (typeof(Module['SDL3']) === 'undefined') {
-            Module['SDL3'] = {};
-        }
-
-        var SDL3 = Module['SDL3'];
-        #if defined(__wasm32__)
-        if (typeof(SDL3.JSVarToCPtr) === 'undefined') { SDL3.JSVarToCPtr = function(v) { return v; }; }
-        if (typeof(SDL3.CPtrToHeap32Index) === 'undefined') { SDL3.CPtrToHeap32Index = function(ptr) { return ptr >>> 2; }; }
-        #elif defined(__wasm64__)
-        if (typeof(SDL3.JSVarToCPtr) === 'undefined') { SDL3.JSVarToCPtr = function(v) { return BigInt(v); }; }
-        if (typeof(SDL3.CPtrToHeap32Index) === 'undefined') { SDL3.CPtrToHeap32Index = function(ptr) { return Number(ptr / 4n); }; }
-        #else
-        #error Please define your platform.
-        #endif
-    });
-#endif
 
     SDL_InitMainThread();
 
@@ -378,11 +320,6 @@ bool SDL_InitSubSystem(SDL_InitFlags flags)
     if (flags & SDL_INIT_EVENTS) {
         if (SDL_ShouldInitSubsystem(SDL_INIT_EVENTS)) {
             SDL_IncrementSubsystemRefCount(SDL_INIT_EVENTS);
-
-            // Note which thread initialized events
-            // This is the thread which should be pumping events
-            SDL_EventsThreadID = SDL_GetCurrentThreadID();
-
             if (!SDL_InitEvents()) {
                 SDL_DecrementSubsystemRefCount(SDL_INIT_EVENTS);
                 goto quit_and_error;
@@ -402,16 +339,12 @@ bool SDL_InitSubSystem(SDL_InitFlags flags)
                 goto quit_and_error;
             }
 
-            SDL_IncrementSubsystemRefCount(SDL_INIT_VIDEO);
-
             // We initialize video on the main thread
             // On Apple platforms this is a requirement.
             // On other platforms, this is the definition.
-            SDL_VideoThreadID = SDL_GetCurrentThreadID();
-#ifdef SDL_PLATFORM_APPLE
-            SDL_assert(SDL_VideoThreadID == SDL_MainThreadID);
-#endif
+            SDL_MainThreadID = SDL_GetCurrentThreadID();
 
+            SDL_IncrementSubsystemRefCount(SDL_INIT_VIDEO);
             if (!SDL_VideoInit(NULL)) {
                 SDL_DecrementSubsystemRefCount(SDL_INIT_VIDEO);
                 SDL_PushError();
@@ -661,7 +594,6 @@ void SDL_QuitSubSystem(SDL_InitFlags flags)
         if (SDL_ShouldQuitSubsystem(SDL_INIT_VIDEO)) {
             SDL_QuitRender();
             SDL_VideoQuit();
-            SDL_VideoThreadID = 0;
             // video implies events
             SDL_QuitSubSystem(SDL_INIT_EVENTS);
         }
@@ -672,7 +604,6 @@ void SDL_QuitSubSystem(SDL_InitFlags flags)
     if (flags & SDL_INIT_EVENTS) {
         if (SDL_ShouldQuitSubsystem(SDL_INIT_EVENTS)) {
             SDL_QuitEvents();
-            SDL_EventsThreadID = 0;
         }
         SDL_DecrementSubsystemRefCount(SDL_INIT_EVENTS);
     }
@@ -691,7 +622,7 @@ Uint32 SDL_WasInit(SDL_InitFlags flags)
     }
 
     if (!flags) {
-        flags = SDL_ALL_SUBSYSTEM_FLAGS;
+        flags = SDL_INIT_EVERYTHING;
     }
 
     num_subsystems = SDL_min(num_subsystems, SDL_MostSignificantBitIndex32(flags) + 1);
@@ -716,31 +647,27 @@ void SDL_Quit(void)
 #ifdef SDL_PLATFORM_WINDOWS
     SDL_HelperWindowDestroy();
 #endif
-    SDL_QuitSubSystem(SDL_ALL_SUBSYSTEM_FLAGS);
-    // SDL_CleanupTrays();
+    SDL_QuitSubSystem(SDL_INIT_EVERYTHING);
+    //SDL_CleanupTrays();
 
 #ifdef SDL_USE_LIBDBUS
     SDL_DBus_Quit();
 #endif
 
-#if defined(SDL_PLATFORM_UNIX) && !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_EMSCRIPTEN) && !defined(SDL_PLATFORM_PRIVATE)
-    SDL_Gtk_Quit();
-#endif
-
     SDL_QuitTimers();
-    // SDL_QuitAsyncIO();
+    //SDL_QuitAsyncIO();
 
     SDL_SetObjectsInvalid();
     SDL_AssertionsQuit();
 
-    // SDL_QuitPixelFormatDetails();
+    //SDL_QuitPixelFormatDetails();
 
-    // SDL_QuitCPUInfo();
+    //SDL_QuitCPUInfo();
 
     /* Now that every subsystem has been quit, we reset the subsystem refcount
      * and the list of initialized subsystems.
      */
-    SDL_zeroa(SDL_SubsystemRefCount);
+    SDL_memset(SDL_SubsystemRefCount, 0x0, sizeof(SDL_SubsystemRefCount));
 
     SDL_QuitLog();
     SDL_QuitHints();
@@ -792,8 +719,6 @@ const char *SDL_GetPlatform(void)
     return "macOS";
 #elif defined(SDL_PLATFORM_NETBSD)
     return "NetBSD";
-#elif defined(SDL_PLATFORM_NGAGE)
-    return "Nokia N-Gage";
 #elif defined(SDL_PLATFORM_OPENBSD)
     return "OpenBSD";
 #elif defined(SDL_PLATFORM_OS2)
@@ -814,8 +739,6 @@ const char *SDL_GetPlatform(void)
     return "Xbox One";
 #elif defined(SDL_PLATFORM_XBOXSERIES)
     return "Xbox Series X|S";
-#elif defined(SDL_PLATFORM_VISIONOS)
-    return "visionOS";
 #elif defined(SDL_PLATFORM_IOS)
     return "iOS";
 #elif defined(SDL_PLATFORM_TVOS)
@@ -828,8 +751,6 @@ const char *SDL_GetPlatform(void)
     return "PlayStation Vita";
 #elif defined(SDL_PLATFORM_3DS)
     return "Nintendo 3DS";
-#elif defined(SDL_PLATFORM_HURD)
-    return "GNU/Hurd";
 #elif defined(__managarm__)
     return "Managarm";
 #else
@@ -842,9 +763,8 @@ bool SDL_IsTablet(void)
 #ifdef SDL_PLATFORM_ANDROID
     return SDL_IsAndroidTablet();
 #elif defined(SDL_PLATFORM_IOS)
-    //extern bool SDL_IsIPad(void);
-    //return SDL_IsIPad();
-    return false;
+    extern bool SDL_IsIPad(void);
+    return SDL_IsIPad();
 #else
     return false;
 #endif
@@ -855,9 +775,8 @@ bool SDL_IsTV(void)
 #ifdef SDL_PLATFORM_ANDROID
     return SDL_IsAndroidTV();
 #elif defined(SDL_PLATFORM_IOS)
-    //extern bool SDL_IsAppleTV(void);
-    //return SDL_IsAppleTV();
-    return false;
+    extern bool SDL_IsAppleTV(void);
+    return SDL_IsAppleTV();
 #else
     return false;
 #endif
@@ -903,7 +822,9 @@ SDL_Sandbox SDL_GetSandbox(void)
 
 #ifdef SDL_PLATFORM_WIN32
 
-#if !defined(HAVE_LIBC) && !defined(SDL_STATIC_LIB)
+#if (!defined(HAVE_LIBC) || defined(__WATCOMC__)) && !defined(SDL_STATIC_LIB)
+// FIXME: Still need to include DllMain() on Watcom C ?
+
 BOOL APIENTRY MINGW32_FORCEALIGN _DllMainCRTStartup(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
     switch (ul_reason_for_call) {

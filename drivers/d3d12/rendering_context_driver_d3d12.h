@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/os/mutex.h"
 #include "drivers/d3d12/rendering_device_driver_d3d12.h"
 #include "servers/display/display_server_enums.h"
 #include "servers/rendering/rendering_context_driver.h"
@@ -48,6 +49,10 @@ class RenderingContextDriverD3D12 : public RenderingContextDriver {
 	Microsoft::WRL::ComPtr<ID3D12DeviceFactory> device_factory;
 	Microsoft::WRL::ComPtr<IDXGIFactory2> dxgi_factory;
 	TightLocalVector<Device> driver_devices;
+	// Mariner E8: DXGI adapter info; UMA is queried on first use (needs a D3D12 device).
+	mutable TightLocalVector<DeviceInfo> driver_device_infos;
+	mutable TightLocalVector<bool> driver_device_uma_queried;
+	mutable BinaryMutex device_info_mutex;
 	bool tearing_supported = false;
 
 	Error _init_device_factory();
@@ -59,6 +64,7 @@ public:
 	virtual Error initialize() override;
 	virtual const Device &device_get(uint32_t p_device_index) const override;
 	virtual uint32_t device_get_count() const override;
+	virtual bool device_get_info(uint32_t p_device_index, DeviceInfo &r_info) const override;
 	virtual bool device_supports_present(uint32_t p_device_index, SurfaceID p_surface) const override;
 	virtual RenderingDeviceDriver *driver_create() override;
 	virtual void driver_free(RenderingDeviceDriver *p_driver) override;

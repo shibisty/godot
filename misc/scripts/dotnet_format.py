@@ -2,7 +2,6 @@
 
 import glob
 import os
-import subprocess
 import sys
 
 if len(sys.argv) < 2:
@@ -31,4 +30,4 @@ projects = {
 # Run dotnet format on all projects with more than 0 modified files.
 for path, files in projects.items():
     if files:
-        subprocess.run(["dotnet", "format", path, "--include", files])
+        os.system(f"dotnet format {path} --include {files}")

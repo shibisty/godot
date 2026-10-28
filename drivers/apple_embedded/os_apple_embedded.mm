@@ -40,17 +40,15 @@
 #include "core/os/os.h"
 #include "core/profiling/profiling.h"
 #import "drivers/apple/os_log_logger.h"
+#import "drivers/apple_embedded/app_delegate_service.h"
 #import "drivers/apple_embedded/display_server_apple_embedded.h"
-#import "drivers/apple_embedded/godot_app_delegate_service_apple_embedded.h"
 #import "drivers/apple_embedded/godot_view_apple_embedded.h"
 #import "drivers/apple_embedded/godot_view_controller.h"
 #ifdef SDL_ENABLED
 #include "drivers/sdl/joypad_sdl.h"
 #endif
 #include "main/main.h"
-#include "servers/audio/audio_driver.h"
 #include "servers/camera/camera_server.h"
-#include "servers/display/accessibility_server.h"
 
 #import <AVFoundation/AVFAudio.h>
 #import <AudioToolbox/AudioServices.h>
@@ -161,11 +159,6 @@ OS_AppleEmbedded::OS_AppleEmbedded() {
 
 OS_AppleEmbedded::~OS_AppleEmbedded() {}
 
-Error OS_AppleEmbedded::get_entropy(uint8_t *r_buffer, int p_bytes) {
-	int status = SecRandomCopyBytes(kSecRandomDefault, p_bytes, r_buffer);
-	return status == errSecSuccess ? OK : FAILED;
-}
-
 void OS_AppleEmbedded::alert(const String &p_alert, const String &p_title) {
 	const CharString utf8_alert = p_alert.utf8();
 	const CharString utf8_title = p_title.utf8();
@@ -198,9 +191,14 @@ void OS_AppleEmbedded::initialize_modules() {
 
 void OS_AppleEmbedded::deinitialize_modules() {
 #ifdef SDL_ENABLED
-	memdelete(joypad_sdl);
+	if (joypad_sdl) {
+		memdelete(joypad_sdl);
+	}
 #endif
-	memdelete(apple_embedded);
+
+	if (apple_embedded) {
+		memdelete(apple_embedded);
+	}
 }
 
 void OS_AppleEmbedded::set_main_loop(MainLoop *p_main_loop) {
@@ -466,18 +464,6 @@ String OS_AppleEmbedded::get_locale() const {
 	return String::utf8([localeIdentifier UTF8String]).replace_char('-', '_');
 }
 
-Vector<String> OS_AppleEmbedded::get_preferred_locales() const {
-	Vector<String> out;
-	for (NSString *locale_code in [NSLocale preferredLanguages]) {
-		out.push_back(String([locale_code UTF8String]).replace_char('-', '_'));
-	}
-	if (out.is_empty()) {
-		NSString *localeIdentifier = [[NSLocale currentLocale] localeIdentifier];
-		out.push_back(String::utf8([localeIdentifier UTF8String]).replace_char('-', '_'));
-	}
-	return out;
-}
-
 String OS_AppleEmbedded::get_unique_id() const {
 	NSString *uuid = [UIDevice currentDevice].identifierForVendor.UUIDString;
 	return String::utf8([uuid UTF8String]);
@@ -521,7 +507,7 @@ static const _ModelInfo _models[] = {
 	{ { "iPad17,1", "iPad17,2", "iPad17,3", "iPad17,4", "RealityDevice17,1" }, "Apple M5" },
 	{ { "iPhone17,3", "iPhone17,4", "iPhone17,5" }, "Apple A18" },
 	{ { "iPhone17,1", "iPhone17,2" }, "Apple A18 Pro" },
-	{ { "iPhone18,3", "iPhone18,5" }, "Apple A19" },
+	{ { "iPhone18,3" }, "Apple A19" },
 	{ { "iPhone18,1", "iPhone18,2", "iPhone18,4" }, "Apple A19 Pro" },
 };
 
@@ -785,19 +771,6 @@ Error OS_AppleEmbedded::setup_remote_filesystem(const String &p_server_host, int
 	return err;
 }
 
-void OS_AppleEmbedded::audio_driver_start() {
-	// Dummy is the singleton when Core Audio init failed. Starting this unit would run a second mix thread.
-	if (AudioDriver::get_singleton() == &audio_driver) {
-		audio_driver.start();
-	}
-}
-
-void OS_AppleEmbedded::audio_driver_stop() {
-	if (AudioDriver::get_singleton() == &audio_driver) {
-		audio_driver.stop();
-	}
-}
-
 void OS_AppleEmbedded::on_focus_out() {
 	if (is_focused) {
 		is_focused = false;
@@ -806,17 +779,13 @@ void OS_AppleEmbedded::on_focus_out() {
 			DisplayServerAppleEmbedded::get_singleton()->send_window_event(DisplayServerEnums::WINDOW_EVENT_FOCUS_OUT);
 		}
 
-		if (AccessibilityServer::get_singleton()) {
-			AccessibilityServer::get_singleton()->set_window_focused(DisplayServerEnums::MAIN_WINDOW_ID, false);
-		}
-
 		if (OS::get_singleton()->get_main_loop()) {
 			OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_APPLICATION_FOCUS_OUT);
 		}
 
 		[GDTAppDelegateService.viewController.godotView stopRendering];
 
-		audio_driver_stop();
+		audio_driver.stop();
 	}
 }
 
@@ -828,17 +797,13 @@ void OS_AppleEmbedded::on_focus_in() {
 			DisplayServerAppleEmbedded::get_singleton()->send_window_event(DisplayServerEnums::WINDOW_EVENT_FOCUS_IN);
 		}
 
-		if (AccessibilityServer::get_singleton()) {
-			AccessibilityServer::get_singleton()->set_window_focused(DisplayServerEnums::MAIN_WINDOW_ID, true);
-		}
-
 		if (OS::get_singleton()->get_main_loop()) {
 			OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_APPLICATION_FOCUS_IN);
 		}
 
 		[GDTAppDelegateService.viewController.godotView startRendering];
 
-		audio_driver_start();
+		audio_driver.start();
 	}
 }
 

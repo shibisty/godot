@@ -94,10 +94,22 @@ public:
 		DeviceType type = DEVICE_TYPE_OTHER;
 	};
 
+	// Mariner E8: more about a physical device (RenderingServer.get_physical_devices()).
+	struct DeviceInfo {
+		uint32_t device_id = 0; // PCI device ID (Vulkan deviceID, DXGI DeviceId).
+		uint64_t dedicated_memory = 0; // Device-local heaps (Vulkan) / DedicatedVideoMemory (DXGI), in bytes.
+		uint64_t shared_memory = 0; // Host memory the device can use (other Vulkan heaps / DXGI SharedSystemMemory), in bytes.
+		bool uma = false; // Memory is shared with the CPU (integrated GPU, software device): reading results back is cheap.
+		DeviceType type = DEVICE_TYPE_OTHER; // Refined type: on D3D12 a UMA hardware adapter is reported as integrated.
+		String api_version; // Vulkan: the device's API version; empty when unknown.
+	};
+
 	virtual ~RenderingContextDriver();
 	virtual Error initialize() = 0;
 	virtual const Device &device_get(uint32_t p_device_index) const = 0;
 	virtual uint32_t device_get_count() const = 0;
+	// Mariner E8: fills r_info (always at least `type` from device_get()); false when the driver knows nothing more.
+	virtual bool device_get_info(uint32_t p_device_index, DeviceInfo &r_info) const;
 	virtual bool device_supports_present(uint32_t p_device_index, SurfaceID p_surface) const = 0;
 	virtual RenderingDeviceDriver *driver_create() = 0;
 	virtual void driver_free(RenderingDeviceDriver *p_driver) = 0;

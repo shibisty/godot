@@ -73,7 +73,6 @@ Fill* Fill::duplicate() const noexcept
 {
     if (type() == Type::LinearGradient) return CONST_LINEAR(this)->duplicate();
     else if (type() == Type::RadialGradient) return CONST_RADIAL(this)->duplicate();
-    else if (type() == Type::ConicGradient) return CONST_CONIC(this)->duplicate();
     return nullptr;
 }
 
@@ -137,30 +136,4 @@ LinearGradient* LinearGradient::gen() noexcept
 Type LinearGradient::type() const noexcept
 {
     return Type::LinearGradient;
-}
-
-/************************************************************************/
-/* ConicGradient Class Implementation                                   */
-/************************************************************************/
-
-ConicGradient::ConicGradient() = default;
-
-Result ConicGradient::conic(float cx, float cy, float angle) noexcept
-{
-    return CONIC(this)->conic(cx, cy, angle);
-}
-
-Result ConicGradient::conic(float* cx, float* cy, float* angle) const noexcept
-{
-    return CONST_CONIC(this)->conic(cx, cy, angle);
-}
-
-ConicGradient* ConicGradient::gen() noexcept
-{
-    return new ConicGradientImpl;
-}
-
-Type ConicGradient::type() const noexcept
-{
-    return Type::ConicGradient;
 }

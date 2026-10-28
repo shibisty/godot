@@ -273,16 +273,6 @@ const char *const RenderingDeviceCommons::FORMAT_NAMES[DATA_FORMAT_MAX] = {
 /**** TEXTURE ****/
 /*****************/
 
-const char *const RenderingDeviceCommons::TEXTURE_TYPE_NAMES[TEXTURE_TYPE_MAX] = {
-	"1D",
-	"2D",
-	"3D",
-	"Cube",
-	"1DArray",
-	"2DArray",
-	"CubeArray",
-};
-
 const uint32_t RenderingDeviceCommons::TEXTURE_SAMPLES_COUNT[TEXTURE_SAMPLES_MAX] = { 1, 2, 4, 8, 16, 32, 64 };
 
 uint32_t RenderingDeviceCommons::get_image_format_pixel_size(DataFormat p_format) {
@@ -597,12 +587,6 @@ void RenderingDeviceCommons::get_compressed_image_format_block_dimensions(DataFo
 			r_w = 4;
 			r_h = 4;
 		} break;
-		case DATA_FORMAT_ASTC_6x6_UNORM_BLOCK:
-		case DATA_FORMAT_ASTC_6x6_SRGB_BLOCK:
-		case DATA_FORMAT_ASTC_6x6_SFLOAT_BLOCK: {
-			r_w = 6;
-			r_h = 6;
-		} break;
 		case DATA_FORMAT_ASTC_5x4_UNORM_BLOCK: // Unsupported
 		case DATA_FORMAT_ASTC_5x4_SRGB_BLOCK:
 		case DATA_FORMAT_ASTC_5x4_SFLOAT_BLOCK:
@@ -612,6 +596,9 @@ void RenderingDeviceCommons::get_compressed_image_format_block_dimensions(DataFo
 		case DATA_FORMAT_ASTC_6x5_UNORM_BLOCK:
 		case DATA_FORMAT_ASTC_6x5_SRGB_BLOCK:
 		case DATA_FORMAT_ASTC_6x5_SFLOAT_BLOCK:
+		case DATA_FORMAT_ASTC_6x6_UNORM_BLOCK:
+		case DATA_FORMAT_ASTC_6x6_SRGB_BLOCK:
+		case DATA_FORMAT_ASTC_6x6_SFLOAT_BLOCK:
 		case DATA_FORMAT_ASTC_8x5_UNORM_BLOCK:
 		case DATA_FORMAT_ASTC_8x5_SRGB_BLOCK:
 		case DATA_FORMAT_ASTC_8x5_SFLOAT_BLOCK:
@@ -744,7 +731,7 @@ uint32_t RenderingDeviceCommons::get_compressed_image_format_block_byte_size(Dat
 	return 1;
 }
 
-uint32_t RenderingDeviceCommons::get_compressed_image_format_pixels_shifted(DataFormat p_format, uint32_t p_pixels) {
+uint32_t RenderingDeviceCommons::get_compressed_image_format_pixel_rshift(DataFormat p_format) {
 	switch (p_format) {
 		case DATA_FORMAT_BC1_RGB_UNORM_BLOCK: // These formats are half byte size, so rshift is 1.
 		case DATA_FORMAT_BC1_RGB_SRGB_BLOCK:
@@ -758,18 +745,17 @@ uint32_t RenderingDeviceCommons::get_compressed_image_format_pixels_shifted(Data
 		case DATA_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK:
 		case DATA_FORMAT_EAC_R11_UNORM_BLOCK:
 		case DATA_FORMAT_EAC_R11_SNORM_BLOCK:
-			return (p_pixels >> 1);
-		case DATA_FORMAT_ASTC_6x6_SRGB_BLOCK:
-		case DATA_FORMAT_ASTC_6x6_UNORM_BLOCK:
-		case DATA_FORMAT_ASTC_6x6_SFLOAT_BLOCK:
-			return (p_pixels * 4) / 9;
+			return 1;
 		case DATA_FORMAT_ASTC_8x8_SRGB_BLOCK:
 		case DATA_FORMAT_ASTC_8x8_UNORM_BLOCK:
-		case DATA_FORMAT_ASTC_8x8_SFLOAT_BLOCK:
-			return (p_pixels >> 2);
-		default:
-			return p_pixels;
+		case DATA_FORMAT_ASTC_8x8_SFLOAT_BLOCK: {
+			return 2;
+		}
+		default: {
+		}
 	}
+
+	return 0;
 }
 
 uint32_t RenderingDeviceCommons::get_image_format_required_size(DataFormat p_format, uint32_t p_width, uint32_t p_height, uint32_t p_depth, uint32_t p_mipmaps, uint32_t *r_blockw, uint32_t *r_blockh, uint32_t *r_depth) {
@@ -781,6 +767,7 @@ uint32_t RenderingDeviceCommons::get_image_format_required_size(DataFormat p_for
 	uint32_t size = 0;
 
 	uint32_t pixel_size = get_image_format_pixel_size(p_format);
+	uint32_t pixel_rshift = get_compressed_image_format_pixel_rshift(p_format);
 	uint32_t blockw = 0;
 	uint32_t blockh = 0;
 	get_compressed_image_format_block_dimensions(p_format, blockw, blockh);
@@ -792,7 +779,7 @@ uint32_t RenderingDeviceCommons::get_image_format_required_size(DataFormat p_for
 		uint32_t s = bw * bh;
 
 		s *= pixel_size;
-		s = get_compressed_image_format_pixels_shifted(p_format, s);
+		s >>= pixel_rshift;
 		size += s * d;
 		if (r_blockw) {
 			*r_blockw = bw;
@@ -995,4 +982,31 @@ const char *RenderingDeviceCommons::SHADER_STAGE_NAMES[SHADER_STAGE_MAX] = {
 	"TesselationControl",
 	"TesselationEvaluation",
 	"Compute",
+	"RayGen",
+	"AnyHit",
+	"ClosestHit",
+	"Miss",
+	"Intersection",
+	"Task",
+	"Mesh",
 };
+
+String RenderingDeviceCommons::validate_mesh_shader_stages(BitField<ShaderStage> p_stages) {
+	const bool has_task = p_stages.has_flag(SHADER_STAGE_TASK_BIT);
+	const bool has_mesh = p_stages.has_flag(SHADER_STAGE_MESH_BIT);
+	if (!has_task && !has_mesh) {
+		return String();
+	}
+	if (!has_mesh) {
+		return "A task shader stage needs a mesh shader stage.";
+	}
+	const uint32_t not_with_mesh = SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_TESSELATION_CONTROL_BIT | SHADER_STAGE_TESSELATION_EVALUATION_BIT;
+	if (uint32_t(p_stages) & not_with_mesh) {
+		return "A mesh shader stage can't be combined with vertex or tessellation stages (it replaces them).";
+	}
+	const uint32_t allowed = SHADER_STAGE_TASK_BIT | SHADER_STAGE_MESH_BIT | SHADER_STAGE_FRAGMENT_BIT;
+	if (uint32_t(p_stages) & ~allowed) {
+		return "A mesh shader pipeline can only have task, mesh and fragment stages.";
+	}
+	return String();
+}

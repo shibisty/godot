@@ -103,7 +103,7 @@ class U_COMMON_API UnicodeSetIterator final : public UObject {
      * @param set set to iterate over
      * @stable ICU 2.4
      */
-    UnicodeSetIterator(const UnicodeSet& set U_LIFETIME_BOUND);
+    UnicodeSetIterator(const UnicodeSet& set);
 
     /**
      * Create an iterator over nothing.  <tt>next()</tt> and
@@ -162,7 +162,7 @@ class U_COMMON_API UnicodeSetIterator final : public UObject {
      * 
      * @stable ICU 2.4
      */
-    const UnicodeString& getString() U_LIFETIME_BOUND;
+    const UnicodeString& getString();
 
     /**
      * Skips over the remaining code points/ranges, if any.
@@ -173,7 +173,7 @@ class U_COMMON_API UnicodeSetIterator final : public UObject {
      * @stable ICU 70
      * @see UnicodeSet#strings()
      */
-    inline UnicodeSetIterator& skipToStrings() U_LIFETIME_BOUND {
+    inline UnicodeSetIterator &skipToStrings() {
         // Finish code point/range iteration.
         range = endRange;
         endElement = -1;

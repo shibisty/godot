@@ -69,6 +69,7 @@ TEST_CASE("[HashingContext] Default - MD5/SHA1/SHA256") {
 
 TEST_CASE("[HashingContext] Multiple updates - MD5/SHA1/SHA256") {
 	HashingContext ctx;
+	const String s = "xyz";
 
 	const PackedByteArray s_byte_parts[] = {
 		String("x").to_ascii_buffer(),

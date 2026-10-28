@@ -225,7 +225,7 @@ void SliderConstraint::CalculatePositionLimitsConstraintProperties(float inDelta
 	// Check if distance is within limits
 	bool below_min = mD <= mLimitsMin;
 	if (mHasLimits && (below_min || mD >= mLimitsMax))
-		mPositionLimitsConstraintPart.CalculateConstraintPropertiesWithSettingsForLimit(inDeltaTime, *mBody1, mR1 + mU, *mBody2, mR2, mWorldSpaceSliderAxis, 0.0f, mD - (below_min? mLimitsMin : mLimitsMax), mLimitsSpringSettings);
+		mPositionLimitsConstraintPart.CalculateConstraintPropertiesWithSettings(inDeltaTime, *mBody1, mR1 + mU, *mBody2, mR2, mWorldSpaceSliderAxis, 0.0f, mD - (below_min? mLimitsMin : mLimitsMax), mLimitsSpringSettings);
 	else
 		mPositionLimitsConstraintPart.Deactivate();
 }
@@ -247,14 +247,7 @@ void SliderConstraint::CalculateMotorConstraintProperties(float inDeltaTime)
 
 	case EMotorState::Position:
 		if (mMotorSettings.mSpringSettings.HasStiffness())
-			mMotorConstraintPart.CalculateConstraintPropertiesWithSettingsForMotor(inDeltaTime, *mBody1, mR1 + mU, *mBody2, mR2, mWorldSpaceSliderAxis, 0.0f, mD - mTargetPosition, mMotorSettings.mSpringSettings);
-		else
-			mMotorConstraintPart.Deactivate();
-		break;
-
-	case EMotorState::PositionAndVelocity:
-		if (mMotorSettings.mSpringSettings.HasStiffnessOrDamping())
-			mMotorConstraintPart.CalculateConstraintPropertiesWithSettingsForMotor(inDeltaTime, *mBody1, mR1 + mU, *mBody2, mR2, mWorldSpaceSliderAxis, -mTargetVelocity, mD - mTargetPosition, mMotorSettings.mSpringSettings);
+			mMotorConstraintPart.CalculateConstraintPropertiesWithSettings(inDeltaTime, *mBody1, mR1 + mU, *mBody2, mR2, mWorldSpaceSliderAxis, 0.0f, mD - mTargetPosition, mMotorSettings.mSpringSettings);
 		else
 			mMotorConstraintPart.Deactivate();
 		break;
@@ -308,7 +301,6 @@ bool SliderConstraint::SolveVelocityConstraint(float inDeltaTime)
 
 		case EMotorState::Velocity:
 		case EMotorState::Position:
-		case EMotorState::PositionAndVelocity:
 			motor = mMotorConstraintPart.SolveVelocityConstraint(*mBody1, *mBody2, mWorldSpaceSliderAxis, inDeltaTime * mMotorSettings.mMinForceLimit, inDeltaTime * mMotorSettings.mMaxForceLimit);
 			break;
 		}
@@ -402,14 +394,22 @@ void SliderConstraint::DrawConstraint(DebugRenderer *inRenderer) const
 	inRenderer->DrawLine(position1, position2, Color::sGreen);
 
 	// Draw motor
-	if (IsPositionMotor(mMotorState))
-		inRenderer->DrawMarker(position1 + mTargetPosition * slider_axis, Color::sYellow, 1.0f);
-
-	if (IsVelocityMotor(mMotorState))
+	switch (mMotorState)
 	{
-		Vec3 cur_vel = (mBody2->GetLinearVelocity() - mBody1->GetLinearVelocity()).Dot(slider_axis) * slider_axis;
-		inRenderer->DrawLine(position2, position2 + cur_vel, Color::sBlue);
-		inRenderer->DrawArrow(position2 + cur_vel, position2 + mTargetVelocity * slider_axis, Color::sRed, 0.1f);
+	case EMotorState::Position:
+		inRenderer->DrawMarker(position1 + mTargetPosition * slider_axis, Color::sYellow, 1.0f);
+		break;
+
+	case EMotorState::Velocity:
+		{
+			Vec3 cur_vel = (mBody2->GetLinearVelocity() - mBody1->GetLinearVelocity()).Dot(slider_axis) * slider_axis;
+			inRenderer->DrawLine(position2, position2 + cur_vel, Color::sBlue);
+			inRenderer->DrawArrow(position2 + cur_vel, position2 + mTargetVelocity * slider_axis, Color::sRed, 0.1f);
+			break;
+		}
+
+	case EMotorState::Off:
+		break;
 	}
 }
 

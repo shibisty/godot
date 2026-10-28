@@ -111,21 +111,10 @@ void MenuBar::gui_input(const Ref<InputEvent> &p_event) {
 		}
 	}
 
-	int event_device_id = p_event->get_device();
 	Ref<InputEventMouseButton> mb = p_event;
-	if (mb.is_valid() && event_device_id != InputEvent::DEVICE_ID_EMULATION) {
+	if (mb.is_valid()) {
 		if (mb->is_pressed() && (mb->get_button_index() == MouseButton::LEFT || mb->get_button_index() == MouseButton::RIGHT)) {
 			int index = _get_index_at_point(mb->get_position());
-			if (index >= 0) {
-				_open_popup(index);
-			}
-		}
-	}
-
-	Ref<InputEventScreenTouch> touch = p_event;
-	if (touch.is_valid() && event_device_id != InputEvent::DEVICE_ID_EMULATION) {
-		if (touch->is_released()) {
-			int index = _get_index_at_point(touch->get_position());
 			if (index >= 0) {
 				_open_popup(index);
 			}
@@ -143,24 +132,18 @@ void MenuBar::_open_popup(int p_index, bool p_focus_item) {
 	}
 
 	Rect2 item_rect = _get_menu_item_rect(p_index);
-	item_rect.position *= get_screen_transform().get_scale();
-	item_rect.size *= get_screen_transform().get_scale();
-
-	Rect2 rect = get_screen_rect();
-	rect.position.x += item_rect.position.x;
-	rect.position.y += rect.size.height;
-	if (get_viewport()->is_embedding_subwindows() && pm->get_force_native()) {
-		Transform2D xform = get_viewport()->get_popup_base_transform_native();
-		rect = xform.xform(rect);
-	}
+	Size2 canvas_scale = get_canvas_transform().get_scale();
+	Point2 screen_pos = get_screen_position() + item_rect.position * canvas_scale;
+	Size2 screen_size = item_rect.size * canvas_scale;
 
 	active_menu = p_index;
 
-	pm->set_size(Size2(item_rect.size.x, 0));
+	pm->set_size(Size2(screen_size.x, 0));
+	screen_pos.y += screen_size.y;
 	if (is_layout_rtl()) {
-		rect.position.x += item_rect.size.x - pm->get_size().width;
+		screen_pos.x += screen_size.x - pm->get_size().width;
 	}
-	pm->set_position(rect.position);
+	pm->set_position(screen_pos);
 	pm->popup();
 
 	if (p_focus_item) {
@@ -416,8 +399,8 @@ int MenuBar::_get_index_at_point(const Point2 &p_point) const {
 			continue;
 		}
 		Size2 size = menu_cache[i].text_buf->get_size() + style->get_minimum_size();
-		if (point.x >= offset && point.x < offset + size.x) {
-			if (point.y >= 0 && point.y < size.y) {
+		if (point.x > offset && point.x < offset + size.x) {
+			if (point.y > 0 && point.y < size.y) {
 				return i;
 			}
 		}

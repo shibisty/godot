@@ -20,55 +20,31 @@
  * SOFTWARE.
  */
 
-#include "tvgAccessor.h"
+#include "tvgIteratorAccessor.h"
 #include "tvgCompressor.h"
-#include "tvgPicture.h"
 
 /************************************************************************/
 /* Internal Class Implementation                                        */
 /************************************************************************/
 
-#define IMPL static_cast<AccessorImpl*>(this)
-
-Accessor::Accessor() = default;
-
-struct AccessorImpl : Accessor
+static bool accessChildren(Iterator* it, function<bool(const Paint* paint, void* data)> func, void* data)
 {
-    Paint* paint;
-    AccessorCallback cb;
-    bool accessible = false;  // special searching for picture nested scenes with id maps
+    while (auto child = it->next()) {
+        //Access the child
+        if (!func(child, data)) return false;
 
-    bool access(AccessorIterator* it)
-    {
-        while (auto child = it->next()) {
-            // access the child
-            if (!cb.func(child, cb.data)) return false;
-
-            // access the children of the child
-            if (auto it2 = AccessorIterator::iterator(child)) {
-                if (!access(it2)) {
-                    delete (it2);
-                    return false;
-                }
+        //Access the children of the child
+        if (auto it2 = IteratorAccessor::iterator(child)) {
+            if (!accessChildren(it2, func, data)) {
                 delete(it2);
+                return false;
             }
-        }
-        return true;
-    }
-
-    // pre-order tree search
-    void search()
-    {
-        // root
-        if (!cb.func(paint, cb.data)) return;
-
-        // children
-        if (auto it = AccessorIterator::iterator(paint)) {
-            access(it);
-            delete (it);
+            delete(it2);
         }
     }
-};
+    return true;
+}
+
 
 /************************************************************************/
 /* External Class Implementation                                        */
@@ -76,40 +52,49 @@ struct AccessorImpl : Accessor
 
 Result Accessor::set(Paint* paint, function<bool(const Paint* paint, void* data)> func, void* data) noexcept
 {
-    if (paint && func) {
-        IMPL->paint = paint;
-        IMPL->cb = {func, data};
-        IMPL->accessible = (paint->type() == Type::Picture && static_cast<Picture*>(paint)->accessible);
+    if (!paint || !func) return Result::InvalidArguments;
 
-        paint->ref();
+    //Use the Preorder Tree-Search
 
-        if (IMPL->accessible) to<PictureImpl>(IMPL->paint)->access(IMPL->cb);
-        else IMPL->search();
+    paint->ref();
 
+    //Root
+    if (!func(paint, data)) {
         paint->unref(false);
-
-        IMPL->accessible = false;
-
         return Result::Success;
     }
-    return Result::InvalidArguments;
+
+    //Children
+    if (auto it = IteratorAccessor::iterator(paint)) {
+        accessChildren(it, func, data);
+        delete(it);
+    }
+
+    paint->unref(false);
+
+    return Result::Success;
 }
 
-const char* Accessor::name(uint32_t id) noexcept
-{
-    if (IMPL->accessible) {
-        auto entity = to<PictureImpl>(IMPL->paint)->access(id);
-        if (entity) return entity->name;
-    } else TVGLOG("RENDERER", "Did you enable Picture::accessible?");
-    return nullptr;
-}
 
 uint32_t Accessor::id(const char* name) noexcept
 {
     return djb2Encode(name);
 }
 
+
+Accessor::~Accessor()
+{
+
+}
+
+
+Accessor::Accessor() : pImpl(nullptr)
+{
+
+}
+
+
 Accessor* Accessor::gen() noexcept
 {
-    return new AccessorImpl;
+    return new Accessor;
 }

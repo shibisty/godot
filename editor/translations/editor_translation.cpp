@@ -42,7 +42,7 @@
 Vector<String> get_editor_locales() {
 	Vector<String> locales;
 
-	for (const EditorTranslationList *etl = _editor_translations; etl->lang; etl++) {
+	for (const EditorTranslationList *etl = _editor_translations; etl->data; etl++) {
 		const String &locale = etl->lang;
 		locales.push_back(locale);
 	}
@@ -50,26 +50,23 @@ Vector<String> get_editor_locales() {
 	return locales;
 }
 
-static void _load(const Ref<TranslationDomain> p_domain, const String &p_locale, const EditorTranslationList *p_etl, const uint8_t *p_data, unsigned int p_decomp_size, unsigned int p_comp_size) {
-	LocalVector<uint8_t> data;
-	data.resize_uninitialized(p_decomp_size);
-	const int64_t ret = Compression::decompress(data.ptr(), p_decomp_size, p_data, p_comp_size, Compression::MODE_ZSTD);
-	ERR_FAIL_COND_MSG(ret == -1, "Compressed file is corrupt.");
-
-	String full_locale = p_locale;
-	String base_locale = p_locale.get_slicec('@', 0).split("_")[0];
-	for (const EditorTranslationList *etl = p_etl; etl->lang; etl++) {
-		if (etl->lang == full_locale || etl->lang == base_locale) {
-			ERR_CONTINUE(etl->offset + etl->size > data.size());
+static void _load(const Ref<TranslationDomain> p_domain, const String &p_locale, const EditorTranslationList *p_etl) {
+	for (const EditorTranslationList *etl = p_etl; etl->data; etl++) {
+		if (etl->lang == p_locale) {
+			LocalVector<uint8_t> data;
+			data.resize_uninitialized(etl->uncomp_size);
+			const int64_t ret = Compression::decompress(data.ptr(), etl->uncomp_size, etl->data, etl->comp_size, Compression::MODE_DEFLATE);
+			ERR_FAIL_COND_MSG(ret == -1, "Compressed file is corrupt.");
 
 			Ref<FileAccessMemory> fa;
 			fa.instantiate();
-			fa->open_custom(data.ptr() + etl->offset, etl->size);
+			fa->open_custom(data.ptr(), data.size());
 
 			Ref<Translation> tr = TranslationLoaderPO::load_translation(fa);
 			if (tr.is_valid()) {
 				tr->set_locale(etl->lang);
 				p_domain->add_translation(tr);
+				break;
 			}
 		}
 	}
@@ -80,37 +77,36 @@ void load_editor_translations(const String &p_locale) {
 
 	domain = TranslationServer::get_singleton()->get_editor_domain();
 	domain->clear();
-	_load(domain, p_locale, _editor_translations, (const uint8_t *)_editor_translation_compressed, _editor_decomp_size, _editor_comp_size);
-	_load(domain, p_locale, _extractable_translations, (const uint8_t *)_extractable_translation_compressed, _extractable_decomp_size, _extractable_comp_size);
+	_load(domain, p_locale, _editor_translations);
+	_load(domain, p_locale, _extractable_translations);
 
 	domain = TranslationServer::get_singleton()->get_property_domain();
 	domain->clear();
-	_load(domain, p_locale, _property_translations, (const uint8_t *)_property_translation_compressed, _property_decomp_size, _property_comp_size);
+	_load(domain, p_locale, _property_translations);
 }
 
 void load_doc_translations(const String &p_locale) {
 	const Ref<TranslationDomain> domain = TranslationServer::get_singleton()->get_doc_domain();
 	domain->clear();
-	_load(domain, p_locale, _doc_translations, (const uint8_t *)_doc_translation_compressed, _doc_decomp_size, _doc_comp_size);
+	_load(domain, p_locale, _doc_translations);
 }
 
 Vector<Vector<String>> get_extractable_message_list() {
 	Vector<Vector<String>> list;
 
-	LocalVector<uint8_t> data;
-	data.resize_uninitialized(_extractable_decomp_size);
-	const int64_t ret = Compression::decompress(data.ptr(), _extractable_decomp_size, _extractable_translation_compressed, _extractable_comp_size, Compression::MODE_ZSTD);
-	ERR_FAIL_COND_V_MSG(ret == -1, list, "Compressed file is corrupt.");
-
-	for (const EditorTranslationList *etl = _extractable_translations; etl->lang; etl++) {
+	for (const EditorTranslationList *etl = _extractable_translations; etl->data; etl++) {
 		if (strcmp(etl->lang, "source")) {
 			continue;
 		}
-		ERR_CONTINUE(etl->offset + etl->size > data.size());
+
+		LocalVector<uint8_t> data;
+		data.resize_uninitialized(etl->uncomp_size);
+		const int64_t ret = Compression::decompress(data.ptr(), etl->uncomp_size, etl->data, etl->comp_size, Compression::MODE_DEFLATE);
+		ERR_FAIL_COND_V_MSG(ret == -1, list, "Compressed file is corrupt.");
 
 		Ref<FileAccessMemory> fa;
 		fa.instantiate();
-		fa->open_custom(data.ptr() + etl->offset, etl->size);
+		fa->open_custom(data.ptr(), data.size());
 
 		// Taken from TranslationLoaderPO, modified to work specifically with POTs.
 		{

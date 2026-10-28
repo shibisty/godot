@@ -66,15 +66,6 @@ public:
 		COMPONENT_TYPE_PERSISTENCE = XR_SPATIAL_COMPONENT_TYPE_PERSISTENCE_EXT,
 	};
 
-	enum TrackingState {
-		TRACKING_UNSUPPORTED_CAPABILITY = -3,
-		TRACKING_NO_PERMISSION = -2,
-		TRACKING_SETUP_FAILED = -1,
-		TRACKING_NOT_ACTIVE = 0,
-		TRACKING_SETTING_UP = 1,
-		TRACKING_ENABLED = 2,
-	};
-
 	static OpenXRSpatialEntityExtension *get_singleton();
 
 	OpenXRSpatialEntityExtension();
@@ -93,7 +84,7 @@ public:
 	bool supports_component_type(XrSpatialCapabilityEXT p_capability, XrSpatialComponentTypeEXT p_component_type);
 
 	// Spatial contexts
-	Ref<OpenXRFutureResult> create_spatial_context(const TypedArray<OpenXRSpatialCapabilityConfigurationBaseHeader> &p_capability_configurations, Ref<OpenXRStructureBase> p_next, const Callable &p_user_callback = Callable(), const Callable &p_failure_callback = Callable());
+	Ref<OpenXRFutureResult> create_spatial_context(const TypedArray<OpenXRSpatialCapabilityConfigurationBaseHeader> &p_capability_configurations, Ref<OpenXRStructureBase> p_next, const Callable &p_user_callback);
 	bool get_spatial_context_ready(RID p_spatial_context) const;
 	void free_spatial_context(RID p_spatial_context);
 	XrSpatialContextEXT get_spatial_context_handle(RID p_spatial_context) const;
@@ -135,10 +126,6 @@ public:
 
 protected:
 	static void _bind_methods();
-#ifndef DISABLE_DEPRECATED
-	static void _bind_compatibility_methods();
-	Ref<OpenXRFutureResult> _create_spatial_context_bind_compat_121123(const TypedArray<OpenXRSpatialCapabilityConfigurationBaseHeader> &p_capability_configurations, Ref<OpenXRStructureBase> p_next, const Callable &p_user_callback);
-#endif
 
 private:
 	static OpenXRSpatialEntityExtension *singleton;
@@ -163,7 +150,7 @@ private:
 	};
 	mutable RID_Owner<SpatialContextData> spatial_context_owner;
 
-	void _on_context_creation_ready(Ref<OpenXRFutureResult> p_future_result, const Callable &p_user_callback, const Callable &p_failure_callback);
+	void _on_context_creation_ready(Ref<OpenXRFutureResult> p_future_result, const Callable &p_user_callback);
 	uint64_t _get_spatial_context_handle(RID p_spatial_context) const;
 
 	// Spatial query
@@ -194,7 +181,7 @@ private:
 	// Entities
 	struct SpatialEntityData {
 		RID spatial_context;
-		XrSpatialEntityIdEXT entity_id = XR_NULL_SPATIAL_ENTITY_ID_EXT;
+		XrSpatialEntityIdEXT entity_id = XR_NULL_ENTITY;
 		XrSpatialEntityEXT entity = XR_NULL_HANDLE;
 	};
 	mutable RID_Owner<SpatialEntityData> spatial_entity_owner;
@@ -231,4 +218,3 @@ private:
 
 VARIANT_ENUM_CAST(OpenXRSpatialEntityExtension::Capability);
 VARIANT_ENUM_CAST(OpenXRSpatialEntityExtension::ComponentType);
-VARIANT_ENUM_CAST(OpenXRSpatialEntityExtension::TrackingState);

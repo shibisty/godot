@@ -48,26 +48,25 @@ struct [[nodiscard]] Vector4 {
 		AXIS_W,
 	};
 
-	real_t x = 0.0f;
-	real_t y = 0.0f;
-	real_t z = 0.0f;
-	real_t w = 0.0f;
+	union {
+		// NOLINTBEGIN(modernize-use-default-member-init)
+		struct {
+			real_t x;
+			real_t y;
+			real_t z;
+			real_t w;
+		};
+		real_t coord[4] = { 0, 0, 0, 0 };
+		// NOLINTEND(modernize-use-default-member-init)
+	};
 
-	constexpr real_t &operator[](int p_axis) {
-		// The pointer math below assumes that the elements are placed back-to-back, like an array.
-		// This is always true in practice, but technically not guaranteed; we safety-check it here.
-		static_assert(offsetof(Vector4, x) == 0 * sizeof(real_t));
-		static_assert(offsetof(Vector4, y) == 1 * sizeof(real_t));
-		static_assert(offsetof(Vector4, z) == 2 * sizeof(real_t));
-		static_assert(offsetof(Vector4, w) == 3 * sizeof(real_t));
-		static_assert(sizeof(Vector4) == 4 * sizeof(real_t));
-
+	_FORCE_INLINE_ real_t &operator[](int p_axis) {
 		DEV_ASSERT((unsigned int)p_axis < 4);
-		return (&x)[p_axis];
+		return coord[p_axis];
 	}
-	constexpr const real_t &operator[](int p_axis) const {
+	_FORCE_INLINE_ const real_t &operator[](int p_axis) const {
 		DEV_ASSERT((unsigned int)p_axis < 4);
-		return (&x)[p_axis];
+		return coord[p_axis];
 	}
 
 	Vector4::Axis min_axis_index() const;
@@ -158,7 +157,8 @@ struct [[nodiscard]] Vector4 {
 		return hash_fmix32(h);
 	}
 
-	constexpr Vector4() = default;
+	constexpr Vector4() :
+			x(0), y(0), z(0), w(0) {}
 	constexpr Vector4(real_t p_x, real_t p_y, real_t p_z, real_t p_w) :
 			x(p_x), y(p_y), z(p_z), w(p_w) {}
 };

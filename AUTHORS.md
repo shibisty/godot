@@ -44,7 +44,6 @@ name is available.
     Alexander Holland (AlexHolly)
     Alexander Streng (warriormaster12)
     Alexey Khoroshavin (allkhor)
-    Alfonso J. Ramos (theraot)
     Alfred Reinold Baudisch (alfredbaudisch)
     Alistair Leslie-Hughes (alesliehughes)
     Alket Rexhepi (alketii)
@@ -52,9 +51,8 @@ name is available.
     Alvin Wong (alvinhochun)
     Andrea Catania (AndreaCatania)
     Andreia Gaita (shana)
-    André Buse (winston-yallow)
-    Andrii Doroshenko (Xrayez)
     Andrés Botero (0xafbf)
+    Andrii Doroshenko (Xrayez)
     Andy Maloney (asmaloney)
     Andy Moss (MillionOstrich)
     Angad Kambli (angad-k)
@@ -64,14 +62,12 @@ name is available.
     Anni Ryynänen (anniryynanen)
     Anton Yabchinskiy (a12n)
     Anutrix
-    ArchercatNEO
     Aren Villanueva (kurikaesu)
     Ariel Manzur (punto-)
     arkology
     Arman Elgudzhyan (puchik)
     Arseny Kapoulkine (zeux)
     AThousandShips
-    Aurélien Condomines (BlooRabbit)
     aXu-AP
     Bartłomiej T. Listwon (Listwon)
     Bastiaan Olij (BastiaanOlij)
@@ -107,21 +103,17 @@ name is available.
     Danil Alexeev (dalexeev)
     dankan1890
     Darío Banini (DarioSamo)
-    DaveTheEggman
     David Cambré (Gallilus)
     David Sichma (DavidSichma)
     David Snopek (dsnopek)
     demolke
     derammo
     Dery Almas (deralmas)
-    Dexter (DexterFstone)
-    DE YU (Delsin-Yu)
     Dharkael (lupoDharkael)
     Dirk Steinmetz (rsjtdrjgfuzkfg)
     Dmitry Koteroff (Krakean)
     Dmitry Maganov (vonagam)
     Dominik Jasiński (dreamsComeTrue)
-    Dominik Jochymek (NoNormalDev)
     Douglas Leão (DeeJayLSP)
     DualMatrix
     Edward Chan (EdwardChanCH)
@@ -142,7 +134,6 @@ name is available.
     Fabrice Cipolla (fabriceci)
     Ferenc Arn (tagcup)
     FireForge (fire-forge)
-    fishnpotatoes (sockeye-d)
     Florent Guiocheau (Flarkk)
     Florian Kothmeier (Dragoncraft89)
     follower
@@ -175,9 +166,7 @@ name is available.
     Ignacio Roldán Etcheverry (neikeq)
     Igor Kordiukiewicz (IgorKordiukiewicz)
     Ilaria Cislaghi (QbieShay)
-    Ilena Pegan (ilenawho)
     Indah Sylvia (ISylvox)
-    Iñigo Allende (InigoAllende)
     Ivan Šachov (van800)
     J08nY
     Jake Young (Duroxxigar)
@@ -350,7 +339,6 @@ name is available.
     sersoong
     Shiqing (kawa-yoiko)
     Silc 'Tokage' Renew (TokageItLab)
-    Simon Döhl (TheDying0fLight)
     Simon Schoenenberger (detomon)
     Simon Wenner (swenner)
     Skyth (Asilkan) (blueskythlikesclouds)

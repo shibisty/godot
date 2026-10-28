@@ -1225,7 +1225,9 @@ bool Expression::_compile_expression() {
 
 	if (error_set) {
 		root = nullptr;
-		memdelete(nodes);
+		if (nodes) {
+			memdelete(nodes);
+		}
 		nodes = nullptr;
 		return true;
 	}
@@ -1479,7 +1481,9 @@ Error Expression::parse(const String &p_expression, const Vector<String> &p_inpu
 
 	if (error_set) {
 		root = nullptr;
-		memdelete(nodes);
+		if (nodes) {
+			memdelete(nodes);
+		}
 		nodes = nullptr;
 		return ERR_INVALID_PARAMETER;
 	}
@@ -1519,5 +1523,7 @@ void Expression::_bind_methods() {
 }
 
 Expression::~Expression() {
-	memdelete(nodes);
+	if (nodes) {
+		memdelete(nodes);
+	}
 }

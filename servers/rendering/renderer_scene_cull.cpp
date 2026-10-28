@@ -41,6 +41,7 @@
 
 #ifndef XR_DISABLED
 #include "servers/xr/xr_interface.h"
+#include "servers/xr/xr_server.h"
 #endif
 
 //#define DEBUG_CULL_TIME
@@ -93,8 +94,6 @@ void RendererSceneCull::camera_set_perspective(RID p_camera, float p_fovy_degree
 	camera->fov = p_fovy_degrees;
 	camera->znear = p_z_near;
 	camera->zfar = p_z_far;
-	camera->offsets.clear();
-	camera->projections.clear();
 }
 
 void RendererSceneCull::camera_set_orthogonal(RID p_camera, float p_size, float p_z_near, float p_z_far) {
@@ -104,8 +103,6 @@ void RendererSceneCull::camera_set_orthogonal(RID p_camera, float p_size, float 
 	camera->size = p_size;
 	camera->znear = p_z_near;
 	camera->zfar = p_z_far;
-	camera->offsets.clear();
-	camera->projections.clear();
 }
 
 void RendererSceneCull::camera_set_frustum(RID p_camera, float p_size, Vector2 p_offset, float p_z_near, float p_z_far) {
@@ -116,28 +113,6 @@ void RendererSceneCull::camera_set_frustum(RID p_camera, float p_size, Vector2 p
 	camera->offset = p_offset;
 	camera->znear = p_z_near;
 	camera->zfar = p_z_far;
-	camera->offsets.clear();
-	camera->projections.clear();
-}
-
-void RendererSceneCull::camera_set_xr_projections(RID p_camera, TypedArray<Projection> p_projections, TypedArray<Transform3D> p_offsets) {
-	ERR_FAIL_COND(p_projections.is_empty());
-	bool has_offsets = !p_offsets.is_empty();
-	ERR_FAIL_COND(has_offsets && p_offsets.size() != p_projections.size());
-
-	Camera *camera = camera_owner.get_or_null(p_camera);
-	ERR_FAIL_NULL(camera);
-	camera->type = Camera::XR;
-	camera->offsets.resize(p_projections.size());
-	camera->projections.resize(p_projections.size());
-	for (int i = 0; i < p_projections.size(); i++) {
-		if (has_offsets) {
-			camera->offsets[i] = p_offsets[i];
-		} else {
-			camera->offsets[i] = Transform3D();
-		}
-		camera->projections[i] = p_projections[i];
-	}
 }
 
 void RendererSceneCull::camera_set_transform(RID p_camera, const Transform3D &p_transform) {
@@ -181,14 +156,6 @@ void RendererSceneCull::camera_set_use_vertical_aspect(RID p_camera, bool p_enab
 bool RendererSceneCull::is_camera(RID p_camera) const {
 	return camera_owner.owns(p_camera);
 }
-
-#ifndef XR_DISABLED
-bool RendererSceneCull::is_xr_camera(RID p_camera) const {
-	Camera *camera = camera_owner.get_or_null(p_camera);
-	ERR_FAIL_NULL_V(camera, false);
-	return camera->type == Camera::XR;
-}
-#endif
 
 /* OCCLUDER API */
 
@@ -961,9 +928,10 @@ void RendererSceneCull::instance_set_layer_mask(RID p_instance, uint32_t p_mask)
 		return;
 	}
 
-	// Particles and geometries need to be unpaired.
+	// Particles always need to be unpaired. Geometry may need to be unpaired, but only if lights or decals use pairing.
 	// Needs to happen before layer mask changes so we can avoid attempting to unpair something that was never paired.
-	if (instance->base_type == RSE::INSTANCE_PARTICLES || ((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK)) {
+	if (instance->base_type == RSE::INSTANCE_PARTICLES ||
+			(((geometry_instance_pair_mask & (1 << RSE::INSTANCE_LIGHT)) || (geometry_instance_pair_mask & (1 << RSE::INSTANCE_DECAL))) && ((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK))) {
 		_unpair_instance(instance);
 		singleton->_instance_queue_update(instance, false, false);
 	}
@@ -2177,7 +2145,7 @@ void RendererSceneCull::_update_instance_lightmap_captures(Instance *p_instance)
 
 void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_index, Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect) {
 	// For later tight culling, the light culler needs to know the details of the directional light.
-	light_culler->prepare_directional_light_begin(p_instance, p_shadow_index);
+	light_culler->prepare_directional_light(p_instance, p_shadow_index);
 
 	InstanceLightData *light = static_cast<InstanceLightData *>(p_instance->base_data);
 
@@ -2244,14 +2212,11 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 			camera_matrix.set_perspective(fov, aspect, distances[(i == 0 || !overlap) ? i : i - 1], distances[i + 1], true);
 		}
 
-		Vector<Plane> receiver_frustum_planes = camera_matrix.get_projection_planes(p_cam_transform);
-
 		//obtain the frustum endpoints
+
 		Vector3 endpoints[8]; // frustum plane endpoints
 		bool res = camera_matrix.get_endpoints(p_cam_transform, endpoints);
 		ERR_CONTINUE(!res);
-
-		light_culler->prepare_directional_light_cascade(p_shadow_index, i, receiver_frustum_planes, endpoints);
 
 		// obtain the light frustum ranges (given endpoints)
 
@@ -2459,8 +2424,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 
 					for (int j = 0; j < (int)instance_shadow_cull_result.size(); j++) {
 						Instance *instance = instance_shadow_cull_result[j];
-						const bool is_inactive_particle = (instance->base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(instance->base);
-						if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base)) || is_inactive_particle) {
+						if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base))) {
 							continue;
 						} else {
 							if (static_cast<InstanceGeometryData *>(instance->base_data)->material_is_animated) {
@@ -2543,8 +2507,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 
 					for (int j = 0; j < (int)instance_shadow_cull_result.size(); j++) {
 						Instance *instance = instance_shadow_cull_result[j];
-						const bool is_inactive_particle = (instance->base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(instance->base);
-						if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base)) || is_inactive_particle) {
+						if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base))) {
 							continue;
 						} else {
 							if (static_cast<InstanceGeometryData *>(instance->base_data)->material_is_animated) {
@@ -2612,8 +2575,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 
 			for (int j = 0; j < (int)instance_shadow_cull_result.size(); j++) {
 				Instance *instance = instance_shadow_cull_result[j];
-				const bool is_inactive_particle = (instance->base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(instance->base);
-				if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base)) || is_inactive_particle) {
+				if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base))) {
 					continue;
 				} else {
 					if (static_cast<InstanceGeometryData *>(instance->base_data)->material_is_animated) {
@@ -2679,8 +2641,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 
 			for (int j = 0; j < (int)instance_shadow_cull_result.size(); j++) {
 				Instance *instance = instance_shadow_cull_result[j];
-				const bool is_inactive_particle = (instance->base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(instance->base);
-				if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base)) || is_inactive_particle) {
+				if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base))) {
 					continue;
 				} else {
 					if (static_cast<InstanceGeometryData *>(instance->base_data)->material_is_animated) {
@@ -2706,7 +2667,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 	return animated_material_found;
 }
 
-void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_camera, RID p_scenario, RID p_viewport, Size2 p_viewport_size, uint32_t p_jitter_phase_count, float p_screen_mesh_lod_threshold, RID p_shadow_atlas, float p_window_output_max_value, RenderingServerTypes::RenderInfo *r_render_info) {
+void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_camera, RID p_scenario, RID p_viewport, Size2 p_viewport_size, uint32_t p_jitter_phase_count, float p_screen_mesh_lod_threshold, RID p_shadow_atlas, Ref<XRInterface> &p_xr_interface, float p_window_output_max_value, RenderingServerTypes::RenderInfo *r_render_info) {
 #ifndef _3D_DISABLED
 
 	Camera *camera = camera_owner.get_or_null(p_camera);
@@ -2733,77 +2694,89 @@ void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_bu
 	RendererSceneRender::CameraData camera_data;
 
 	// Setup Camera(s)
-	// Normal camera
-	Transform3D transform = camera->transform;
-	bool vaspect = camera->vaspect;
-	bool is_orthogonal = false;
+	if (p_xr_interface.is_null()) {
+		// Normal camera
+		Transform3D transform = camera->transform;
+		Projection projection;
+		bool vaspect = camera->vaspect;
+		bool is_orthogonal = false;
 
-	switch (camera->type) {
-		case Camera::ORTHOGONAL: {
-			Projection projection;
-			projection.set_orthogonal(
-					camera->size,
-					p_viewport_size.width / (float)p_viewport_size.height,
-					camera->znear,
-					camera->zfar,
-					camera->vaspect);
-			is_orthogonal = true;
+		switch (camera->type) {
+			case Camera::ORTHOGONAL: {
+				projection.set_orthogonal(
+						camera->size,
+						p_viewport_size.width / (float)p_viewport_size.height,
+						camera->znear,
+						camera->zfar,
+						camera->vaspect);
+				is_orthogonal = true;
+			} break;
+			case Camera::PERSPECTIVE: {
+				projection.set_perspective(
+						camera->fov,
+						p_viewport_size.width / (float)p_viewport_size.height,
+						camera->znear,
+						camera->zfar,
+						camera->vaspect);
 
-			camera->offsets.resize(1);
-			camera->offsets[0] = Transform3D();
-			camera->projections.resize(1);
-			camera->projections[0] = projection;
-		} break;
-		case Camera::PERSPECTIVE: {
-			Projection projection;
-			projection.set_perspective(
-					camera->fov,
-					p_viewport_size.width / (float)p_viewport_size.height,
-					camera->znear,
-					camera->zfar,
-					camera->vaspect);
+			} break;
+			case Camera::FRUSTUM: {
+				projection.set_frustum(
+						camera->size,
+						p_viewport_size.width / (float)p_viewport_size.height,
+						camera->offset,
+						camera->znear,
+						camera->zfar,
+						camera->vaspect);
+			} break;
+		}
 
-			camera->offsets.resize(1);
-			camera->offsets[0] = Transform3D();
-			camera->projections.resize(1);
-			camera->projections[0] = projection;
-		} break;
-		case Camera::FRUSTUM: {
-			Projection projection;
-			projection.set_frustum(
-					camera->size,
-					p_viewport_size.width / (float)p_viewport_size.height,
-					camera->offset,
-					camera->znear,
-					camera->zfar,
-					camera->vaspect);
-
-			camera->offsets.resize(1);
-			camera->offsets[0] = Transform3D();
-			camera->projections.resize(1);
-			camera->projections[0] = projection;
-		} break;
-		case Camera::XR:
-			break;
-	}
-
-	for (const Projection &projection : camera->projections) {
-		is_orthogonal |= projection.is_orthogonal();
-	}
-
-	if (camera->projections.size() == 1) {
-		camera_data.set_camera(transform * camera->offsets[0], camera->projections[0], is_orthogonal, vaspect, jitter, taa_frame_count, camera->visible_layers);
-	} else if (camera->projections.size() == 2) {
-		camera_data.set_multiview_camera(transform, camera->offsets, camera->projections, is_orthogonal, vaspect, camera->visible_layers);
+		camera_data.set_camera(transform, projection, is_orthogonal, vaspect, jitter, taa_frame_count, camera->visible_layers);
+#ifndef XR_DISABLED
 	} else {
-		ERR_FAIL_MSG("Unsupported camera setup.");
+		XRServer *xr_server = XRServer::get_singleton();
+
+		// Setup our camera for our XR interface.
+		// We can support multiple views here each with their own camera
+		Transform3D transforms[RendererSceneRender::MAX_RENDER_VIEWS];
+		Projection projections[RendererSceneRender::MAX_RENDER_VIEWS];
+
+		uint32_t view_count = p_xr_interface->get_view_count();
+		ERR_FAIL_COND_MSG(view_count == 0 || view_count > RendererSceneRender::MAX_RENDER_VIEWS, "Requested view count is not supported");
+
+		float aspect = p_viewport_size.width / (float)p_viewport_size.height;
+
+		Transform3D world_origin = xr_server->get_world_origin();
+
+		// We ignore our camera position, it will have been positioned with a slightly old tracking position.
+		// Instead we take our origin point and have our XR interface add fresh tracking data! Whoohoo!
+		for (uint32_t v = 0; v < view_count; v++) {
+			transforms[v] = p_xr_interface->get_transform_for_view(v, world_origin);
+			projections[v] = p_xr_interface->get_projection_for_view(v, aspect, camera->znear, camera->zfar);
+		}
+
+		// If requested, we move the views to be rendered as if the HMD is at the XROrigin.
+		if (unlikely(xr_server->is_camera_locked_to_origin())) {
+			Transform3D camera_reset = p_xr_interface->get_camera_transform().affine_inverse() * xr_server->get_reference_frame().affine_inverse();
+			for (uint32_t v = 0; v < view_count; v++) {
+				transforms[v] *= camera_reset;
+			}
+		}
+
+		if (view_count == 1) {
+			camera_data.set_camera(transforms[0], projections[0], false, camera->vaspect, jitter, p_jitter_phase_count, camera->visible_layers);
+		} else if (view_count == 2) {
+			camera_data.set_multiview_camera(view_count, transforms, projections, false, camera->vaspect, camera->visible_layers);
+		} else {
+			// this won't be called (see fail check above) but keeping this comment to indicate we may support more then 2 views in the future...
+		}
+#endif // XR_DISABLED
 	}
 
 	RID environment = _render_get_environment(p_camera, p_scenario);
 	RID compositor = _render_get_compositor(p_camera, p_scenario);
 
 	RENDER_TIMESTAMP("Update Occlusion Buffer")
-
 	// For now just cull on the first camera
 	RendererSceneOcclusionCull::get_singleton()->buffer_update(p_viewport, camera_data.main_transform, camera_data.main_projection, camera_data.is_orthogonal);
 
@@ -2940,6 +2913,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 
 	for (uint64_t i = p_from; i < p_to; i++) {
 		bool mesh_visible = false;
+		bool in_frustum = false;
 
 		InstanceData &idata = cull_data.scenario->instance_data[i];
 		uint32_t visibility_flags = idata.flags & (InstanceData::FLAG_VISIBILITY_DEPENDENCY_HIDDEN_CLOSE_RANGE | InstanceData::FLAG_VISIBILITY_DEPENDENCY_HIDDEN | InstanceData::FLAG_VISIBILITY_DEPENDENCY_FADE_CHILDREN);
@@ -2955,6 +2929,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 
 		if (!HIDDEN_BY_VISIBILITY_CHECKS) {
 			if ((LAYER_CHECK && IN_FRUSTUM(cull_data.cull->frustum) && VIS_CHECK && !OCCLUSION_CULLED) || (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_ALL_CULLING)) {
+				in_frustum = true;
 				uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
 				if (base_type == RSE::INSTANCE_LIGHT) {
 					cull_result.lights.push_back(idata.instance);
@@ -3272,11 +3247,29 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 					if (IN_FRUSTUM(cull_data.cull->shadows[j].cascades[k].frustum) && VIS_CHECK) {
 						uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
 
-						const bool is_inactive_particle = (base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(idata.base_rid);
-						if (((1 << base_type) & RSE::INSTANCE_GEOMETRY_MASK) && idata.flags & InstanceData::FLAG_CAST_SHADOWS && (LAYER_CHECK & cull_data.cull->shadows[j].caster_mask) && !is_inactive_particle) {
+						if (((1 << base_type) & RSE::INSTANCE_GEOMETRY_MASK) && idata.flags & InstanceData::FLAG_CAST_SHADOWS && (LAYER_CHECK & cull_data.cull->shadows[j].caster_mask)) {
 							cull_result.directional_shadows[j].cascade_geometry_instances[k].push_back(idata.instance_geometry);
 							mesh_visible = true;
 						}
+					}
+				}
+			}
+
+			// Raytracing scene (TLAS): every mesh / multimesh within the raytracing range around the camera, also
+			// outside the view frustum (reflections, shadows of off-screen objects). Frustum-visible instances are
+			// inside the range by construction. Shadow-only instances and layers outside the viewport's raytracing
+			// cull mask are skipped; visibility ranges are respected like for drawing.
+			if (cull_data.cull->rt_enabled && (idata.layer_mask & cull_data.cull->rt_cull_mask)) {
+				uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
+				if ((base_type == RSE::INSTANCE_MESH || base_type == RSE::INSTANCE_MULTIMESH) && !(idata.flags & InstanceData::FLAG_CAST_SHADOWS_ONLY)) {
+					bool rt_in_range = in_frustum || (cull_data.scenario->instance_aabbs[i].in_aabb(cull_data.cull->rt_aabb) && VIS_CHECK);
+					// When a visibility parent is still cross-fading its children, keep only the parent (a ray hits one LOD).
+					if (rt_in_range && idata.parent_array_index >= 0 && (cull_data.scenario->instance_data[idata.parent_array_index].flags & InstanceData::FLAG_VISIBILITY_DEPENDENCY_FADE_CHILDREN)) {
+						rt_in_range = false;
+					}
+					if (rt_in_range) {
+						cull_result.rt_geometry_instances.push_back(idata.instance_geometry);
+						mesh_visible = true; // Skinned / blend shape meshes must be deformed for the TLAS too.
 					}
 				}
 			}
@@ -3379,6 +3372,19 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 
 	Vector<Plane> planes = p_camera_data->main_projection.get_projection_planes(p_camera_data->main_transform);
 	cull.frustum = Frustum(planes);
+
+	// Raytracing scene: wider (camera-centered box) cull volume for the TLAS, only for viewports that request it.
+	cull.rt_enabled = false;
+	if (p_reflection_probe.is_null() && p_viewport.is_valid() && scene_render->raytracing_scene_is_supported()) {
+		uint32_t rt_cull_mask = 0;
+		float rt_distance = 0.0;
+		if (RSG::viewport->viewport_get_raytracing_scene(p_viewport, rt_cull_mask, rt_distance) && rt_cull_mask != 0) {
+			cull.rt_enabled = true;
+			cull.rt_cull_mask = rt_cull_mask;
+			real_t extent = rt_distance > 0.0 ? real_t(rt_distance) : p_camera_data->main_projection.get_z_far();
+			cull.rt_aabb = AABB(camera_position - Vector3(extent, extent, extent), Vector3(extent, extent, extent) * 2.0);
+		}
+	}
 
 	Vector<RID> directional_lights;
 	// directional lights
@@ -3731,7 +3737,9 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	}
 
 	RENDER_TIMESTAMP("Render 3D Scene");
+	scene_render->raytracing_instances = cull.rt_enabled ? &scene_cull_result.rt_geometry_instances : nullptr;
 	scene_render->render_scene(p_render_buffers, p_camera_data, prev_camera_data, scene_cull_result.geometry_instances, scene_cull_result.light_instances, scene_cull_result.reflections, scene_cull_result.voxel_gi_instances, scene_cull_result.decals, scene_cull_result.lightmaps, scene_cull_result.fog_volumes, p_environment, camera_attributes, p_compositor, p_shadow_atlas, occluders_tex, p_reflection_probe.is_valid() ? RID() : scenario->reflection_atlas, p_reflection_probe, p_reflection_probe_pass, p_screen_mesh_lod_threshold, render_shadow_data, max_shadows_used, render_sdfgi_data, cull.sdfgi.region_count, p_window_output_max_value, &sdfgi_update_data, r_render_info);
+	scene_render->raytracing_instances = nullptr;
 
 	if (p_viewport.is_valid()) {
 		RSG::viewport->viewport_set_prev_camera_data(p_viewport, p_camera_data);
@@ -4571,7 +4579,9 @@ RendererSceneCull::~RendererSceneCull() {
 	}
 	scene_cull_result_threads.clear();
 
-	memdelete(dummy_occlusion_culling);
+	if (dummy_occlusion_culling) {
+		memdelete(dummy_occlusion_culling);
+	}
 
 	if (light_culler) {
 		memdelete(light_culler);

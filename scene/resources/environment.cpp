@@ -1102,6 +1102,86 @@ void Environment::_update_adjustment() {
 			color_correction);
 }
 
+// Path tracing (Mariner E5c)
+
+void Environment::set_pathtracing_enabled(bool p_enabled) {
+	pathtracing_enabled = p_enabled;
+	_update_pathtracing();
+}
+
+bool Environment::is_pathtracing_enabled() const {
+	return pathtracing_enabled;
+}
+
+void Environment::set_pathtracing_debug_mode(PathtracingDebugMode p_mode) {
+	ERR_FAIL_INDEX(int(p_mode), int(RT_DEBUG_MAX));
+	pathtracing_debug_mode = p_mode;
+	_update_pathtracing();
+}
+
+Environment::PathtracingDebugMode Environment::get_pathtracing_debug_mode() const {
+	return pathtracing_debug_mode;
+}
+
+void Environment::set_pathtracing_samples_per_pixel(int p_samples) {
+	pathtracing_samples_per_pixel = CLAMP(p_samples, 1, 64);
+	_update_pathtracing();
+}
+
+int Environment::get_pathtracing_samples_per_pixel() const {
+	return pathtracing_samples_per_pixel;
+}
+
+void Environment::set_pathtracing_max_bounces(int p_bounces) {
+	pathtracing_max_bounces = CLAMP(p_bounces, 1, 8);
+	_update_pathtracing();
+}
+
+int Environment::get_pathtracing_max_bounces() const {
+	return pathtracing_max_bounces;
+}
+
+void Environment::set_pathtracing_denoiser(RSE::PathtracingDenoiser p_denoiser) {
+	pathtracing_denoiser = p_denoiser;
+	_update_pathtracing();
+}
+
+RSE::PathtracingDenoiser Environment::get_pathtracing_denoiser() const {
+	return pathtracing_denoiser;
+}
+
+void Environment::set_pathtracing_accumulate(bool p_accumulate) {
+	pathtracing_accumulate = p_accumulate;
+	_update_pathtracing();
+}
+
+bool Environment::is_pathtracing_accumulate() const {
+	return pathtracing_accumulate;
+}
+
+void Environment::set_pathtracing_max_samples(int p_samples) {
+	pathtracing_max_samples = MAX(p_samples, 0);
+	_update_pathtracing();
+}
+
+int Environment::get_pathtracing_max_samples() const {
+	return pathtracing_max_samples;
+}
+
+void Environment::set_pathtracing_firefly_clamp(float p_clamp) {
+	pathtracing_firefly_clamp = MAX(p_clamp, 0.0f);
+	_update_pathtracing();
+}
+
+float Environment::get_pathtracing_firefly_clamp() const {
+	return pathtracing_firefly_clamp;
+}
+
+void Environment::_update_pathtracing() {
+	RS::get_singleton()->environment_set_pathtracing(environment, pathtracing_enabled, int(pathtracing_debug_mode), pathtracing_samples_per_pixel, pathtracing_max_bounces, pathtracing_denoiser);
+	RS::get_singleton()->environment_set_pathtracing_accumulation(environment, pathtracing_accumulate, pathtracing_max_samples, pathtracing_firefly_clamp);
+}
+
 // Private methods, constructor and destructor
 
 void Environment::_validate_property(PropertyInfo &p_property) const {
@@ -1595,6 +1675,35 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "adjustment_saturation", PROPERTY_HINT_RANGE, "0.0,2.0,0.01,or_less,or_greater"), "set_adjustment_saturation", "get_adjustment_saturation");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "adjustment_color_correction", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D,Texture3D"), "set_adjustment_color_correction", "get_adjustment_color_correction");
 
+	// Path tracing (Mariner E5c)
+
+	ClassDB::bind_method(D_METHOD("set_pathtracing_enabled", "enabled"), &Environment::set_pathtracing_enabled);
+	ClassDB::bind_method(D_METHOD("is_pathtracing_enabled"), &Environment::is_pathtracing_enabled);
+	ClassDB::bind_method(D_METHOD("set_pathtracing_debug_mode", "mode"), &Environment::set_pathtracing_debug_mode);
+	ClassDB::bind_method(D_METHOD("get_pathtracing_debug_mode"), &Environment::get_pathtracing_debug_mode);
+	ClassDB::bind_method(D_METHOD("set_pathtracing_samples_per_pixel", "samples"), &Environment::set_pathtracing_samples_per_pixel);
+	ClassDB::bind_method(D_METHOD("get_pathtracing_samples_per_pixel"), &Environment::get_pathtracing_samples_per_pixel);
+	ClassDB::bind_method(D_METHOD("set_pathtracing_max_bounces", "bounces"), &Environment::set_pathtracing_max_bounces);
+	ClassDB::bind_method(D_METHOD("get_pathtracing_max_bounces"), &Environment::get_pathtracing_max_bounces);
+	ClassDB::bind_method(D_METHOD("set_pathtracing_denoiser", "denoiser"), &Environment::set_pathtracing_denoiser);
+	ClassDB::bind_method(D_METHOD("get_pathtracing_denoiser"), &Environment::get_pathtracing_denoiser);
+	ClassDB::bind_method(D_METHOD("set_pathtracing_accumulate", "accumulate"), &Environment::set_pathtracing_accumulate);
+	ClassDB::bind_method(D_METHOD("is_pathtracing_accumulate"), &Environment::is_pathtracing_accumulate);
+	ClassDB::bind_method(D_METHOD("set_pathtracing_max_samples", "samples"), &Environment::set_pathtracing_max_samples);
+	ClassDB::bind_method(D_METHOD("get_pathtracing_max_samples"), &Environment::get_pathtracing_max_samples);
+	ClassDB::bind_method(D_METHOD("set_pathtracing_firefly_clamp", "clamp"), &Environment::set_pathtracing_firefly_clamp);
+	ClassDB::bind_method(D_METHOD("get_pathtracing_firefly_clamp"), &Environment::get_pathtracing_firefly_clamp);
+
+	ADD_GROUP("Pathtracing", "pathtracing_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "pathtracing_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_pathtracing_enabled", "is_pathtracing_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "pathtracing_debug_mode", PROPERTY_HINT_ENUM, "Disabled,Mirror Reflection,Geometry Normals,Final Normals,Normal Map,Tangent,Bitangent,UV,Albedo,ORM,Diffuse Albedo,Specular Albedo,Normal+Roughness,Specular Hit Dist,Metalness,Roughness,View Normals,Diffuse+Specular,Fresnel F0,Front/Back Face,Depth,Emissive,BRDF Rejection"), "set_pathtracing_debug_mode", "get_pathtracing_debug_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "pathtracing_samples_per_pixel", PROPERTY_HINT_RANGE, "1,64,1"), "set_pathtracing_samples_per_pixel", "get_pathtracing_samples_per_pixel");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "pathtracing_max_bounces", PROPERTY_HINT_RANGE, "1,8,1"), "set_pathtracing_max_bounces", "get_pathtracing_max_bounces");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "pathtracing_denoiser", PROPERTY_HINT_ENUM, "None,DLSS Ray Reconstruction"), "set_pathtracing_denoiser", "get_pathtracing_denoiser");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "pathtracing_accumulate"), "set_pathtracing_accumulate", "is_pathtracing_accumulate");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "pathtracing_max_samples", PROPERTY_HINT_RANGE, "0,65536,1,or_greater"), "set_pathtracing_max_samples", "get_pathtracing_max_samples");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "pathtracing_firefly_clamp", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater"), "set_pathtracing_firefly_clamp", "get_pathtracing_firefly_clamp");
+
 	// Constants
 
 	BIND_ENUM_CONSTANT(BG_CLEAR_COLOR);
@@ -1632,6 +1741,30 @@ void Environment::_bind_methods() {
 	BIND_ENUM_CONSTANT(SDFGI_Y_SCALE_50_PERCENT);
 	BIND_ENUM_CONSTANT(SDFGI_Y_SCALE_75_PERCENT);
 	BIND_ENUM_CONSTANT(SDFGI_Y_SCALE_100_PERCENT);
+
+	BIND_ENUM_CONSTANT(RT_DEBUG_DISABLED);
+	BIND_ENUM_CONSTANT(RT_DEBUG_MIRROR_REFLECTION);
+	BIND_ENUM_CONSTANT(RT_DEBUG_GEOMETRY_NORMALS);
+	BIND_ENUM_CONSTANT(RT_DEBUG_FINAL_NORMALS);
+	BIND_ENUM_CONSTANT(RT_DEBUG_NORMAL_MAP);
+	BIND_ENUM_CONSTANT(RT_DEBUG_TANGENT);
+	BIND_ENUM_CONSTANT(RT_DEBUG_BITANGENT);
+	BIND_ENUM_CONSTANT(RT_DEBUG_UV);
+	BIND_ENUM_CONSTANT(RT_DEBUG_ALBEDO);
+	BIND_ENUM_CONSTANT(RT_DEBUG_ORM);
+	BIND_ENUM_CONSTANT(RT_DEBUG_DIFFUSE_ALBEDO);
+	BIND_ENUM_CONSTANT(RT_DEBUG_SPECULAR_ALBEDO);
+	BIND_ENUM_CONSTANT(RT_DEBUG_NORMAL_ROUGHNESS);
+	BIND_ENUM_CONSTANT(RT_DEBUG_SPECULAR_HIT_DISTANCE);
+	BIND_ENUM_CONSTANT(RT_DEBUG_METALNESS);
+	BIND_ENUM_CONSTANT(RT_DEBUG_ROUGHNESS);
+	BIND_ENUM_CONSTANT(RT_DEBUG_VIEW_NORMALS);
+	BIND_ENUM_CONSTANT(RT_DEBUG_DIFFUSE_SPECULAR_SPLIT);
+	BIND_ENUM_CONSTANT(RT_DEBUG_FRESNEL_F0);
+	BIND_ENUM_CONSTANT(RT_DEBUG_FRONT_BACK_FACE);
+	BIND_ENUM_CONSTANT(RT_DEBUG_DEPTH);
+	BIND_ENUM_CONSTANT(RT_DEBUG_EMISSIVE);
+	BIND_ENUM_CONSTANT(RT_DEBUG_BRDF_REJECTION);
 }
 
 Environment::Environment() {
@@ -1657,6 +1790,7 @@ Environment::Environment() {
 	_update_glow();
 	_update_fog();
 	_update_adjustment();
+	_update_pathtracing();
 	_update_volumetric_fog();
 	_update_bg_energy();
 	notify_property_list_changed();

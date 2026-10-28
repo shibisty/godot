@@ -40,8 +40,8 @@ StringEnumeration::clone() const {
   return nullptr;
 }
 
-const char*
-StringEnumeration::next(int32_t* resultLength, UErrorCode& status) U_LIFETIME_BOUND {
+const char *
+StringEnumeration::next(int32_t *resultLength, UErrorCode &status) {
     const UnicodeString *s=snext(status);
     if(U_SUCCESS(status) && s!=nullptr) {
         unistr=*s;
@@ -58,8 +58,8 @@ StringEnumeration::next(int32_t* resultLength, UErrorCode& status) U_LIFETIME_BO
     return nullptr;
 }
 
-const char16_t*
-StringEnumeration::unext(int32_t* resultLength, UErrorCode& status) U_LIFETIME_BOUND {
+const char16_t *
+StringEnumeration::unext(int32_t *resultLength, UErrorCode &status) {
     const UnicodeString *s=snext(status);
     if(U_SUCCESS(status) && s!=nullptr) {
         unistr=*s;
@@ -72,8 +72,8 @@ StringEnumeration::unext(int32_t* resultLength, UErrorCode& status) U_LIFETIME_B
     return nullptr;
 }
 
-const UnicodeString*
-StringEnumeration::snext(UErrorCode& status) U_LIFETIME_BOUND {
+const UnicodeString *
+StringEnumeration::snext(UErrorCode &status) {
     int32_t length;
     const char *s=next(&length, status);
     return setChars(s, length, status);
@@ -100,8 +100,8 @@ StringEnumeration::ensureCharsCapacity(int32_t capacity, UErrorCode &status) {
     }
 }
 
-UnicodeString*
-StringEnumeration::setChars(const char* s, int32_t length, UErrorCode& status) U_LIFETIME_BOUND {
+UnicodeString *
+StringEnumeration::setChars(const char *s, int32_t length, UErrorCode &status) {
     if(U_SUCCESS(status) && s!=nullptr) {
         if(length<0) {
             length = static_cast<int32_t>(uprv_strlen(s));
@@ -161,11 +161,11 @@ int32_t UStringEnumeration::count(UErrorCode& status) const {
     return uenum_count(uenum, &status);
 }
 
-const char* UStringEnumeration::next(int32_t* resultLength, UErrorCode& status) U_LIFETIME_BOUND {
+const char *UStringEnumeration::next(int32_t *resultLength, UErrorCode &status) {
     return uenum_next(uenum, resultLength, &status);
 }
 
-const UnicodeString* UStringEnumeration::snext(UErrorCode& status) U_LIFETIME_BOUND {
+const UnicodeString* UStringEnumeration::snext(UErrorCode& status) {
     int32_t length;
     const char16_t* str = uenum_unext(uenum, &length, &status);
     if (str == nullptr || U_FAILURE(status)) {
@@ -210,7 +210,7 @@ ustrenum_count(UEnumeration* en,
  * Wrapper API to make StringEnumeration look like UEnumeration.
  */
 static const char16_t* U_CALLCONV
-ustrenum_unext(UEnumeration* en U_LIFETIME_BOUND,
+ustrenum_unext(UEnumeration* en,
                int32_t* resultLength,
                UErrorCode* ec)
 {
@@ -221,7 +221,7 @@ ustrenum_unext(UEnumeration* en U_LIFETIME_BOUND,
  * Wrapper API to make StringEnumeration look like UEnumeration.
  */
 static const char* U_CALLCONV
-ustrenum_next(UEnumeration* en U_LIFETIME_BOUND,
+ustrenum_next(UEnumeration* en,
               int32_t* resultLength,
               UErrorCode* ec)
 {
@@ -298,7 +298,7 @@ ucharstrenum_count(UEnumeration* en,
 }
 
 static const char16_t* U_CALLCONV
-ucharstrenum_unext(UEnumeration* en U_LIFETIME_BOUND,
+ucharstrenum_unext(UEnumeration* en,
                   int32_t* resultLength,
                   UErrorCode* /*ec*/) {
     UCharStringEnumeration *e = (UCharStringEnumeration*) en;
@@ -314,7 +314,7 @@ ucharstrenum_unext(UEnumeration* en U_LIFETIME_BOUND,
 
 
 static const char* U_CALLCONV
-ucharstrenum_next(UEnumeration* en U_LIFETIME_BOUND,
+ucharstrenum_next(UEnumeration* en,
                   int32_t* resultLength,
                   UErrorCode* /*ec*/) {
     UCharStringEnumeration *e = (UCharStringEnumeration*) en;
@@ -357,8 +357,7 @@ static const UEnumeration UCHARSTRENUM_U_VT = {
 U_CDECL_END
 
 U_CAPI UEnumeration* U_EXPORT2
-uenum_openCharStringsEnumeration(U_LIFETIME_BOUND const char* const strings[],
-                                 int32_t count,
+uenum_openCharStringsEnumeration(const char* const strings[], int32_t count,
                                  UErrorCode* ec) {
     UCharStringEnumeration* result = nullptr;
     if (U_SUCCESS(*ec) && count >= 0 && (count == 0 || strings != nullptr)) {
@@ -377,9 +376,8 @@ uenum_openCharStringsEnumeration(U_LIFETIME_BOUND const char* const strings[],
 }
 
 U_CAPI UEnumeration* U_EXPORT2
-uenum_openUCharStringsEnumeration(U_LIFETIME_BOUND const char16_t* const strings[],
-                                  int32_t count,
-                                  UErrorCode* ec) {
+uenum_openUCharStringsEnumeration(const char16_t* const strings[], int32_t count,
+                                 UErrorCode* ec) {
     UCharStringEnumeration* result = nullptr;
     if (U_SUCCESS(*ec) && count >= 0 && (count == 0 || strings != nullptr)) {
         result = (UCharStringEnumeration*) uprv_malloc(sizeof(UCharStringEnumeration));

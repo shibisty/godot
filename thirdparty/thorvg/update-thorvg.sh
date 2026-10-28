@@ -1,6 +1,6 @@
 #!/bin/bash -e
 
-VERSION=1.1.3
+VERSION=1.0.3
 # Uncomment and set a git hash to use specific commit instead of tag.
 #GIT_COMMIT=
 
@@ -40,7 +40,7 @@ cat << EOF > ../inc/config.h
 #ifndef THORVG_CONFIG_H
 #define THORVG_CONFIG_H
 
-#define THORVG_CPU_ENGINE_SUPPORT
+#define THORVG_SW_RASTER_SUPPORT
 #define THORVG_SVG_LOADER_SUPPORT
 #define THORVG_PNG_LOADER_SUPPORT
 #ifndef WEB_ENABLED
@@ -62,8 +62,9 @@ mkdir ../src
 cp -rv src/common ../src
 cp -rv src/renderer ../src/
 
-# Only cpu_engine is enabled.
-rm -rfv ../src/renderer/gpu_engine
+# Only sw_engine is enabled.
+rm -rfv ../src/renderer/gl_engine
+rm -rfv ../src/renderer/wg_engine
 
 # Enabled embedded loaders: raw, JPEG, PNG, WebP.
 mkdir ../src/loaders

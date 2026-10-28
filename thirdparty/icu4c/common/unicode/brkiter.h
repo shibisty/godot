@@ -152,7 +152,7 @@ public:
      * Return a CharacterIterator over the text being analyzed.
      * @stable ICU 2.0
      */
-    U_COMMON_API virtual CharacterIterator& getText() const U_LIFETIME_BOUND = 0;
+    U_COMMON_API virtual CharacterIterator& getText() const = 0;
 
     /**
       *  Get a UText for the text being analyzed.
@@ -168,7 +168,7 @@ public:
       *           UText was provided, it will always be returned.
       * @stable ICU 3.4
       */
-    U_COMMON_API virtual UText* getUText(UText* fillIn U_LIFETIME_BOUND, UErrorCode& status) const = 0;
+    U_COMMON_API virtual UText* getUText(UText* fillIn, UErrorCode& status) const = 0;
 
     /**
      * Change the text over which this operates. The text boundary is
@@ -483,10 +483,9 @@ public:
      * @return user-displayable name
      * @stable ICU 2.0
      */
-    U_COMMON_API static UnicodeString& U_EXPORT2
-    getDisplayName(const Locale& objectLocale,
-                   const Locale& displayLocale,
-                   UnicodeString& name U_LIFETIME_BOUND);
+    U_COMMON_API static UnicodeString& U_EXPORT2 getDisplayName(const Locale& objectLocale,
+                                                                const Locale& displayLocale,
+                                                                UnicodeString& name);
 
     /**
      * Get name of the object for the desired Locale, in the language of the
@@ -496,9 +495,8 @@ public:
      * @return user-displayable name
      * @stable ICU 2.0
      */
-    U_COMMON_API static UnicodeString& U_EXPORT2
-    getDisplayName(const Locale& objectLocale,
-                   UnicodeString& name U_LIFETIME_BOUND);
+    U_COMMON_API static UnicodeString& U_EXPORT2 getDisplayName(const Locale& objectLocale,
+                                                                UnicodeString& name);
 
 #ifndef U_FORCE_HIDE_DEPRECATED_API
     /**
@@ -595,8 +593,7 @@ public:
      *  @return the locale
      *  @internal
      */
-    U_COMMON_API const char* getLocaleID(ULocDataLocaleType type,
-                                         UErrorCode& status) const U_LIFETIME_BOUND;
+    U_COMMON_API const char* getLocaleID(ULocDataLocaleType type, UErrorCode& status) const;
 #endif  /* U_HIDE_INTERNAL_API */
 
     /**
@@ -624,8 +621,7 @@ public:
      *
      * @stable ICU 49
      */
-    U_COMMON_API virtual BreakIterator& refreshInputText(UText* input,
-                                                         UErrorCode& status) U_LIFETIME_BOUND = 0;
+    U_COMMON_API virtual BreakIterator& refreshInputText(UText* input, UErrorCode& status) = 0;
 
  private:
     static BreakIterator* buildInstance(const Locale& loc, const char *type, UErrorCode& status);
@@ -646,7 +642,7 @@ protected:
     /** @internal */
     U_COMMON_API BreakIterator(const Locale& valid, const Locale& actual);
     /** @internal. Assignment Operator, used by RuleBasedBreakIterator. */
-    U_COMMON_API BreakIterator& operator=(const BreakIterator& other) U_LIFETIME_BOUND;
+    U_COMMON_API BreakIterator& operator=(const BreakIterator& other);
 #endif  /* U_HIDE_INTERNAL_API */
 
 private:

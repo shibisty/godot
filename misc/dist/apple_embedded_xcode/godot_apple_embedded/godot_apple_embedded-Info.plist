@@ -61,8 +61,7 @@
 	<key>CADisableMinimumFrameDurationOnPhone</key><true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
-		$application_scene_manifest_default_session_role
-		<key>UIApplicationSupportsMultipleScenes</key>$application_supports_multiple_scenes
+		<key>UIApplicationSupportsMultipleScenes</key><false/>
 		<key>UISceneConfigurations</key>
 		<dict>
 			<key>UIWindowSceneSessionRoleApplication</key>
@@ -72,10 +71,7 @@
 					<string>Default Configuration</string>
 				</dict>
 			</array>
-			$application_scene_manifest_immersive_configuration
 		</dict>
 	</dict>
-    $hand_tracking_usage_description
-    $accessory_tracking_usage_description
 </dict>
 </plist>

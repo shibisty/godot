@@ -53,7 +53,9 @@ void uninitialize_raycast_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 
-	memdelete(raycast_occlusion_cull);
+	if (raycast_occlusion_cull) {
+		memdelete(raycast_occlusion_cull);
+	}
 #ifdef TOOLS_ENABLED
 	StaticRaycasterEmbree::free();
 #endif

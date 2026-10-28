@@ -27,12 +27,20 @@
 #include "tvgRender.h"
 #include "tvgMath.h"
 
+
 #define PAINT(A) ((Paint::Impl*)A->pImpl)
 
 namespace tvg
 {
 enum ContextFlag : uint8_t {Default = 0, FastTrack = 1};
-struct AccessorIterator;
+
+struct Iterator
+{
+    virtual ~Iterator() {}
+    virtual const Paint* next() = 0;
+    virtual uint32_t count() = 0;
+    virtual void begin() = 0;
+};
 
 struct Mask
 {
@@ -105,16 +113,9 @@ struct Paint::Impl
         return ++refCnt;
     }
 
-    void attachTo(Paint* parent)
-    {
-        this->parent = parent;
-        if (clipper) PAINT(clipper)->attachTo(parent);
-        if (maskData) PAINT(maskData->target)->attachTo(parent);
-    }
-
     uint16_t unref(bool free = true)
     {
-        attachTo(nullptr);
+        parent = nullptr;
         return unrefx(free);
     }
 
@@ -194,7 +195,7 @@ struct Paint::Impl
         clipper = clp;
         if (clp) {
             clp->ref();
-            PAINT(clp)->attachTo(parent);
+            PAINT(clp)->parent = parent;
         }
         return Result::Success;
     }
@@ -214,7 +215,7 @@ struct Paint::Impl
         maskData = tvg::malloc<Mask>(sizeof(Mask));
         target->ref();
         maskData->target = target;
-        PAINT(target)->attachTo(parent);
+        PAINT(target)->parent = parent;
         maskData->source = paint;
         maskData->method = method;
         return Result::Success;
@@ -305,10 +306,10 @@ struct Paint::Impl
         return Result::Success;
     }
 
-    bool intersects(const RenderRegion& region, bool visibleOnly);
+    bool intersects(const RenderRegion& region);
     RenderRegion bounds();
     bool bounds(Point* pt4, const Matrix* pm, bool obb);
-    AccessorIterator* iterator();
+    Iterator* iterator();
     RenderData update(RenderMethod* renderer, const Matrix& pm, Array<RenderData>& clips, uint8_t opacity, RenderUpdateFlag pFlag, bool clipper = false);
     bool render(RenderMethod* renderer, CompositionFlag flag = CompositionFlag::Invalid);
     Paint* duplicate(Paint* ret = nullptr);
@@ -316,4 +317,4 @@ struct Paint::Impl
 
 }
 
-#endif  //_TVG_PAINT_H_
+#endif //_TVG_PAINT_H_

@@ -58,10 +58,8 @@ ucnv_canCreateConverter(const char *converterName, UErrorCode *err);
  * @param err The error code
  * @return the newly created converter
  */
-U_CAPI UConverter*
-ucnv_createConverter(UConverter* myUConverter U_LIFETIME_BOUND,
-                     const char* converterName,
-                     UErrorCode* err);
+U_CAPI UConverter *
+ucnv_createConverter(UConverter *myUConverter, const char *converterName, UErrorCode * err);
 
 /*
  * Open a purely algorithmic converter, specified by a type constant.
@@ -74,12 +72,11 @@ ucnv_createConverter(UConverter* myUConverter U_LIFETIME_BOUND,
  *                      because this is an internal function
  * @internal
  */
-U_CFUNC UConverter*
-ucnv_createAlgorithmicConverter(UConverter* myUConverter U_LIFETIME_BOUND,
+U_CFUNC UConverter *
+ucnv_createAlgorithmicConverter(UConverter *myUConverter,
                                 UConverterType type,
-                                const char* locale,
-                                uint32_t options,
-                                UErrorCode* err);
+                                const char *locale, uint32_t options,
+                                UErrorCode *err);
 
 /*
  * Creates a converter from shared data.
@@ -87,11 +84,11 @@ ucnv_createAlgorithmicConverter(UConverter* myUConverter U_LIFETIME_BOUND,
  * unload mySharedConverterData, except via ucnv_close(return value)
  * if this function is successful.
  */
-U_CFUNC UConverter*
-ucnv_createConverterFromSharedData(UConverter* myUConverter U_LIFETIME_BOUND,
-                                   UConverterSharedData* mySharedConverterData,
-                                   UConverterLoadArgs* pArgs,
-                                   UErrorCode* err);
+U_CFUNC UConverter *
+ucnv_createConverterFromSharedData(UConverter *myUConverter,
+                                   UConverterSharedData *mySharedConverterData,
+                                   UConverterLoadArgs *pArgs,
+                                   UErrorCode *err);
 
 U_CFUNC UConverter *
 ucnv_createConverterFromPackage(const char *packageName, const char *converterName, UErrorCode *err);

@@ -37,6 +37,8 @@
 
 #include <openxr/openxr.h>
 
+#define XR_NULL_ENTITY 0x7FFFFFFF
+
 // Wrapper class for XrSpatialCapabilityConfigurationBaseHeaderEXT
 class OpenXRSpatialCapabilityConfigurationBaseHeader : public RefCounted {
 	GDCLASS(OpenXRSpatialCapabilityConfigurationBaseHeader, RefCounted);
@@ -187,9 +189,7 @@ public:
 	virtual void *get_structure_data(void *p_next) override;
 
 	Transform3D get_transform(int64_t p_index) const;
-	XrSpatialBufferIdEXT get_vertex_buffer_id(int64_t p_index) const;
 	PackedVector2Array get_vertices(RID p_snapshot, int64_t p_index) const;
-	XrSpatialBufferIdEXT get_index_buffer_id(int64_t p_index) const;
 	PackedInt32Array get_indices(RID p_snapshot, int64_t p_index) const;
 
 private:

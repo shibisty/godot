@@ -32,8 +32,10 @@
 
 #include "core/config/engine.h"
 #include "core/config/project_settings.h"
+#include "core/os/os.h"
 #include "core/string/ustring.h"
 #include "core/templates/local_vector.h"
+#include "drivers/streamline/streamline.h"
 
 GODOT_GCC_WARNING_PUSH_AND_IGNORE("-Wnon-virtual-dtor")
 GODOT_CLANG_WARNING_PUSH_AND_IGNORE("-Wnon-virtual-dtor")
@@ -103,6 +105,12 @@ Error RenderingContextDriverD3D12::_init_device_factory() {
 	ERR_FAIL_NULL_V(lib_dcomp, ERR_CANT_CREATE);
 #endif
 
+	// Streamline doesn't currently support device factories, so fall back to default D3D12CreateDevice
+	// (proxied by sl.interposer.dll) when Streamline is active. This also means no Agility SDK in that case.
+	if (Streamline::get_singleton() && Streamline::get_singleton()->get_internal_parameter(STREAMLINE_INTERNAL_PARAMETER_FUNC_D3D12GetInterface)) {
+		return OK;
+	}
+
 	// Note: symbol is not available in MinGW import library.
 	PFN_D3D12_GET_INTERFACE d3d_D3D12GetInterface = (PFN_D3D12_GET_INTERFACE)(void *)GetProcAddress(lib_d3d12, "D3D12GetInterface");
 	if (!d3d_D3D12GetInterface) {
@@ -146,6 +154,10 @@ Error RenderingContextDriverD3D12::_create_dxgi_factory() {
 	PFN_DXGI_CREATE_DXGI_FACTORY2 dxgi_CreateDXGIFactory2 = (PFN_DXGI_CREATE_DXGI_FACTORY2)(void *)GetProcAddress(lib_dxgi, "CreateDXGIFactory2");
 	ERR_FAIL_NULL_V(dxgi_CreateDXGIFactory2, ERR_CANT_CREATE);
 
+	if (Streamline::get_singleton() && Streamline::get_singleton()->get_internal_parameter(STREAMLINE_INTERNAL_PARAMETER_FUNC_CreateDXGIFactory2)) {
+		dxgi_CreateDXGIFactory2 = (PFN_DXGI_CREATE_DXGI_FACTORY2)Streamline::get_singleton()->get_internal_parameter(STREAMLINE_INTERNAL_PARAMETER_FUNC_CreateDXGIFactory2);
+	}
+
 	HRESULT res = dxgi_CreateDXGIFactory2(dxgi_factory_flags, IID_PPV_ARGS(&dxgi_factory));
 	ERR_FAIL_COND_V(!SUCCEEDED(res), ERR_CANT_CREATE);
 
@@ -173,6 +185,8 @@ Error RenderingContextDriverD3D12::_initialize_devices() {
 
 	// Fill the device descriptions with the adapters.
 	driver_devices.resize(adapters.size());
+	driver_device_infos.resize(adapters.size());
+	driver_device_uma_queried.resize(adapters.size());
 	for (uint32_t i = 0; i < adapters.size(); ++i) {
 		DXGI_ADAPTER_DESC1 desc = {};
 		adapters[i]->GetDesc1(&desc);
@@ -187,6 +201,15 @@ Error RenderingContextDriverD3D12::_initialize_devices() {
 			const bool has_dedicated_vram = desc.DedicatedVideoMemory > 0;
 			device.type = has_dedicated_vram ? DEVICE_TYPE_DISCRETE_GPU : DEVICE_TYPE_INTEGRATED_GPU;
 		}
+
+		// Mariner E8.
+		DeviceInfo &info = driver_device_infos[i];
+		info.device_id = desc.DeviceId;
+		info.dedicated_memory = desc.DedicatedVideoMemory;
+		info.shared_memory = desc.SharedSystemMemory;
+		info.type = device.type;
+		info.uma = device.type == DEVICE_TYPE_CPU;
+		driver_device_uma_queried[i] = device.type == DEVICE_TYPE_CPU;
 	}
 
 	// Release all created adapters.
@@ -227,6 +250,41 @@ Error RenderingContextDriverD3D12::initialize() {
 	ERR_FAIL_COND_V(err != OK, ERR_CANT_CREATE);
 
 	return OK;
+}
+
+bool RenderingContextDriverD3D12::device_get_info(uint32_t p_device_index, DeviceInfo &r_info) const {
+	ERR_FAIL_UNSIGNED_INDEX_V(p_device_index, driver_device_infos.size(), false);
+	MutexLock lock(device_info_mutex);
+	if (!driver_device_uma_queried[p_device_index]) {
+		// Integrated GPUs report a small "dedicated" carve-out (Intel: 128 MB) and Godot's own device list calls
+		// them discrete; D3D12_FEATURE_ARCHITECTURE knows. D3D12 devices are per-adapter singletons, so this
+		// returns the existing device for an adapter already in use. The Streamline proxy is never used here.
+		driver_device_uma_queried[p_device_index] = true;
+		PFN_D3D12_CREATE_DEVICE d3d_D3D12CreateDevice = (PFN_D3D12_CREATE_DEVICE)(void *)GetProcAddress(lib_d3d12, "D3D12CreateDevice");
+		ComPtr<IDXGIAdapter1> adapter;
+		adapter.Attach(create_adapter(p_device_index));
+		ComPtr<ID3D12Device> device;
+		HRESULT res = E_FAIL;
+		if (adapter != nullptr) {
+			if (device_factory != nullptr) {
+				res = device_factory->CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(device.GetAddressOf()));
+			} else if (d3d_D3D12CreateDevice != nullptr) {
+				res = d3d_D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(device.GetAddressOf()));
+			}
+		}
+		if (SUCCEEDED(res) && device != nullptr) {
+			D3D12_FEATURE_DATA_ARCHITECTURE architecture = {};
+			if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE, &architecture, sizeof(architecture)))) {
+				DeviceInfo &info = driver_device_infos[p_device_index];
+				info.uma = architecture.UMA;
+				if (architecture.UMA && info.type == DEVICE_TYPE_DISCRETE_GPU) {
+					info.type = DEVICE_TYPE_INTEGRATED_GPU;
+				}
+			}
+		}
+	}
+	r_info = driver_device_infos[p_device_index];
+	return true;
 }
 
 const RenderingContextDriver::Device &RenderingContextDriverD3D12::device_get(uint32_t p_device_index) const {
@@ -348,9 +406,15 @@ void RenderingContextDriverD3D12::surface_destroy(SurfaceID p_surface) {
 }
 
 bool RenderingContextDriverD3D12::is_debug_utils_enabled() const {
-#ifdef PIX_ENABLED
+#if defined(PIX_ENABLED) || defined(DEV_ENABLED)
 	return true;
 #else
+	if (Engine::get_singleton() && Engine::get_singleton()->is_gpu_markers_enabled()) {
+		return true;
+	}
+	if (OS::get_singleton() && OS::get_singleton()->is_stdout_verbose()) {
+		return true;
+	}
 	return false;
 #endif
 }

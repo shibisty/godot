@@ -62,7 +62,6 @@ void MFXSpatialEffect::callback(RDD *p_driver, RDD::CommandBufferID p_command_bu
 	MTL::Texture *dst_texture = reinterpret_cast<MTL::Texture *>(p_userdata->dst.id);
 
 	MTLFX::SpatialScalerBase *scaler = p_userdata->scaler;
-	scaler->setFence(obj->external_pass_fence());
 	scaler->setColorTexture(src_texture);
 	scaler->setOutputTexture(dst_texture);
 	MTLFX::SpatialScaler *s = static_cast<MTLFX::SpatialScaler *>(scaler);
@@ -171,15 +170,12 @@ void MFXTemporalEffect::process(RendererRD::MFXTemporalContext *p_ctx, RendererR
 			RDD::TextureID(RD::get_singleton()->get_driver_resource(RDC::DRIVER_RESOURCE_TEXTURE, p_params.dst)),
 			*p_ctx,
 			p_params.reset);
-	RD::CallbackResource res[5] = {
+	RD::CallbackResource res[3] = {
 		{ .rid = p_params.src, .usage = RD::CALLBACK_RESOURCE_USAGE_TEXTURE_SAMPLE },
 		{ .rid = p_params.depth, .usage = RD::CALLBACK_RESOURCE_USAGE_TEXTURE_SAMPLE },
-		{ .rid = p_params.motion, .usage = RD::CALLBACK_RESOURCE_USAGE_TEXTURE_SAMPLE },
 		{ .rid = p_params.dst, .usage = RD::CALLBACK_RESOURCE_USAGE_STORAGE_IMAGE_READ_WRITE },
-		{ .rid = p_params.exposure, .usage = RD::CALLBACK_RESOURCE_USAGE_TEXTURE_SAMPLE },
 	};
-	uint32_t res_count = p_params.exposure.is_valid() ? 5 : 4;
-	RD::get_singleton()->driver_callback_add((RDD::DriverCallback)MFXTemporalEffect::callback, userdata, VectorView<RD::CallbackResource>(res, res_count));
+	RD::get_singleton()->driver_callback_add((RDD::DriverCallback)MFXTemporalEffect::callback, userdata, VectorView<RD::CallbackResource>(res, 3));
 }
 
 void MFXTemporalEffect::callback(RDD *p_driver, RDD::CommandBufferID p_command_buffer, CallbackArgs *p_userdata) {
@@ -194,7 +190,6 @@ void MFXTemporalEffect::callback(RDD *p_driver, RDD::CommandBufferID p_command_b
 	MTL::Texture *dst_texture = reinterpret_cast<MTL::Texture *>(p_userdata->dst.id);
 
 	MTLFX::TemporalScalerBase *scaler = p_userdata->scaler;
-	scaler->setFence(obj->external_pass_fence());
 	scaler->setReset(p_userdata->reset);
 	scaler->setColorTexture(src_texture);
 	scaler->setDepthTexture(depth);

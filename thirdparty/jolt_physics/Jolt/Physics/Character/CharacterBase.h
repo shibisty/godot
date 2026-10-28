@@ -69,10 +69,6 @@ public:
 	void								SetUp(Vec3Arg inUp)										{ mUp = inUp; }
 	Vec3								GetUp() const											{ return mUp; }
 
-	// Every contact behind this plane can support the character
-	const Plane &						GetSupportingVolume() const								{ return mSupportingVolume; }
-	void								SetSupportingVolume(const Plane &inPlane)				{ mSupportingVolume = inPlane; }
-
 	/// Check if the normal of the ground surface is too steep to walk on
 	bool								IsSlopeTooSteep(Vec3Arg inNormal) const
 	{

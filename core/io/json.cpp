@@ -198,12 +198,12 @@ void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_in
 	}
 }
 
-Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_token, int &r_line, String &r_err_str) {
+Error JSON::_get_token(const char32_t *p_str, int &index, int p_len, Token &r_token, int &line, String &r_err_str) {
 	while (p_len > 0) {
-		switch (p_str[r_index]) {
+		switch (p_str[index]) {
 			case '\n': {
-				r_line++;
-				r_index++;
+				line++;
+				index++;
 				break;
 			}
 			case 0: {
@@ -212,48 +212,48 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 			} break;
 			case '{': {
 				r_token.type = TK_CURLY_BRACKET_OPEN;
-				r_index++;
+				index++;
 				return OK;
 			}
 			case '}': {
 				r_token.type = TK_CURLY_BRACKET_CLOSE;
-				r_index++;
+				index++;
 				return OK;
 			}
 			case '[': {
 				r_token.type = TK_BRACKET_OPEN;
-				r_index++;
+				index++;
 				return OK;
 			}
 			case ']': {
 				r_token.type = TK_BRACKET_CLOSE;
-				r_index++;
+				index++;
 				return OK;
 			}
 			case ':': {
 				r_token.type = TK_COLON;
-				r_index++;
+				index++;
 				return OK;
 			}
 			case ',': {
 				r_token.type = TK_COMMA;
-				r_index++;
+				index++;
 				return OK;
 			}
 			case '"': {
-				r_index++;
+				index++;
 				String str;
 				while (true) {
-					if (p_str[r_index] == 0) {
+					if (p_str[index] == 0) {
 						r_err_str = "Unterminated string";
 						return ERR_PARSE_ERROR;
-					} else if (p_str[r_index] == '"') {
-						r_index++;
+					} else if (p_str[index] == '"') {
+						index++;
 						break;
-					} else if (p_str[r_index] == '\\') {
+					} else if (p_str[index] == '\\') {
 						//escaped characters...
-						r_index++;
-						char32_t next = p_str[r_index];
+						index++;
+						char32_t next = p_str[index];
 						if (next == 0) {
 							r_err_str = "Unterminated string";
 							return ERR_PARSE_ERROR;
@@ -279,7 +279,7 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 							case 'u': {
 								// hex number
 								for (int j = 0; j < 4; j++) {
-									char32_t c = p_str[r_index + j + 1];
+									char32_t c = p_str[index + j + 1];
 									if (c == 0) {
 										r_err_str = "Unterminated string";
 										return ERR_PARSE_ERROR;
@@ -305,17 +305,17 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 									res <<= 4;
 									res |= v;
 								}
-								r_index += 4; //will add at the end anyway
+								index += 4; //will add at the end anyway
 
 								if ((res & 0xfffffc00) == 0xd800) {
-									if (p_str[r_index + 1] != '\\' || p_str[r_index + 2] != 'u') {
+									if (p_str[index + 1] != '\\' || p_str[index + 2] != 'u') {
 										r_err_str = "Invalid UTF-16 sequence in string, unpaired lead surrogate";
 										return ERR_PARSE_ERROR;
 									}
-									r_index += 2;
+									index += 2;
 									char32_t trail = 0;
 									for (int j = 0; j < 4; j++) {
-										char32_t c = p_str[r_index + j + 1];
+										char32_t c = p_str[index + j + 1];
 										if (c == 0) {
 											r_err_str = "Unterminated string";
 											return ERR_PARSE_ERROR;
@@ -343,7 +343,7 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 									}
 									if ((trail & 0xfffffc00) == 0xdc00) {
 										res = (res << 10UL) + trail - ((0xd800 << 10UL) + 0xdc00 - 0x10000);
-										r_index += 4; //will add at the end anyway
+										index += 4; //will add at the end anyway
 									} else {
 										r_err_str = "Invalid UTF-16 sequence in string, unpaired lead surrogate";
 										return ERR_PARSE_ERROR;
@@ -368,12 +368,12 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 						str += res;
 
 					} else {
-						if (p_str[r_index] == '\n') {
-							r_line++;
+						if (p_str[index] == '\n') {
+							line++;
 						}
-						str += p_str[r_index];
+						str += p_str[index];
 					}
-					r_index++;
+					index++;
 				}
 
 				r_token.type = TK_STRING;
@@ -382,26 +382,26 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 
 			} break;
 			default: {
-				if (p_str[r_index] <= 32) {
-					r_index++;
+				if (p_str[index] <= 32) {
+					index++;
 					break;
 				}
 
-				if (p_str[r_index] == '-' || is_digit(p_str[r_index])) {
+				if (p_str[index] == '-' || is_digit(p_str[index])) {
 					//a number
 					const char32_t *rptr;
-					double number = String::to_float(&p_str[r_index], &rptr);
-					r_index += (rptr - &p_str[r_index]);
+					double number = String::to_float(&p_str[index], &rptr);
+					index += (rptr - &p_str[index]);
 					r_token.type = TK_NUMBER;
 					r_token.value = number;
 					return OK;
 
-				} else if (is_ascii_alphabet_char(p_str[r_index])) {
+				} else if (is_ascii_alphabet_char(p_str[index])) {
 					String id;
 
-					while (is_ascii_alphabet_char(p_str[r_index])) {
-						id += p_str[r_index];
-						r_index++;
+					while (is_ascii_alphabet_char(p_str[index])) {
+						id += p_str[index];
+						index++;
 					}
 
 					r_token.type = TK_IDENTIFIER;
@@ -419,50 +419,59 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 	return ERR_PARSE_ERROR;
 }
 
-Error JSON::_parse_value(Variant &r_value, Token &r_token, const char32_t *p_str, int &r_index, int p_len, int &r_line, int p_depth, String &r_err_str) {
+Error JSON::_parse_value(Variant &value, Token &token, const char32_t *p_str, int &index, int p_len, int &line, int p_depth, String &r_err_str) {
 	if (p_depth > Variant::MAX_RECURSION_DEPTH) {
 		r_err_str = "JSON structure is too deep";
 		return ERR_OUT_OF_MEMORY;
 	}
 
-	if (r_token.type == TK_CURLY_BRACKET_OPEN) {
+	if (token.type == TK_CURLY_BRACKET_OPEN) {
 		Dictionary d;
-		RETURN_IF_ERROR(_parse_object(d, p_str, r_index, p_len, r_line, p_depth + 1, r_err_str));
-		r_value = d;
-	} else if (r_token.type == TK_BRACKET_OPEN) {
+		Error err = _parse_object(d, p_str, index, p_len, line, p_depth + 1, r_err_str);
+		if (err) {
+			return err;
+		}
+		value = d;
+	} else if (token.type == TK_BRACKET_OPEN) {
 		Array a;
-		RETURN_IF_ERROR(_parse_array(a, p_str, r_index, p_len, r_line, p_depth + 1, r_err_str));
-		r_value = a;
-	} else if (r_token.type == TK_IDENTIFIER) {
-		String id = r_token.value;
+		Error err = _parse_array(a, p_str, index, p_len, line, p_depth + 1, r_err_str);
+		if (err) {
+			return err;
+		}
+		value = a;
+	} else if (token.type == TK_IDENTIFIER) {
+		String id = token.value;
 		if (id == "true") {
-			r_value = true;
+			value = true;
 		} else if (id == "false") {
-			r_value = false;
+			value = false;
 		} else if (id == "null") {
-			r_value = Variant();
+			value = Variant();
 		} else {
 			r_err_str = vformat("Expected 'true', 'false', or 'null', got '%s'", id);
 			return ERR_PARSE_ERROR;
 		}
-	} else if (r_token.type == TK_NUMBER) {
-		r_value = r_token.value;
-	} else if (r_token.type == TK_STRING) {
-		r_value = r_token.value;
+	} else if (token.type == TK_NUMBER) {
+		value = token.value;
+	} else if (token.type == TK_STRING) {
+		value = token.value;
 	} else {
-		r_err_str = vformat("Expected value, got '%s'", String(tk_name[r_token.type]));
+		r_err_str = vformat("Expected value, got '%s'", String(tk_name[token.type]));
 		return ERR_PARSE_ERROR;
 	}
 
 	return OK;
 }
 
-Error JSON::_parse_array(Array &r_array, const char32_t *p_str, int &r_index, int p_len, int &r_line, int p_depth, String &r_err_str) {
+Error JSON::_parse_array(Array &array, const char32_t *p_str, int &index, int p_len, int &line, int p_depth, String &r_err_str) {
 	Token token;
 	bool need_comma = false;
 
-	while (r_index < p_len) {
-		RETURN_IF_ERROR(_get_token(p_str, r_index, p_len, token, r_line, r_err_str));
+	while (index < p_len) {
+		Error err = _get_token(p_str, index, p_len, token, line, r_err_str);
+		if (err != OK) {
+			return err;
+		}
 
 		if (token.type == TK_BRACKET_CLOSE) {
 			return OK;
@@ -479,9 +488,12 @@ Error JSON::_parse_array(Array &r_array, const char32_t *p_str, int &r_index, in
 		}
 
 		Variant v;
-		RETURN_IF_ERROR(_parse_value(v, token, p_str, r_index, p_len, r_line, p_depth, r_err_str));
+		err = _parse_value(v, token, p_str, index, p_len, line, p_depth, r_err_str);
+		if (err) {
+			return err;
+		}
 
-		r_array.push_back(v);
+		array.push_back(v);
 		need_comma = true;
 	}
 
@@ -489,15 +501,18 @@ Error JSON::_parse_array(Array &r_array, const char32_t *p_str, int &r_index, in
 	return ERR_PARSE_ERROR;
 }
 
-Error JSON::_parse_object(Dictionary &r_object, const char32_t *p_str, int &r_index, int p_len, int &r_line, int p_depth, String &r_err_str) {
+Error JSON::_parse_object(Dictionary &object, const char32_t *p_str, int &index, int p_len, int &line, int p_depth, String &r_err_str) {
 	bool at_key = true;
 	String key;
 	Token token;
 	bool need_comma = false;
 
-	while (r_index < p_len) {
+	while (index < p_len) {
 		if (at_key) {
-			RETURN_IF_ERROR(_get_token(p_str, r_index, p_len, token, r_line, r_err_str));
+			Error err = _get_token(p_str, index, p_len, token, line, r_err_str);
+			if (err != OK) {
+				return err;
+			}
 
 			if (token.type == TK_CURLY_BRACKET_CLOSE) {
 				return OK;
@@ -519,18 +534,27 @@ Error JSON::_parse_object(Dictionary &r_object, const char32_t *p_str, int &r_in
 			}
 
 			key = token.value;
-			RETURN_IF_ERROR(_get_token(p_str, r_index, p_len, token, r_line, r_err_str));
+			err = _get_token(p_str, index, p_len, token, line, r_err_str);
+			if (err != OK) {
+				return err;
+			}
 			if (token.type != TK_COLON) {
 				r_err_str = "Expected ':'";
 				return ERR_PARSE_ERROR;
 			}
 			at_key = false;
 		} else {
-			RETURN_IF_ERROR(_get_token(p_str, r_index, p_len, token, r_line, r_err_str));
+			Error err = _get_token(p_str, index, p_len, token, line, r_err_str);
+			if (err != OK) {
+				return err;
+			}
 
 			Variant v;
-			RETURN_IF_ERROR(_parse_value(v, token, p_str, r_index, p_len, r_line, p_depth, r_err_str));
-			r_object[key] = v;
+			err = _parse_value(v, token, p_str, index, p_len, line, p_depth, r_err_str);
+			if (err) {
+				return err;
+			}
+			object[key] = v;
 			need_comma = true;
 			at_key = true;
 		}
@@ -551,10 +575,14 @@ Error JSON::_parse_string(const String &p_json, Variant &r_ret, String &r_err_st
 	int len = p_json.length();
 	Token token;
 	r_err_line = 0;
+	String aux_key;
 
-	RETURN_IF_ERROR(_get_token(str, idx, len, token, r_err_line, r_err_str));
+	Error err = _get_token(str, idx, len, token, r_err_line, r_err_str);
+	if (err) {
+		return err;
+	}
 
-	Error err = _parse_value(r_ret, token, str, idx, len, r_err_line, 0, r_err_str);
+	err = _parse_value(r_ret, token, str, idx, len, r_err_line, 0, r_err_str);
 
 	// Check if EOF is reached
 	// or it's a type of the next token.
@@ -627,7 +655,7 @@ void JSON::_bind_methods() {
 #define PROPS "props"
 
 static bool _encode_container_type(Dictionary &r_dict, const String &p_key, const ContainerType &p_type, bool p_full_objects) {
-	if (p_type.variant_type != Variant::NIL) {
+	if (p_type.builtin_type != Variant::NIL) {
 		if (p_type.script.is_valid()) {
 			ERR_FAIL_COND_V(!p_full_objects, false);
 			const String path = p_type.script->get_path();
@@ -638,7 +666,7 @@ static bool _encode_container_type(Dictionary &r_dict, const String &p_key, cons
 			r_dict[p_key] = String(p_type.class_name);
 		} else {
 			// No need to check `p_full_objects` since `class_name` should be non-empty for `builtin_type == Variant::OBJECT`.
-			r_dict[p_key] = Variant::get_type_name(p_type.variant_type);
+			r_dict[p_key] = Variant::get_type_name(p_type.builtin_type);
 		}
 	}
 	return true;
@@ -1004,14 +1032,14 @@ static bool _decode_container_type(const Dictionary &p_dict, const String &p_key
 
 	const Variant::Type builtin_type = Variant::get_type_by_name(type_name);
 	if (builtin_type < Variant::VARIANT_MAX && builtin_type != Variant::OBJECT) {
-		r_type.variant_type = builtin_type;
+		r_type.builtin_type = builtin_type;
 		return true;
 	}
 
 	if (ClassDB::class_exists(type_name)) {
 		ERR_FAIL_COND_V(!p_allow_objects, false);
 
-		r_type.variant_type = Variant::OBJECT;
+		r_type.builtin_type = Variant::OBJECT;
 		r_type.class_name = type_name;
 		return true;
 	}
@@ -1023,7 +1051,7 @@ static bool _decode_container_type(const Dictionary &p_dict, const String &p_key
 		const Ref<Script> script = ResourceLoader::load(type_name, "Script");
 		ERR_FAIL_COND_V_MSG(script.is_null(), false, vformat(R"(Can't load script at path "%s".)", type_name));
 
-		r_type.variant_type = Variant::OBJECT;
+		r_type.builtin_type = Variant::OBJECT;
 		r_type.class_name = script->get_instance_base_type();
 		r_type.script = script;
 		return true;
@@ -1288,7 +1316,7 @@ Variant JSON::_to_native(const Variant &p_json, bool p_allow_objects, int p_dept
 
 					Dictionary ret;
 
-					if (key_type.variant_type != Variant::NIL || value_type.variant_type != Variant::NIL) {
+					if (key_type.builtin_type != Variant::NIL || value_type.builtin_type != Variant::NIL) {
 						ret.set_typed(key_type, value_type);
 					}
 
@@ -1311,7 +1339,7 @@ Variant JSON::_to_native(const Variant &p_json, bool p_allow_objects, int p_dept
 
 					Array ret;
 
-					if (elem_type.variant_type != Variant::NIL) {
+					if (elem_type.builtin_type != Variant::NIL) {
 						ret.set_typed(elem_type);
 					}
 

@@ -222,9 +222,7 @@ public:
 	virtual uint64_t get_rendering_info(RSE::RenderingInfo p_info) override;
 	virtual String get_video_adapter_name() const override;
 	virtual String get_video_adapter_vendor() const override;
-#ifdef RD_ENABLED
-	virtual RenderingDeviceEnums::DeviceType get_video_adapter_type() const override { return RenderingDeviceEnums::DeviceType::DEVICE_TYPE_OTHER; }
-#endif // RD_ENABLED
+	virtual RenderingDeviceEnums::DeviceType get_video_adapter_type() const override;
 	virtual String get_video_adapter_api_version() const override;
 
 	virtual Size2i get_maximum_viewport_size() const override;

@@ -37,24 +37,28 @@
 
 #include "servers/rendering/shader_include_db.h"
 
+const char *RDShaderFile::SHADER_FILE_STAGE_SECTIONS[RD::SHADER_STAGE_MAX] = {
+	"vertex",
+	"fragment",
+	"tesselation_control",
+	"tesselation_evaluation",
+	"compute",
+	"raygen",
+	"any_hit",
+	"closest_hit",
+	"miss",
+	"intersection",
+	"task", // Mariner E7.
+	"mesh", // Mariner E7.
+};
+
 Error RDShaderFile::parse_versions_from_text(const String &p_text, const String p_defines, OpenIncludeFunction p_include_func, void *p_include_func_userdata) {
 	Vector<String> lines = p_text.split("\n");
 
 	bool reading_versions = false;
 	bool stage_found[RD::SHADER_STAGE_MAX] = {};
 	RD::ShaderStage stage = RD::SHADER_STAGE_MAX;
-	static const char *stage_str[RD::SHADER_STAGE_MAX] = {
-		"vertex",
-		"fragment",
-		"tesselation_control",
-		"tesselation_evaluation",
-		"compute",
-		"raygen",
-		"any_hit",
-		"closest_hit",
-		"miss",
-		"intersection",
-	};
+	const char *const *stage_str = SHADER_FILE_STAGE_SECTIONS;
 	String stage_code[RD::SHADER_STAGE_MAX];
 	int stages_found = 0;
 	HashMap<StringName, String> version_texts;
@@ -178,6 +182,16 @@ Error RDShaderFile::parse_versions_from_text(const String &p_text, const String 
 			ERR_FAIL_V_MSG(ERR_PARSE_ERROR, "When writing compute shaders, [compute] mustbe the only stage present.");
 		}
 
+		// Mariner E7: a mesh pipeline replaces the vertex (and tessellation) stages; the task stage needs a mesh stage.
+		if (stage_found[RD::SHADER_STAGE_TASK] && !stage_found[RD::SHADER_STAGE_MESH]) {
+			base_error = "Invalid shader file, a #[task] stage needs a #[mesh] stage.";
+			ERR_FAIL_V_MSG(ERR_PARSE_ERROR, base_error);
+		}
+		if (stage_found[RD::SHADER_STAGE_MESH] && (stage_found[RD::SHADER_STAGE_VERTEX] || stage_found[RD::SHADER_STAGE_TESSELATION_CONTROL] || stage_found[RD::SHADER_STAGE_TESSELATION_EVALUATION])) {
+			base_error = "Invalid shader file, #[mesh] can't be combined with #[vertex] or tessellation stages.";
+			ERR_FAIL_V_MSG(ERR_PARSE_ERROR, base_error);
+		}
+
 		if (version_texts.is_empty()) {
 			version_texts[""] = ""; //make sure a default version exists
 		}
@@ -198,11 +212,7 @@ Error RDShaderFile::parse_versions_from_text(const String &p_text, const String 
 				code = code.replace("VERSION_DEFINES", E.value);
 				String error;
 #ifdef MODULE_GLSLANG_ENABLED
-				RD::ShaderSpirvVersion spirv_version = RD::SHADER_SPIRV_VERSION_1_3;
-				if (i >= RD::SHADER_STAGE_RAYGEN && i <= RD::SHADER_STAGE_INTERSECTION) {
-					spirv_version = RD::SHADER_SPIRV_VERSION_1_4;
-				}
-				Vector<uint8_t> spirv = compile_glslang_shader(RD::ShaderStage(i), ShaderIncludeDB::parse_include_files(code), RD::SHADER_LANGUAGE_VULKAN_VERSION_1_1, spirv_version, &error);
+				Vector<uint8_t> spirv = compile_glslang_shader(RD::ShaderStage(i), ShaderIncludeDB::parse_include_files(code), RD::SHADER_LANGUAGE_VULKAN_VERSION_1_1, RD::SHADER_SPIRV_VERSION_1_4, &error);
 				bytecode->set_stage_bytecode(RD::ShaderStage(i), spirv);
 #else
 				error = "Shader compilation is not supported because glslang was not enabled.";

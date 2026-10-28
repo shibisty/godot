@@ -32,7 +32,7 @@
 
 TEST_FORCE_LINK(test_visual_shader)
 
-#include "../visual_shader.h"
+#include "modules/visual_shader/visual_shader.h"
 
 namespace TestVisualShader {
 

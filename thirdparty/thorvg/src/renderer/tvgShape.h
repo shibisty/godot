@@ -96,7 +96,8 @@ struct ShapeImpl : Shape
 
     bool skip(RenderUpdateFlag flag)
     {
-        return (flag == RenderUpdateFlag::None);
+        if (flag == RenderUpdateFlag::None) return true;
+        return false;
     }
 
     bool update(RenderMethod* renderer, const Matrix& transform, Array<RenderData>& clips, uint8_t opacity, RenderUpdateFlag flag, bool clipper)
@@ -128,7 +129,7 @@ struct ShapeImpl : Shape
         }
         //Keep this for legacy. loaders still depend on this logic, remove it if possible.
         if (fallback) {
-            BBox box;
+            BBox box = {{FLT_MAX, FLT_MAX}, {-FLT_MAX, -FLT_MAX}};
             if (!rs.path.bounds(obb ? nullptr : &m, box)) return false;
             if (rs.stroke) {
                 //Use geometric mean for feathering.
@@ -240,7 +241,7 @@ struct ShapeImpl : Shape
         return Result::Success;
     }
 
-    bool intersects(const RenderRegion& region, TVG_UNUSED bool visibleOnly)
+    bool intersects(const RenderRegion& region)
     {
         if (!impl.rd || !impl.renderer) return false;
         return impl.renderer->intersectsShape(impl.rd, region);
@@ -284,9 +285,9 @@ struct ShapeImpl : Shape
             tvg::free(dash.pattern);
             dash.pattern = nullptr;
         }
-        dash.length = 0.0f;
         if (cnt > 0) {
             if (!dash.pattern) dash.pattern = tvg::malloc<float>(sizeof(float) * cnt);
+            dash.length = 0.0f;
             for (uint32_t i = 0; i < cnt; ++i) {
                 dash.pattern[i] = pattern[i] < 0.0f ? 0.0f : pattern[i];
                 dash.length += dash.pattern[i];
@@ -414,7 +415,7 @@ struct ShapeImpl : Shape
         rs.fill = nullptr;
     }
 
-    AccessorIterator* iterator()
+    Iterator* iterator()
     {
         return nullptr;
     }

@@ -32,6 +32,7 @@
 
 #include "core/io/resource.h"
 #include "scene/resources/texture.h"
+#include "servers/rendering/rendering_server_enums.h"
 
 class Sky;
 
@@ -87,6 +88,34 @@ public:
 		GLOW_BLEND_MODE_SOFTLIGHT,
 		GLOW_BLEND_MODE_REPLACE,
 		GLOW_BLEND_MODE_MIX,
+	};
+
+	// Mariner E5c: same values as NVIDIA's Godot fork.
+	enum PathtracingDebugMode {
+		RT_DEBUG_DISABLED,
+		RT_DEBUG_MIRROR_REFLECTION,
+		RT_DEBUG_GEOMETRY_NORMALS,
+		RT_DEBUG_FINAL_NORMALS,
+		RT_DEBUG_NORMAL_MAP,
+		RT_DEBUG_TANGENT,
+		RT_DEBUG_BITANGENT,
+		RT_DEBUG_UV,
+		RT_DEBUG_ALBEDO,
+		RT_DEBUG_ORM,
+		RT_DEBUG_DIFFUSE_ALBEDO,
+		RT_DEBUG_SPECULAR_ALBEDO,
+		RT_DEBUG_NORMAL_ROUGHNESS,
+		RT_DEBUG_SPECULAR_HIT_DISTANCE,
+		RT_DEBUG_METALNESS,
+		RT_DEBUG_ROUGHNESS,
+		RT_DEBUG_VIEW_NORMALS,
+		RT_DEBUG_DIFFUSE_SPECULAR_SPLIT,
+		RT_DEBUG_FRESNEL_F0,
+		RT_DEBUG_FRONT_BACK_FACE,
+		RT_DEBUG_DEPTH,
+		RT_DEBUG_EMISSIVE,
+		RT_DEBUG_BRDF_REJECTION,
+		RT_DEBUG_MAX
 	};
 
 private:
@@ -223,6 +252,17 @@ private:
 	bool use_1d_color_correction = true;
 	Ref<Texture> adjustment_color_correction;
 	void _update_adjustment();
+
+	// Path tracing (Mariner E5c)
+	bool pathtracing_enabled = false;
+	PathtracingDebugMode pathtracing_debug_mode = RT_DEBUG_DISABLED;
+	int pathtracing_samples_per_pixel = 1;
+	int pathtracing_max_bounces = 3;
+	RSE::PathtracingDenoiser pathtracing_denoiser = RSE::PT_DENOISER_NONE;
+	bool pathtracing_accumulate = true;
+	int pathtracing_max_samples = 0;
+	float pathtracing_firefly_clamp = 0.0;
+	void _update_pathtracing();
 
 protected:
 	static void _bind_methods();
@@ -449,6 +489,24 @@ public:
 	void set_adjustment_color_correction(Ref<Texture> p_color_correction);
 	Ref<Texture> get_adjustment_color_correction() const;
 
+	// Path tracing (Mariner E5c)
+	void set_pathtracing_enabled(bool p_enabled);
+	bool is_pathtracing_enabled() const;
+	void set_pathtracing_debug_mode(PathtracingDebugMode p_mode);
+	PathtracingDebugMode get_pathtracing_debug_mode() const;
+	void set_pathtracing_samples_per_pixel(int p_samples);
+	int get_pathtracing_samples_per_pixel() const;
+	void set_pathtracing_max_bounces(int p_bounces);
+	int get_pathtracing_max_bounces() const;
+	void set_pathtracing_denoiser(RSE::PathtracingDenoiser p_denoiser);
+	RSE::PathtracingDenoiser get_pathtracing_denoiser() const;
+	void set_pathtracing_accumulate(bool p_accumulate);
+	bool is_pathtracing_accumulate() const;
+	void set_pathtracing_max_samples(int p_samples);
+	int get_pathtracing_max_samples() const;
+	void set_pathtracing_firefly_clamp(float p_clamp);
+	float get_pathtracing_firefly_clamp() const;
+
 	Environment();
 	~Environment();
 };
@@ -460,3 +518,4 @@ VARIANT_ENUM_CAST(Environment::ToneMapper)
 VARIANT_ENUM_CAST(Environment::SDFGIYScale)
 VARIANT_ENUM_CAST(Environment::GlowBlendMode)
 VARIANT_ENUM_CAST(Environment::FogMode)
+VARIANT_ENUM_CAST(Environment::PathtracingDebugMode)

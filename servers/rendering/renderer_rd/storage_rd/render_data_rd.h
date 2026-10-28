@@ -90,7 +90,6 @@ public:
 	LocalVector<int> cube_shadows;
 	LocalVector<int> shadows;
 	LocalVector<int> directional_shadows;
-	LocalVector<int> contact_shadows;
 
 	/* GI info */
 	const RendererSceneRender::RenderSDFGIData *render_sdfgi_regions = nullptr;
@@ -98,4 +97,7 @@ public:
 	const RendererSceneRender::RenderSDFGIUpdateData *sdfgi_update_data = nullptr;
 
 	uint32_t voxel_gi_count = 0;
+
+	/* Raytracing scene (TLAS) instances, nullptr when the viewport has no raytracing scene. */
+	const PagedArray<RenderGeometryInstance *> *rt_instances = nullptr;
 };

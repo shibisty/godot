@@ -45,9 +45,6 @@ static const float earth_gravity = 9.80665;
 @interface GDTView () {
 	UITouch *godot_touches[max_touches];
 	CGFloat last_edr_headroom;
-	NSTimeInterval begin_timestamp[max_touches];
-	CGPoint begin_delta[max_touches];
-	int touch_count[max_touches];
 }
 
 @property(assign, nonatomic) BOOL isActive;
@@ -134,7 +131,7 @@ static const float earth_gravity = 9.80665;
 		[self registerForTraitChanges:@[ [UITraitUserInterfaceStyle class] ] withTarget:self action:@selector(traitCollectionDidChangeWithView:previousTraitCollection:)];
 	}
 
-	[self clearTouches];
+	[self initTouches];
 
 	self.multipleTouchEnabled = YES;
 
@@ -182,7 +179,7 @@ static const float earth_gravity = 9.80665;
 
 	self.isActive = NO;
 
-	print_verbose("Stop rendering");
+	print_verbose("Stop animation!");
 
 	if (self.useCADisplayLink) {
 		[self.displayLink invalidate];
@@ -202,7 +199,7 @@ static const float earth_gravity = 9.80665;
 
 	self.isActive = YES;
 
-	print_verbose("Start rendering");
+	print_verbose("Start animation!");
 
 	if (self.useCADisplayLink) {
 		self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(drawView)];
@@ -240,7 +237,7 @@ static const float earth_gravity = 9.80665;
 		return;
 	}
 
-	if ([self.renderer setUp]) {
+	if ([self.renderer setupView:self]) {
 		return;
 	}
 
@@ -309,6 +306,12 @@ static const float earth_gravity = 9.80665;
 
 // MARK: Touches
 
+- (void)initTouches {
+	for (int i = 0; i < max_touches; i++) {
+		godot_touches[i] = nullptr;
+	}
+}
+
 - (int)getTouchIDForTouch:(UITouch *)p_touch {
 	int first = -1;
 	for (int i = 0; i < max_touches; i++) {
@@ -337,9 +340,6 @@ static const float earth_gravity = 9.80665;
 		}
 		if (godot_touches[i] == p_touch) {
 			godot_touches[i] = nullptr;
-			begin_timestamp[i] = 0.0;
-			begin_delta[i] = CGPointMake(0, 0);
-			touch_count[i] = 0;
 		} else {
 			++remaining;
 		}
@@ -350,9 +350,6 @@ static const float earth_gravity = 9.80665;
 - (void)clearTouches {
 	for (int i = 0; i < max_touches; i++) {
 		godot_touches[i] = nullptr;
-		begin_timestamp[i] = 0.0;
-		begin_delta[i] = CGPointMake(0, 0);
-		touch_count[i] = 0;
 	}
 }
 
@@ -361,10 +358,7 @@ static const float earth_gravity = 9.80665;
 		int tid = [self getTouchIDForTouch:touch];
 		ERR_FAIL_COND(tid == -1);
 		CGPoint touchPoint = [touch locationInView:self];
-		begin_timestamp[tid] = [touch timestamp];
-		begin_delta[tid] = CGPointMake(0, 0);
-		touch_count[tid] = touch.tapCount;
-		DisplayServerAppleEmbedded::get_singleton()->touch_press(tid, touchPoint.x * self.contentScaleFactor, touchPoint.y * self.contentScaleFactor, true, touch.tapCount > 1, false);
+		DisplayServerAppleEmbedded::get_singleton()->touch_press(tid, touchPoint.x * self.contentScaleFactor, touchPoint.y * self.contentScaleFactor, true, touch.tapCount > 1);
 	}
 }
 
@@ -374,17 +368,6 @@ static const float earth_gravity = 9.80665;
 		ERR_FAIL_COND(tid == -1);
 		CGPoint touchPoint = [touch locationInView:self];
 		CGPoint prev_point = [touch previousLocationInView:self];
-		if (begin_timestamp[tid] != 0.0) {
-			begin_delta[tid].x = fmax(begin_delta[tid].x, Math::abs(touchPoint.x - prev_point.x));
-			begin_delta[tid].y = fmax(begin_delta[tid].y, Math::abs(touchPoint.y - prev_point.y));
-			if ([touch timestamp] - begin_timestamp[tid] >= 0.5) {
-				begin_timestamp[tid] = 0.0;
-				if (begin_delta[tid].x <= 10.0 && begin_delta[tid].y <= 10.0) {
-					DisplayServerAppleEmbedded::get_singleton()->touch_press(tid, touchPoint.x * self.contentScaleFactor, touchPoint.y * self.contentScaleFactor, true, touch.tapCount > 1, true);
-					return;
-				}
-			}
-		}
 		CGFloat alt = [touch altitudeAngle];
 		CGVector azim = [touch azimuthUnitVectorInView:self];
 		DisplayServerAppleEmbedded::get_singleton()->touch_drag(tid, prev_point.x * self.contentScaleFactor, prev_point.y * self.contentScaleFactor, touchPoint.x * self.contentScaleFactor, touchPoint.y * self.contentScaleFactor, [touch force] / [touch maximumPossibleForce], Vector2(azim.dx, azim.dy) * Math::cos(alt));
@@ -395,9 +378,9 @@ static const float earth_gravity = 9.80665;
 	for (UITouch *touch in touches) {
 		int tid = [self getTouchIDForTouch:touch];
 		ERR_FAIL_COND(tid == -1);
-		CGPoint touchPoint = [touch locationInView:self];
-		DisplayServerAppleEmbedded::get_singleton()->touch_press(tid, touchPoint.x * self.contentScaleFactor, touchPoint.y * self.contentScaleFactor, false, touch_count[tid] > 1, false);
 		[self removeTouch:touch];
+		CGPoint touchPoint = [touch locationInView:self];
+		DisplayServerAppleEmbedded::get_singleton()->touch_press(tid, touchPoint.x * self.contentScaleFactor, touchPoint.y * self.contentScaleFactor, false, false);
 	}
 }
 
@@ -445,10 +428,6 @@ static const float earth_gravity = 9.80665;
 	/// best
 	CMRotationRate rotation = self.motionManager.deviceMotion.rotationRate;
 
-	// Device orientation (attitude) as quaternion.
-	CMQuaternion att = self.motionManager.deviceMotion.attitude.quaternion;
-	Quaternion device_orientation(att.x, att.y, att.z, att.w);
-
 	// Adjust for screen orientation.
 	// [[UIDevice currentDevice] orientation] changes even if we've fixed
 	// our orientation which is not a good thing when you're trying to get
@@ -466,28 +445,24 @@ static const float earth_gravity = 9.80665;
 			DisplayServerAppleEmbedded::get_singleton()->update_accelerometer(Vector3(acceleration.x + gravity.x, acceleration.y + gravity.y, acceleration.z + gravity.z).rotated(Vector3(0, 0, 1), -Math::PI * 0.5));
 			DisplayServerAppleEmbedded::get_singleton()->update_magnetometer(Vector3(magnetic.x, magnetic.y, magnetic.z).rotated(Vector3(0, 0, 1), -Math::PI * 0.5));
 			DisplayServerAppleEmbedded::get_singleton()->update_gyroscope(Vector3(rotation.x, rotation.y, rotation.z).rotated(Vector3(0, 0, 1), -Math::PI * 0.5));
-			DisplayServerAppleEmbedded::get_singleton()->update_device_orientation(Quaternion(Vector3(0, 0, 1), -Math::PI * 0.5) * device_orientation);
 		} break;
 		case UIInterfaceOrientationLandscapeRight: {
 			DisplayServerAppleEmbedded::get_singleton()->update_gravity(Vector3(gravity.x, gravity.y, gravity.z).rotated(Vector3(0, 0, 1), Math::PI * 0.5));
 			DisplayServerAppleEmbedded::get_singleton()->update_accelerometer(Vector3(acceleration.x + gravity.x, acceleration.y + gravity.y, acceleration.z + gravity.z).rotated(Vector3(0, 0, 1), Math::PI * 0.5));
 			DisplayServerAppleEmbedded::get_singleton()->update_magnetometer(Vector3(magnetic.x, magnetic.y, magnetic.z).rotated(Vector3(0, 0, 1), Math::PI * 0.5));
 			DisplayServerAppleEmbedded::get_singleton()->update_gyroscope(Vector3(rotation.x, rotation.y, rotation.z).rotated(Vector3(0, 0, 1), Math::PI * 0.5));
-			DisplayServerAppleEmbedded::get_singleton()->update_device_orientation(Quaternion(Vector3(0, 0, 1), Math::PI * 0.5) * device_orientation);
 		} break;
 		case UIInterfaceOrientationPortraitUpsideDown: {
 			DisplayServerAppleEmbedded::get_singleton()->update_gravity(Vector3(gravity.x, gravity.y, gravity.z).rotated(Vector3(0, 0, 1), Math::PI));
 			DisplayServerAppleEmbedded::get_singleton()->update_accelerometer(Vector3(acceleration.x + gravity.x, acceleration.y + gravity.y, acceleration.z + gravity.z).rotated(Vector3(0, 0, 1), Math::PI));
 			DisplayServerAppleEmbedded::get_singleton()->update_magnetometer(Vector3(magnetic.x, magnetic.y, magnetic.z).rotated(Vector3(0, 0, 1), Math::PI));
 			DisplayServerAppleEmbedded::get_singleton()->update_gyroscope(Vector3(rotation.x, rotation.y, rotation.z).rotated(Vector3(0, 0, 1), Math::PI));
-			DisplayServerAppleEmbedded::get_singleton()->update_device_orientation(Quaternion(Vector3(0, 0, 1), Math::PI) * device_orientation);
 		} break;
 		default: { // assume portrait
 			DisplayServerAppleEmbedded::get_singleton()->update_gravity(Vector3(gravity.x, gravity.y, gravity.z));
 			DisplayServerAppleEmbedded::get_singleton()->update_accelerometer(Vector3(acceleration.x + gravity.x, acceleration.y + gravity.y, acceleration.z + gravity.z));
 			DisplayServerAppleEmbedded::get_singleton()->update_magnetometer(Vector3(magnetic.x, magnetic.y, magnetic.z));
 			DisplayServerAppleEmbedded::get_singleton()->update_gyroscope(Vector3(rotation.x, rotation.y, rotation.z));
-			DisplayServerAppleEmbedded::get_singleton()->update_device_orientation(device_orientation);
 		} break;
 	}
 }

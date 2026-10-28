@@ -23,7 +23,11 @@
 #ifndef _TVG_XML_PARSER_H_
 #define _TVG_XML_PARSER_H_
 
-#include "tvgSvgCommon.h"
+#include "tvgSvgLoaderCommon.h"
+
+#define NUMBER_OF_XML_ENTITIES 9
+const char* const xmlEntity[] = {"&#10;", "&quot;", "&nbsp;", "&apos;", "&amp;", "&lt;", "&gt;", "&#035;", "&#039;"};
+const int xmlEntityLength[] = {5, 6, 6, 6, 5, 4, 4, 6, 6};
 
 enum class XMLType
 {

@@ -6,6 +6,9 @@
 
 JPH_NAMESPACE_BEGIN
 
+// Turn off fused multiply add instruction because it makes the equations of the form a * b - c * d inaccurate below
+JPH_PRECISE_MATH_ON
+
 /// Helper utils to find the closest point to a line segment, triangle or tetrahedron
 namespace ClosestPoint
 {
@@ -66,7 +69,7 @@ namespace ClosestPoint
 
 			// Denominator must be positive:
 			// |v0|^2 * |v1|^2 - (v0 . v1)^2 = |v0|^2 * |v1|^2 * (1 - cos(angle)^2) >= 0
-			float denominator = DifferenceOfProducts(d00, d11, d01, d01);
+			float denominator = d00 * d11 - d01 * d01;
 			if (denominator < 1.0e-12f)
 			{
 				// Degenerate triangle, return coordinates along longest edge
@@ -86,8 +89,8 @@ namespace ClosestPoint
 			{
 				float a0 = inA.Dot(v0);
 				float a1 = inA.Dot(v1);
-				outV = DifferenceOfProducts(d01, a1, d11, a0) / denominator;
-				outW = DifferenceOfProducts(d01, a0, d00, a1) / denominator;
+				outV = (d01 * a1 - d11 * a0) / denominator;
+				outW = (d01 * a0 - d00 * a1) / denominator;
 				outU = 1.0f - outV - outW;
 			}
 		}
@@ -96,7 +99,7 @@ namespace ClosestPoint
 			// Use v1 and v2 to calculate barycentric coordinates
 			float d12 = v1.Dot(v2);
 
-			float denominator = DifferenceOfProducts(d11, d22, d12, d12);
+			float denominator = d11 * d22 - d12 * d12;
 			if (denominator < 1.0e-12f)
 			{
 				// Degenerate triangle, return coordinates along longest edge
@@ -116,8 +119,8 @@ namespace ClosestPoint
 			{
 				float c1 = inC.Dot(v1);
 				float c2 = inC.Dot(v2);
-				outU = DifferenceOfProducts(d22, c1, d12, c2) / denominator;
-				outV = DifferenceOfProducts(d11, c2, d12, c1) / denominator;
+				outU = (d22 * c1 - d12 * c2) / denominator;
+				outV = (d11 * c2 - d12 * c1) / denominator;
 				outW = 1.0f - outU - outV;
 			}
 		}
@@ -163,12 +166,12 @@ namespace ClosestPoint
 		// See: https://box2d.org/posts/2014/01/troublesome-triangle/
 		// The difference in normals is most pronounced when one edge is much smaller than the others (in which case the other 2 must have roughly the same length).
 		// Therefore we can suffice by just picking the shortest from 2 edges and use that with the 3rd edge to calculate the normal.
-		// In this case we ensure that ab is shorter than bc by swapping a and c if it is not.
+		// We first check which of the edges is shorter and if bc is shorter than ac then we swap a with c to a is always on the shortest edge
 		UVec4 swap_ac;
 		{
-			Vec3 ba = inA - inB;
+			Vec3 ac = inC - inA;
 			Vec3 bc = inC - inB;
-			swap_ac = Vec4::sLess(bc.DotV4(bc), ba.DotV4(ba));
+			swap_ac = Vec4::sLess(bc.DotV4(bc), ac.DotV4(ac));
 		}
 		Vec3 a = Vec3::sSelect(inA, inC, swap_ac);
 		Vec3 c = Vec3::sSelect(inC, inA, swap_ac);
@@ -176,7 +179,7 @@ namespace ClosestPoint
 		// Calculate normal
 		Vec3 ab = inB - a;
 		Vec3 ac = c - a;
-		Vec3 n = ab.CrossPrecise(ac);
+		Vec3 n = ab.Cross(ac);
 		float n_len_sq = n.LengthSq();
 
 		// Check degenerate
@@ -340,7 +343,7 @@ namespace ClosestPoint
 		// With p = 0
 
 		// Test if point p and d lie on opposite sides of plane through abc
-		Vec3 n = (inB - inA).CrossPrecise(inC - inA);
+		Vec3 n = (inB - inA).Cross(inC - inA);
 		float signp = inA.Dot(n); // [AP AB AC]
 		float signd = (inD - inA).Dot(n); // [AD AB AC]
 
@@ -364,10 +367,10 @@ namespace ClosestPoint
 		Vec3 bd = inD - inB;
 		Vec3 bc = inC - inB;
 
-		Vec3 ab_cross_ac = ab.CrossPrecise(ac);
-		Vec3 ac_cross_ad = ac.CrossPrecise(ad);
-		Vec3 ad_cross_ab = ad.CrossPrecise(ab);
-		Vec3 bd_cross_bc = bd.CrossPrecise(bc);
+		Vec3 ab_cross_ac = ab.Cross(ac);
+		Vec3 ac_cross_ad = ac.Cross(ad);
+		Vec3 ad_cross_ab = ad.Cross(ab);
+		Vec3 bd_cross_bc = bd.Cross(bc);
 
 		// For each plane get the side on which the origin is
 		float signp0 = inA.Dot(ab_cross_ac); // ABC
@@ -489,5 +492,7 @@ namespace ClosestPoint
 		return closest_point;
 	}
 };
+
+JPH_PRECISE_MATH_OFF
 
 JPH_NAMESPACE_END

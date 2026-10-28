@@ -34,8 +34,6 @@
 
 #include <thorvg.h>
 
-#include <memory>
-
 HashMap<Color, Color> ImageLoaderSVG::forced_color_map = HashMap<Color, Color>();
 
 void ImageLoaderSVG::set_forced_color_map(const HashMap<Color, Color> &p_color_map) {
@@ -162,15 +160,20 @@ Error ImageLoaderSVG::load_image(Ref<Image> p_image, Ref<FileAccess> p_fileacces
 	p_fileaccess->get_buffer(buffer.ptrw(), buffer.size());
 
 	String svg;
-	RETURN_IF_ERROR(svg.append_utf8((const char *)buffer.ptr(), buffer.size()));
-
-	if (p_flags & FLAG_CONVERT_COLORS) {
-		RETURN_IF_ERROR(create_image_from_string(p_image, svg, p_scale, false, forced_color_map));
-	} else {
-		RETURN_IF_ERROR(create_image_from_string(p_image, svg, p_scale, false, HashMap<Color, Color>()));
+	Error err = svg.append_utf8((const char *)buffer.ptr(), buffer.size());
+	if (err != OK) {
+		return err;
 	}
 
-	if (p_image->is_empty()) {
+	if (p_flags & FLAG_CONVERT_COLORS) {
+		err = create_image_from_string(p_image, svg, p_scale, false, forced_color_map);
+	} else {
+		err = create_image_from_string(p_image, svg, p_scale, false, HashMap<Color, Color>());
+	}
+
+	if (err != OK) {
+		return err;
+	} else if (p_image->is_empty()) {
 		return ERR_INVALID_DATA;
 	}
 

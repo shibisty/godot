@@ -79,7 +79,6 @@ class EditorRunBar : public MarginContainer {
 
 	EditorRun editor_run;
 	EditorRunNative *run_native = nullptr;
-	bool is_native = false;
 
 	enum MovieMakerMenuItem {
 		MOVIE_MAKER_TOGGLE,
@@ -130,7 +129,6 @@ public:
 	String get_playing_scene() const;
 
 	Error start_native_device(int p_device_id) const;
-	bool is_running_natively() const;
 
 	ProcessID has_child_process(ProcessID p_pid) const;
 	void stop_child_process(ProcessID p_pid);

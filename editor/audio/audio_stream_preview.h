@@ -30,15 +30,15 @@
 
 #pragma once
 
-#include "core/object/worker_thread_pool.h"
+#include "core/os/thread.h"
 #include "core/templates/safe_refcount.h"
 #include "scene/main/node.h"
-#include "scene/resources/audio/audio_stream.h"
+#include "servers/audio/audio_stream.h"
 
 class AudioStreamPreview : public RefCounted {
 	GDCLASS(AudioStreamPreview, RefCounted);
 	friend class AudioStream;
-	LocalVector<uint8_t> preview;
+	Vector<uint8_t> preview;
 	float length;
 
 	friend class AudioStreamPreviewGenerator;
@@ -64,7 +64,7 @@ class AudioStreamPreviewGenerator : public Node {
 		Ref<AudioStreamPlayback> playback;
 		SafeFlag generating;
 		ObjectID id;
-		WorkerThreadPool::TaskID task_id = WorkerThreadPool::INVALID_TASK_ID;
+		Thread *thread = nullptr;
 
 		// Needed for the bookkeeping of the Map
 		void operator=(const Preview &p_rhs) {
@@ -73,7 +73,7 @@ class AudioStreamPreviewGenerator : public Node {
 			playback = p_rhs.playback;
 			generating.set_to(generating.is_set());
 			id = p_rhs.id;
-			task_id = p_rhs.task_id;
+			thread = p_rhs.thread;
 		}
 		Preview(const Preview &p_rhs) {
 			preview = p_rhs.preview;
@@ -81,7 +81,7 @@ class AudioStreamPreviewGenerator : public Node {
 			playback = p_rhs.playback;
 			generating.set_to(generating.is_set());
 			id = p_rhs.id;
-			task_id = p_rhs.task_id;
+			thread = p_rhs.thread;
 		}
 		Preview() {}
 	};
@@ -102,5 +102,4 @@ public:
 	Ref<AudioStreamPreview> generate_preview(const Ref<AudioStream> &p_stream);
 
 	AudioStreamPreviewGenerator();
-	~AudioStreamPreviewGenerator();
 };

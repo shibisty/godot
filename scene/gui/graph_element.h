@@ -65,8 +65,6 @@ protected:
 
 	virtual void _resort();
 
-	virtual Size2 get_minimum_size() const override;
-
 	void _validate_property(PropertyInfo &p_property) const;
 
 public:
@@ -90,6 +88,8 @@ public:
 
 	void set_scaling_menus(bool p_scaling_menus);
 	bool is_scaling_menus() const;
+
+	virtual Size2 get_minimum_size() const override;
 
 	bool is_resizing() const {
 		return resizing;

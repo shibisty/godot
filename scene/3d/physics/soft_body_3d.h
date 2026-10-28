@@ -151,7 +151,6 @@ public:
 
 	void set_parent_collision_ignore(const NodePath &p_parent_collision_ignore);
 	const NodePath &get_parent_collision_ignore() const;
-	int get_point_count() const;
 
 	void set_pinned_points_indices(Vector<PinnedPoint> p_pinned_points_indices);
 	Vector<PinnedPoint> get_pinned_points_indices();
@@ -178,8 +177,8 @@ public:
 	real_t get_drag_coefficient();
 
 	TypedArray<PhysicsBody3D> get_collision_exceptions();
-	void add_collision_exception_with(RequiredParam<Node> p_node);
-	void remove_collision_exception_with(RequiredParam<Node> p_node);
+	void add_collision_exception_with(RequiredParam<Node> rp_node);
+	void remove_collision_exception_with(RequiredParam<Node> rp_node);
 
 	Vector3 get_point_transform(int p_point_index);
 

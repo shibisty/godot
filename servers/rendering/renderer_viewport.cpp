@@ -36,6 +36,7 @@
 #include "core/object/worker_thread_pool.h"
 #include "core/os/os.h"
 #include "core/profiling/profiling.h"
+#include "drivers/streamline/streamline.h"
 #include "servers/display/display_server.h"
 #include "servers/rendering/renderer_canvas_cull.h"
 #include "servers/rendering/renderer_compositor.h"
@@ -133,6 +134,44 @@ Vector<RendererViewport::Viewport *> RendererViewport::_sort_active_viewports() 
 	return result;
 }
 
+bool RendererViewport::_is_dlss_available() {
+	if (OS::get_singleton()->get_current_rendering_method() != "forward_plus") {
+		return false;
+	}
+	Streamline *streamline = Streamline::get_singleton();
+	return streamline != nullptr && streamline->get_capability(STREAMLINE_CAPABILITY_DLSS);
+}
+
+bool RendererViewport::_is_frame_generation_available() {
+	if (OS::get_singleton()->get_current_rendering_method() != "forward_plus") {
+		return false;
+	}
+	Streamline *streamline = Streamline::get_singleton();
+	return streamline != nullptr && streamline->get_capability(STREAMLINE_CAPABILITY_DLSS_G);
+}
+
+void RendererViewport::_capture_frame_generation_hudless(Viewport *p_viewport) {
+	// Mariner E3: DLSS Frame Generation interpolates the whole swap chain image. Godot draws the 2D canvases (HUD,
+	// menus) into the same render target as the 3D scene, so the 3D result is copied here, after the scene is final
+	// (tonemapped, post-processed) and before any canvas on top of it is drawn, with the same blit that later puts the
+	// render target on screen. DLSS-G gets it as the HUD-less colour and keeps the UI out of the interpolation.
+	if (!p_viewport->frame_generation || p_viewport->viewport_to_screen == DisplayServerEnums::INVALID_WINDOW_ID || p_viewport->use_xr) {
+		return;
+	}
+	if (p_viewport->scaling_3d_mode != RSE::VIEWPORT_SCALING_3D_MODE_DLSS || !p_viewport->dlss_enabled || !_is_frame_generation_available()) {
+		return; // Frame generation runs with DLSS / DLAA only.
+	}
+	RenderingServerTypes::BlitToScreen blit;
+	blit.render_target = p_viewport->render_target;
+	if (p_viewport->viewport_to_screen_rect != Rect2()) {
+		blit.dst_rect = p_viewport->viewport_to_screen_rect;
+	} else {
+		blit.dst_rect.position = Vector2();
+		blit.dst_rect.size = p_viewport->size;
+	}
+	RSG::rasterizer->frame_generation_capture_hudless(p_viewport->viewport_to_screen, blit);
+}
+
 void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 	if (p_viewport->render_buffers.is_valid()) {
 		if (p_viewport->size.width == 0 || p_viewport->size.height == 0) {
@@ -141,7 +180,16 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 			const float EPSILON = 0.0001;
 			float scaling_3d_scale = p_viewport->scaling_3d_scale;
 			RSE::ViewportScaling3DMode scaling_3d_mode = p_viewport->scaling_3d_mode;
-			bool upscaler_available = p_viewport->fsr_enabled;
+			bool upscaler_available = p_viewport->fsr_enabled || p_viewport->dlss_enabled;
+
+			if (scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS && !(p_viewport->dlss_enabled && _is_dlss_available())) {
+				// DLSS needs Forward+ on D3D12 or Vulkan, an NVIDIA RTX GPU and the Streamline DLLs next to the executable.
+				// Fall back to plain bilinear scaling (TAA, if enabled, keeps working) instead of rendering a jittered,
+				// non-accumulated image.
+				WARN_PRINT_ONCE("NVIDIA DLSS is not available (Streamline not loaded, unsupported GPU/driver or renderer). Falling back to bilinear 3D resolution scaling.");
+				scaling_3d_mode = RSE::VIEWPORT_SCALING_3D_MODE_BILINEAR;
+			}
+
 			RSE::ViewportScaling3DType scaling_type = RSE::scaling_3d_mode_type(scaling_3d_mode);
 
 			if ((!upscaler_available || (scaling_type == RSE::VIEWPORT_SCALING_3D_TYPE_SPATIAL)) && scaling_3d_scale >= (1.0 - EPSILON) && scaling_3d_scale <= (1.0 + EPSILON)) {
@@ -165,9 +213,6 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 				WARN_PRINT_ONCE("MetalFX temporal and FSR upscaling are not supported in the Mobile renderer. Falling back to bilinear scaling.");
 			}
 
-			RenderingServerEnums::ViewportMSAA msaa_3d = p_viewport->msaa_3d;
-
-#ifdef RD_ENABLED
 			if (scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL && !RD::get_singleton()->has_feature(RD::SUPPORTS_METALFX_TEMPORAL)) {
 				if (RD::get_singleton()->has_feature(RD::SUPPORTS_METALFX_SPATIAL)) {
 					// Prefer MetalFX spatial if it is supported, which will be much more efficient than FSR2,
@@ -186,6 +231,8 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 				WARN_PRINT_ONCE("MetalFX spatial upscaling is not supported by the current renderer or hardware. Falling back to FSR scaling.");
 			}
 
+			RSE::ViewportMSAA msaa_3d = p_viewport->msaa_3d;
+
 			// If MetalFX Temporal upscaling is supported, verify limits.
 			if (scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL) {
 				double min_scale = (double)RD::get_singleton()->limit_get(RD::LIMIT_METALFX_TEMPORAL_SCALER_MIN_SCALE) / 1000'000.0;
@@ -198,23 +245,14 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 					msaa_3d = RSE::VIEWPORT_MSAA_DISABLED;
 				}
 			}
-#else
-			if (scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL) {
-				scaling_3d_mode = RSE::VIEWPORT_SCALING_3D_MODE_FSR2;
-				WARN_PRINT_ONCE("MetalFX upscaling is not supported by the current renderer or hardware. Falling back to FSR 2 scaling.");
-			} else if (scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_SPATIAL) {
-				scaling_3d_mode = RSE::VIEWPORT_SCALING_3D_MODE_FSR;
-				WARN_PRINT_ONCE("MetalFX spatial upscaling is not supported by the current renderer or hardware. Falling back to FSR scaling.");
-			}
-#endif // RD_ENABLED
 
 			bool scaling_3d_is_not_bilinear = scaling_3d_mode != RSE::VIEWPORT_SCALING_3D_MODE_OFF && scaling_3d_mode != RSE::VIEWPORT_SCALING_3D_MODE_BILINEAR;
 			bool use_taa = p_viewport->use_taa;
 
 			if (scaling_3d_is_not_bilinear && scaling_3d_scale >= (1.0 + EPSILON)) {
-				// FSR, MetalFX, and nearest-neighbor scaling are not designed for downsampling.
+				// FSR, MetalFX, DLSS, and nearest-neighbor scaling are not designed for downsampling.
 				// Fall back to bilinear scaling.
-				WARN_PRINT_ONCE("FSR, MetalFX, and nearest-neighbor 3D resolution scaling are not designed for downsampling. Falling back to bilinear 3D resolution scaling.");
+				WARN_PRINT_ONCE("FSR, MetalFX, DLSS, and nearest-neighbor 3D resolution scaling are not designed for downsampling. Falling back to bilinear 3D resolution scaling.");
 				scaling_3d_mode = RSE::VIEWPORT_SCALING_3D_MODE_BILINEAR;
 				scaling_type = RSE::scaling_3d_mode_type(scaling_3d_mode);
 			}
@@ -230,7 +268,7 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 			if (use_taa && scaling_type == RSE::VIEWPORT_SCALING_3D_TYPE_TEMPORAL) {
 				// Temporal upscalers can't be used with TAA.
 				// Turn it off and prefer using the temporal upscaler.
-				WARN_PRINT_ONCE("FSR 2 or MetalFX Temporal is not compatible with TAA. Disabling TAA internally.");
+				WARN_PRINT_ONCE("FSR 2, MetalFX Temporal or DLSS is not compatible with TAA. Disabling TAA internally.");
 				use_taa = false;
 			}
 
@@ -253,6 +291,7 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 				case RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL:
 				case RSE::VIEWPORT_SCALING_3D_MODE_FSR:
 				case RSE::VIEWPORT_SCALING_3D_MODE_FSR2:
+				case RSE::VIEWPORT_SCALING_3D_MODE_DLSS:
 					target_width = p_viewport->size.width;
 					target_height = p_viewport->size.height;
 					render_width = MAX(target_width * scaling_3d_scale, 1.0); // target_width / (target_width * scaling)
@@ -306,6 +345,7 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 			rb_config.set_anisotropic_filtering_level(p_viewport->anisotropic_filtering_level);
 			rb_config.set_use_taa(use_taa);
 			rb_config.set_use_debanding(p_viewport->use_debanding);
+			rb_config.set_use_frame_generation(p_viewport->frame_generation && scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS);
 
 			p_viewport->render_buffers->configure(&rb_config);
 		}
@@ -315,6 +355,13 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 void RendererViewport::_draw_3d(Viewport *p_viewport) {
 #ifndef _3D_DISABLED
 	RENDER_TIMESTAMP("> Render 3D Scene");
+
+	Ref<XRInterface> xr_interface;
+#ifndef XR_DISABLED
+	if (p_viewport->use_xr && XRServer::get_singleton() != nullptr) {
+		xr_interface = XRServer::get_singleton()->get_primary_interface();
+	}
+#endif // XR_DISABLED
 
 	if (p_viewport->use_occlusion_culling) {
 		if (p_viewport->occlusion_buffer_dirty) {
@@ -332,7 +379,11 @@ void RendererViewport::_draw_3d(Viewport *p_viewport) {
 	}
 
 	float screen_mesh_lod_threshold = p_viewport->mesh_lod_threshold / float(p_viewport->size.width);
-	RSG::scene->render_camera(p_viewport->render_buffers, p_viewport->camera, p_viewport->scenario, p_viewport->self, p_viewport->internal_size, p_viewport->jitter_phase_count, screen_mesh_lod_threshold, p_viewport->shadow_atlas, p_viewport->window_output_max_value, &p_viewport->render_info);
+	RSG::scene->render_camera(p_viewport->render_buffers, p_viewport->camera, p_viewport->scenario, p_viewport->self, p_viewport->internal_size, p_viewport->jitter_phase_count, screen_mesh_lod_threshold, p_viewport->shadow_atlas, xr_interface, p_viewport->window_output_max_value, &p_viewport->render_info);
+
+	if (xr_interface.is_null()) {
+		_capture_frame_generation_hudless(p_viewport);
+	}
 
 	RENDER_TIMESTAMP("< Render 3D Scene");
 #endif // _3D_DISABLED
@@ -376,7 +427,6 @@ void RendererViewport::_draw_viewport(Viewport *p_viewport) {
 		}
 
 		p_viewport->window_output_max_value = 1.0;
-#ifdef RD_ENABLED
 		DisplayServerEnums::WindowID parent_window = _get_containing_window(p_viewport);
 		if (RD::get_singleton() && parent_window != DisplayServerEnums::INVALID_WINDOW_ID) {
 			RenderingContextDriver *context_driver = RD::get_singleton()->get_context_driver();
@@ -384,18 +434,9 @@ void RendererViewport::_draw_viewport(Viewport *p_viewport) {
 				p_viewport->window_output_max_value = context_driver->window_get_output_max_linear_value(parent_window);
 			}
 		}
-#endif
 	}
 
 	bool can_draw_3d = RSG::scene->is_camera(p_viewport->camera) && !p_viewport->disable_3d;
-
-#ifndef XR_DISABLED
-#if DEBUG_ENABLED
-	if (p_viewport->use_xr && !RSG::scene->is_xr_camera(p_viewport->camera)) {
-		WARN_PRINT("Viewport marked with use_xr but current camera is not an XRCamera3D");
-	}
-#endif
-#endif
 
 	if ((scenario_draw_canvas_bg || can_draw_3d) && !p_viewport->render_buffers.is_valid()) {
 		//wants to draw 3D but there is no render buffer, create
@@ -1010,6 +1051,7 @@ void RendererViewport::viewport_initialize(RID p_rid) {
 	viewport->viewport_render_direct_to_screen = false;
 
 	viewport->fsr_enabled = !RSG::rasterizer->is_low_end() && !viewport->disable_3d;
+	viewport->dlss_enabled = !RSG::rasterizer->is_low_end() && !viewport->disable_3d;
 }
 
 #ifndef XR_DISABLED
@@ -1032,6 +1074,22 @@ void RendererViewport::viewport_set_use_xr(RID p_viewport, bool p_use_xr) {
 }
 #endif // !XR_DISABLED
 
+void RendererViewport::viewport_set_frame_generation(RID p_viewport, bool p_frame_generation) {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL(viewport);
+
+	if (viewport->frame_generation == p_frame_generation) {
+		return;
+	}
+	viewport->frame_generation = p_frame_generation;
+	_configure_3d_render_buffers(viewport);
+}
+
+bool RendererViewport::viewport_get_frame_generation(RID p_viewport) const {
+	const Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	return viewport != nullptr && viewport->frame_generation;
+}
+
 void RendererViewport::viewport_set_scaling_3d_mode(RID p_viewport, RSE::ViewportScaling3DMode p_mode) {
 	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
 	ERR_FAIL_NULL(viewport);
@@ -1049,10 +1107,21 @@ void RendererViewport::viewport_set_scaling_3d_mode(RID p_viewport, RSE::Viewpor
 			WARN_PRINT_ONCE_ED("MetalFX Temporal 3D scaling is only available when using the Forward+ renderer.");
 			return;
 		}
+		if (p_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS) {
+			WARN_PRINT_ONCE_ED("DLSS 3D scaling is only available when using the Forward+ renderer.");
+			return;
+		}
 	}
 	if (rendering_method == "gl_compatibility" && p_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_SPATIAL) {
 		WARN_PRINT_ONCE_ED("MetalFX Spatial 3D scaling is only available when using the Forward+ or Mobile renderer.");
 		return;
+	}
+	if (p_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS && !_is_dlss_available()) {
+#ifndef STREAMLINE_ENABLED
+		WARN_PRINT_ONCE_ED("DLSS is not available because Streamline support was not compiled into the engine (Windows only). Falling back to bilinear 3D resolution scaling.");
+#else
+		WARN_PRINT_ONCE_ED("DLSS is not available: Streamline failed to initialize (sl.interposer.dll, sl.common.dll, sl.dlss.dll and nvngx_dlss.dll must be next to the executable) or the GPU/driver does not support DLSS. Falling back to bilinear 3D resolution scaling.");
+#endif
 	}
 
 	if (viewport->scaling_3d_mode == p_mode) {
@@ -1512,6 +1581,39 @@ void RendererViewport::_viewport_set_force_motion_vectors(RendererViewport::View
 	}
 
 	_configure_3d_render_buffers(p_viewport);
+}
+
+int RendererViewport::viewport_get_pathtracing_sample_count(RID p_viewport) {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL_V(viewport, 0);
+	return viewport->render_buffers.is_valid() ? int(viewport->render_buffers->get_pathtracing_sample_count()) : 0;
+}
+
+void RendererViewport::viewport_reset_pathtracing(RID p_viewport) {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL(viewport);
+	if (viewport->render_buffers.is_valid()) {
+		viewport->render_buffers->reset_pathtracing();
+	}
+}
+
+bool RendererViewport::viewport_get_raytracing_scene(RID p_viewport, uint32_t &r_cull_mask, float &r_distance) const {
+	const Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	if (!viewport || !viewport->raytracing_scene) {
+		return false;
+	}
+	r_cull_mask = viewport->raytracing_scene_cull_mask;
+	r_distance = viewport->raytracing_scene_distance;
+	return true;
+}
+
+void RendererViewport::viewport_set_raytracing_scene(RID p_viewport, bool p_enable, uint32_t p_cull_mask, float p_distance) {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL(viewport);
+
+	viewport->raytracing_scene = p_enable;
+	viewport->raytracing_scene_cull_mask = p_cull_mask;
+	viewport->raytracing_scene_distance = MAX(p_distance, 0.0f);
 }
 
 void RendererViewport::viewport_set_use_occlusion_culling(RID p_viewport, bool p_use_occlusion_culling) {

@@ -593,7 +593,7 @@ void StreamPeerBuffer::set_data_array(const Vector<uint8_t> &p_data) {
 	pointer = 0;
 }
 
-const Vector<uint8_t> &StreamPeerBuffer::get_data_array() const {
+Vector<uint8_t> StreamPeerBuffer::get_data_array() const {
 	return data;
 }
 

@@ -239,10 +239,6 @@ public:
 		return bone_id;
 	}
 
-	RID get_joint_rid() const {
-		return joint;
-	}
-
 	void set_joint_type(JointType p_joint_type);
 	JointType get_joint_type() const;
 

@@ -885,6 +885,7 @@ typedef struct DefaultTZInfo {
     char* defaultTZBuffer;
     int64_t defaultTZFileSize;
     FILE* defaultTZFilePtr;
+    UBool defaultTZstatus;
     int32_t defaultTZPosition;
 } DefaultTZInfo;
 
@@ -892,7 +893,7 @@ typedef struct DefaultTZInfo {
  * This method compares the two files given to see if they are a match.
  * It is currently use to compare two TZ files.
  */
-static UBool compareBinaryFiles(const char* TZFileName, DefaultTZInfo* tzInfo) {
+static UBool compareBinaryFiles(const char* defaultTZFileName, const char* TZFileName, DefaultTZInfo* tzInfo) {
     FILE* file;
     int64_t sizeFile;
     int64_t sizeFileLeft;
@@ -901,26 +902,21 @@ static UBool compareBinaryFiles(const char* TZFileName, DefaultTZInfo* tzInfo) {
     char bufferFile[MAX_READ_SIZE];
     UBool result = true;
 
-    U_ASSERT(tzInfo->defaultTZFilePtr != nullptr);
+    if (tzInfo->defaultTZFilePtr == nullptr) {
+        tzInfo->defaultTZFilePtr = fopen(defaultTZFileName, "r");
+    }
     file = fopen(TZFileName, "r");
 
     tzInfo->defaultTZPosition = 0; /* reset position to begin search */
 
-    if (file != nullptr) {
+    if (file != nullptr && tzInfo->defaultTZFilePtr != nullptr) {
         /* First check that the file size are equal. */
         if (tzInfo->defaultTZFileSize == 0) {
             fseek(tzInfo->defaultTZFilePtr, 0, SEEK_END);
             tzInfo->defaultTZFileSize = ftell(tzInfo->defaultTZFilePtr);
         }
-        if (fseek(file, 0, SEEK_END) != 0) {
-            fclose(file);
-            return false;
-        }
+        fseek(file, 0, SEEK_END);
         sizeFile = ftell(file);
-        if (sizeFile == -1) {
-            fclose(file);
-            return false;
-        }
         sizeFileLeft = sizeFile;
 
         if (sizeFile != tzInfo->defaultTZFileSize) {
@@ -930,26 +926,16 @@ static UBool compareBinaryFiles(const char* TZFileName, DefaultTZInfo* tzInfo) {
              * compare each byte to determine equality.
              */
             if (tzInfo->defaultTZBuffer == nullptr) {
-                if (fseek(tzInfo->defaultTZFilePtr, 0, SEEK_SET) != 0) {
-                    fclose(file);
-                    return false;
-                }
+                rewind(tzInfo->defaultTZFilePtr);
                 tzInfo->defaultTZBuffer = static_cast<char*>(uprv_malloc(sizeof(char) * tzInfo->defaultTZFileSize));
                 sizeFileRead = fread(tzInfo->defaultTZBuffer, 1, tzInfo->defaultTZFileSize, tzInfo->defaultTZFilePtr);
             }
-            if (fseek(file, 0, SEEK_SET) != 0) {
-                fclose(file);
-                return false;
-            }
+            rewind(file);
             while(sizeFileLeft > 0) {
                 uprv_memset(bufferFile, 0, MAX_READ_SIZE);
                 sizeFileToRead = sizeFileLeft < MAX_READ_SIZE ? sizeFileLeft : MAX_READ_SIZE;
 
                 sizeFileRead = fread(bufferFile, 1, sizeFileToRead, file);
-                if (sizeFileRead == -1) {
-                    fclose(file);
-                    return false;
-                }
                 if (memcmp(tzInfo->defaultTZBuffer + tzInfo->defaultTZPosition, bufferFile, sizeFileRead) != 0) {
                     result = false;
                     break;
@@ -985,11 +971,6 @@ static char* searchForTZFile(const char* path, DefaultTZInfo* tzInfo) {
     struct dirent* dirEntry = nullptr;
     char* result = nullptr;
     UErrorCode status = U_ZERO_ERROR;
-
-    /* There is no reference file to compare against, so do not traverse the zoneinfo tree. */
-    if (tzInfo->defaultTZFilePtr == nullptr) {
-        return nullptr;
-    }
 
     /* Save the current path */
     CharString curpath(path, -1, status);
@@ -1042,7 +1023,7 @@ static char* searchForTZFile(const char* path, DefaultTZInfo* tzInfo) {
                 if (result != nullptr)
                     break;
             } else {
-                if(compareBinaryFiles(newpath.data(), tzInfo)) {
+                if(compareBinaryFiles(TZDEFAULT, newpath.data(), tzInfo)) {
                     int32_t amountToSkip = sizeof(TZZONEINFO) - 1;
                     if (amountToSkip > newpath.length()) {
                         amountToSkip = newpath.length();
@@ -1217,7 +1198,8 @@ uprv_tzname(int n)
             if (tzInfo != nullptr) {
                 tzInfo->defaultTZBuffer = nullptr;
                 tzInfo->defaultTZFileSize = 0;
-                tzInfo->defaultTZFilePtr = fopen(TZDEFAULT, "r");
+                tzInfo->defaultTZFilePtr = nullptr;
+                tzInfo->defaultTZstatus = false;
                 tzInfo->defaultTZPosition = 0;
 
                 gTimeZoneBufferPtr = searchForTZFile(TZZONEINFO, tzInfo);
@@ -1448,6 +1430,9 @@ static void U_CALLCONV dataDirectoryInitFn() {
     }
 
     const char *path = nullptr;
+#if defined(ICU_DATA_DIR_PREFIX_ENV_VAR)
+    char datadir_path_buffer[PATH_MAX];
+#endif
 
     /*
     When ICU_NO_USER_DATA_OVERRIDE is defined, users aren't allowed to
@@ -1477,9 +1462,6 @@ static void U_CALLCONV dataDirectoryInitFn() {
      * set their own path.
      */
 #if defined(ICU_DATA_DIR) || defined(U_ICU_DATA_DEFAULT_DIR)
-# if defined(ICU_DATA_DIR_PREFIX_ENV_VAR)
-    char datadir_path_buffer[PATH_MAX];
-# endif
     if(path==nullptr || *path==0) {
 # if defined(ICU_DATA_DIR_PREFIX_ENV_VAR)
         const char *prefix = getenv(ICU_DATA_DIR_PREFIX_ENV_VAR);

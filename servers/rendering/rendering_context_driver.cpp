@@ -33,6 +33,15 @@
 RenderingContextDriver::~RenderingContextDriver() {
 }
 
+bool RenderingContextDriver::device_get_info(uint32_t p_device_index, DeviceInfo &r_info) const {
+	r_info = DeviceInfo();
+	if (p_device_index < device_get_count()) {
+		r_info.type = device_get(p_device_index).type;
+		r_info.uma = r_info.type == DEVICE_TYPE_INTEGRATED_GPU || r_info.type == DEVICE_TYPE_CPU;
+	}
+	return false;
+}
+
 RenderingContextDriver::SurfaceID RenderingContextDriver::surface_get_from_window(DisplayServerEnums::WindowID p_window) const {
 	HashMap<DisplayServerEnums::WindowID, SurfaceID>::ConstIterator it = window_surface_map.find(p_window);
 	if (it != window_surface_map.end()) {

@@ -188,8 +188,7 @@ void LargeIslandSplitter::Prepare(const IslandBuilder &inIslandBuilder, uint32 i
 	JPH_PROFILE_FUNCTION();
 
 	// Count the total number of constraints and contacts that we will be putting in splits
-	JPH_ASSERT(mNumSplitIslands == 0);
-	JPH_ASSERT(mContactAndConstraintsSize == 0);
+	mContactAndConstraintsSize = 0;
 	for (uint32 island = 0; island < inIslandBuilder.GetNumIslands(); ++island)
 	{
 		// Get the contacts in this island
@@ -286,6 +285,8 @@ uint LargeIslandSplitter::AssignToNonParallelSplit(const Body *inBody)
 
 bool LargeIslandSplitter::SplitIsland(uint32 inIslandIndex, const IslandBuilder &inIslandBuilder, const BodyManager &inBodyManager, const ContactConstraintManager &inContactManager, Constraint **inActiveConstraints, CalculateSolverSteps &ioStepsCalculator)
 {
+	JPH_PROFILE_FUNCTION();
+
 	// Get the contacts in this island
 	uint32 *contacts_start, *contacts_end;
 	inIslandBuilder.GetContactsInIsland(inIslandIndex, contacts_start, contacts_end);
@@ -300,9 +301,6 @@ bool LargeIslandSplitter::SplitIsland(uint32 inIslandIndex, const IslandBuilder 
 	uint island_size = num_contacts_in_island + num_constraints_in_island;
 	if (island_size < cLargeIslandTreshold)
 		return false;
-
-	// Start measuring after the early out
-	JPH_PROFILE_FUNCTION();
 
 	// Get bodies in this island
 	BodyID *bodies_start, *bodies_end;

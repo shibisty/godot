@@ -28,8 +28,4 @@ public partial class Methods : GodotObject
     private void GenericMethod<T>(T t)
     {
     }
-
-    private static void StaticMethod()
-    {
-    }
 }

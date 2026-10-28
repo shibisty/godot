@@ -100,7 +100,7 @@ public:
 	StringName source_geometry_group_name = "navigation_polygon_source_geometry_group";
 
 	void set_vertices(const Vector<Vector2> &p_vertices);
-	const Vector<Vector2> &get_vertices() const _LIFETIME_BOUND_;
+	Vector<Vector2> get_vertices() const;
 
 	void add_polygon(const Vector<int> &p_polygon);
 	int get_polygon_count() const;

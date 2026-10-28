@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -31,24 +31,10 @@
 
 typedef struct SDL_CursorData SDL_CursorData;
 
-struct SDL_Cursor;
-
-typedef struct
-{
-    Uint64 last_update;
-    int num_frames;
-    int current_frame;
-    struct SDL_Cursor **frames;
-    Uint32 *durations;
-} SDL_CursorAnimation;
-
 struct SDL_Cursor
 {
-    SDL_CursorAnimation *animation;
-
-    SDL_CursorData *internal;
-
     struct SDL_Cursor *next;
+    SDL_CursorData *internal;
 };
 
 typedef struct
@@ -73,9 +59,6 @@ typedef struct
 {
     // Create a cursor from a surface
     SDL_Cursor *(*CreateCursor)(SDL_Surface *surface, int hot_x, int hot_y);
-
-    // Create an animated cursor from a sequence of surfaces
-    SDL_Cursor *(*CreateAnimatedCursor)(SDL_CursorFrameInfo *frames, int frame_count, int hot_x, int hot_y);
 
     // Create a system cursor
     SDL_Cursor *(*CreateSystemCursor)(SDL_SystemCursor id);
@@ -104,13 +87,9 @@ typedef struct
     // Get absolute mouse coordinates. (x) and (y) are never NULL and set to zero before call.
     SDL_MouseButtonFlags (*GetGlobalMouseState)(float *x, float *y);
 
-    // Platform-specific system mouse transform applied in relative mode
-    SDL_MouseMotionTransformCallback ApplySystemScale;
+    // Platform-specific system mouse transform
+    void (*ApplySystemScale)(void *internal, Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseID, float *x, float *y);
     void *system_scale_data;
-
-    // User-defined mouse input transform applied in relative mode
-    SDL_MouseMotionTransformCallback InputTransform;
-    void *input_transform_data;
 
     // integer mode data
     Uint8 integer_mode_flags; // 1 to enable mouse quantization, 2 to enable wheel quantization
@@ -131,7 +110,7 @@ typedef struct
     bool has_position;
     bool relative_mode;
     bool relative_mode_warp_motion;
-    bool relative_mode_hide_cursor;
+    bool relative_mode_cursor_visible;
     bool relative_mode_center;
     bool warp_emulation_hint;
     bool warp_emulation_active;
@@ -165,7 +144,7 @@ typedef struct
     SDL_Cursor *cursors;
     SDL_Cursor *def_cursor;
     SDL_Cursor *cur_cursor;
-    bool cursor_visible;
+    bool cursor_shown;
 
     // Driver-dependent data.
     void *internal;
@@ -181,25 +160,19 @@ extern void SDL_PostInitMouse(void);
 extern bool SDL_IsMouse(Uint16 vendor, Uint16 product);
 
 // A mouse has been added to the system
-extern void SDL_AddMouse(SDL_MouseID mouseID, const char *name);
+extern void SDL_AddMouse(SDL_MouseID mouseID, const char *name, bool send_event);
 
 // A mouse has been removed from the system
-extern void SDL_RemoveMouse(SDL_MouseID mouseID);
+extern void SDL_RemoveMouse(SDL_MouseID mouseID, bool send_event);
 
 // Get the mouse state structure
 extern SDL_Mouse *SDL_GetMouse(void);
-
-// Set the default mouse cursor
-extern void SDL_RedrawCursor(void);
 
 // Set the default mouse cursor
 extern void SDL_SetDefaultCursor(SDL_Cursor *cursor);
 
 // Get the preferred default system cursor
 extern SDL_SystemCursor SDL_GetDefaultSystemCursor(void);
-
-// Update the current cursor animation if needed
-extern void SDL_UpdateCursorAnimation(void);
 
 // Set the mouse focus window
 extern void SDL_SetMouseFocus(SDL_Window *window);
@@ -225,7 +198,7 @@ extern void SDL_PerformWarpMouseInWindow(SDL_Window *window, float x, float y, b
 // Relative mouse mode
 extern bool SDL_SetRelativeMouseMode(bool enabled);
 extern bool SDL_GetRelativeMouseMode(void);
-extern bool SDL_UpdateRelativeMouseMode(void);
+extern void SDL_UpdateRelativeMouseMode(void);
 extern void SDL_DisableMouseWarpEmulation(void);
 
 // TODO RECONNECT: Set mouse state to "zero"

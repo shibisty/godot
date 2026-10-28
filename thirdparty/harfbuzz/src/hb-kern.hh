@@ -43,6 +43,7 @@ struct hb_kern_machine_t
 		       driver (driver_),
 		       crossStream (crossStream_) {}
 
+  HB_NO_SANITIZE_SIGNED_INTEGER_OVERFLOW
   void kern (hb_font_t   *font,
 	     hb_buffer_t *buffer,
 	     hb_mask_t    kern_mask,
@@ -71,9 +72,9 @@ struct hb_kern_machine_t
 
       skippy_iter.reset_fast (idx);
       unsigned unsafe_to;
-      if (unlikely (!skippy_iter.next (&unsafe_to)))
+      if (!skippy_iter.next (&unsafe_to))
       {
-	idx = unsafe_to;
+	idx++;
 	continue;
       }
 
@@ -100,9 +101,9 @@ struct hb_kern_machine_t
 	{
 	  hb_position_t kern1 = kern >> 1;
 	  hb_position_t kern2 = kern - kern1;
-	  pos[i].x_advance = hb_saturate_add (pos[i].x_advance, kern1);
-	  pos[j].x_advance = hb_saturate_add (pos[j].x_advance, kern2);
-	  pos[j].x_offset = hb_saturate_add (pos[j].x_offset, kern2);
+	  pos[i].x_advance += kern1;
+	  pos[j].x_advance += kern2;
+	  pos[j].x_offset += kern2;
 	}
       }
       else
@@ -118,9 +119,9 @@ struct hb_kern_machine_t
 	{
 	  hb_position_t kern1 = kern >> 1;
 	  hb_position_t kern2 = kern - kern1;
-	  pos[i].y_advance = hb_saturate_add (pos[i].y_advance, kern1);
-	  pos[j].y_advance = hb_saturate_add (pos[j].y_advance, kern2);
-	  pos[j].y_offset = hb_saturate_add (pos[j].y_offset, kern2);
+	  pos[i].y_advance += kern1;
+	  pos[j].y_advance += kern2;
+	  pos[j].y_offset += kern2;
 	}
       }
 

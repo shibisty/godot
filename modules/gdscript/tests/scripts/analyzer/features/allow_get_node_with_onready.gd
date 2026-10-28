@@ -2,7 +2,6 @@ extends Node
 
 @onready var shorthand = $Node
 @onready var call_no_cast = get_node(^"Node")
-@warning_ignore("ONREADY_WITH_CAST")
 @onready var shorthand_with_cast = $Node as Node
 @onready var call_with_cast = get_node(^"Node") as Node
 

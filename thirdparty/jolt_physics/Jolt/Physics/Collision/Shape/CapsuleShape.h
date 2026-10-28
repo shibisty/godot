@@ -26,8 +26,7 @@ public:
 	/// Checks if the settings of this capsule make this shape a sphere
 	bool					IsSphere() const														{ return mHalfHeightOfCylinder == 0.0f; }
 
-	/// Create a shape according to the settings specified by this object.
-	/// Note when mHalfHeightOfCylinder is 0, this will create a SphereShape instead of a CapsuleShape.
+	// See: ShapeSettings
 	virtual ShapeResult		Create() const override;
 
 	float					mRadius = 0.0f;

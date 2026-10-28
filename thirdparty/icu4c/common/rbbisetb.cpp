@@ -60,6 +60,7 @@ RBBISetBuilder::RBBISetBuilder(RBBIRuleBuilder *rb)
     fTrie           = nullptr;
     fTrieSize       = 0;
     fGroupCount     = 0;
+    fSawBOF         = false;
 }
 
 
@@ -239,12 +240,16 @@ void RBBISetBuilder::buildRanges() {
 
     // Handle input sets that contain the special string {eof}.
     //   Column 1 of the state table is reserved for EOF on input.
-    //   Add this column value (1) to the equivalent expression
+    //   Column 2 is reserved for before-the-start-input.
+    //            (This column can be optimized away later if there are no rule
+    //             references to {bof}.)
+    //   Add this column value (1 or 2) to the equivalent expression
     //     subtree for each UnicodeSet that contains the string {eof}
-    //   Because {eof} is not a character in the normal sense,
-    //   it doesn’t affect the computation of ranges or TRIE.
+    //   Because {bof} and {eof} are not characters in the normal sense,
+    //   they don't affect the computation of the ranges or TRIE.
 
     UnicodeString eofString(u"eof");
+    UnicodeString bofString(u"bof");
     for (ni=0; ; ni++) {        // Loop over each of the UnicodeSets encountered in the input rules
         usetNode = static_cast<RBBINode*>(this->fRB->fUSetNodes->elementAt(ni));
         if (usetNode==nullptr) {
@@ -253,6 +258,10 @@ void RBBISetBuilder::buildRanges() {
         UnicodeSet      *inputSet = usetNode->fInputSet;
         if (inputSet->contains(eofString)) {
             addValToSet(usetNode, 1);
+        }
+        if (inputSet->contains(bofString)) {
+            addValToSet(usetNode, 2);
+            fSawBOF = true;
         }
     }
 
@@ -420,6 +429,16 @@ int32_t  RBBISetBuilder::getNumCharCategories() const {
 //------------------------------------------------------------------------
 int32_t  RBBISetBuilder::getDictCategoriesStart() const {
     return fDictCategoriesStart;
+}
+
+
+//------------------------------------------------------------------------
+//
+//   sawBOF
+//
+//------------------------------------------------------------------------
+UBool  RBBISetBuilder::sawBOF() const {
+    return fSawBOF;
 }
 
 

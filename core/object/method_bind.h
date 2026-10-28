@@ -133,8 +133,7 @@ public:
 
 	uint32_t get_hash() const;
 
-	// No-inline to save on binary space with LTO.
-	_NO_INLINE_ MethodBind();
+	MethodBind();
 	virtual ~MethodBind();
 };
 

@@ -1,19 +1,19 @@
-func print_enum(e: Mesh.ArrayType) -> Mesh.ArrayType:
+func print_enum(e: TileSet.TileShape) -> TileSet.TileShape:
 	print(e)
 	return e
 
 func test():
-	var v: Mesh.ArrayType
-	v = Mesh.ARRAY_VERTEX
+	var v: TileSet.TileShape
+	v = TileSet.TILE_SHAPE_SQUARE
 	v = print_enum(v)
-	v = print_enum(Mesh.ARRAY_VERTEX)
-	v = Mesh.ArrayType.ARRAY_VERTEX
+	v = print_enum(TileSet.TILE_SHAPE_SQUARE)
+	v = TileSet.TileShape.TILE_SHAPE_SQUARE
 	v = print_enum(v)
-	v = print_enum(Mesh.ArrayType.ARRAY_VERTEX)
+	v = print_enum(TileSet.TileShape.TILE_SHAPE_SQUARE)
 
-	v = Mesh.ARRAY_NORMAL
+	v = TileSet.TILE_SHAPE_ISOMETRIC
 	v = print_enum(v)
-	v = print_enum(Mesh.ARRAY_NORMAL)
-	v = Mesh.ArrayType.ARRAY_NORMAL
+	v = print_enum(TileSet.TILE_SHAPE_ISOMETRIC)
+	v = TileSet.TileShape.TILE_SHAPE_ISOMETRIC
 	v = print_enum(v)
-	v = print_enum(Mesh.ArrayType.ARRAY_NORMAL)
+	v = print_enum(TileSet.TileShape.TILE_SHAPE_ISOMETRIC)

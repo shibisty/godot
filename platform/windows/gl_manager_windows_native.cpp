@@ -352,7 +352,10 @@ PFNWGLDELETECONTEXT gd_wglDeleteContext;
 PFNWGLGETPROCADDRESS gd_wglGetProcAddress;
 
 Error GLManagerNative_Windows::_create_context(GLWindow &win, GLDisplay &gl_display) {
-	RETURN_IF_ERROR(_configure_pixel_format(win.hDC));
+	Error err = _configure_pixel_format(win.hDC);
+	if (err != OK) {
+		return err;
+	}
 
 	HMODULE module = LoadLibraryW(L"opengl32.dll");
 	if (!module) {
@@ -431,7 +434,10 @@ Error GLManagerNative_Windows::window_create(DisplayServerEnums::WindowID p_wind
 	}
 
 	// configure the HDC to use a compatible pixel format
-	RETURN_IF_ERROR(_configure_pixel_format(hDC));
+	Error result = _configure_pixel_format(hDC);
+	if (result != OK) {
+		return result;
+	}
 
 	GLWindow win;
 	win.hwnd = p_hwnd;

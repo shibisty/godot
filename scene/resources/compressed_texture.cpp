@@ -36,7 +36,7 @@
 #include "scene/resources/bit_map.h"
 #include "servers/rendering/rendering_server.h"
 
-Error CompressedTexture2D::_load_data(const String &p_path, int &r_width, int &r_height, Ref<Image> &image, bool &r_request_3d, bool &r_request_normal, bool &r_request_roughness, int &mipmap_limit) {
+Error CompressedTexture2D::_load_data(const String &p_path, int &r_width, int &r_height, Ref<Image> &image, bool &r_request_3d, bool &r_request_normal, bool &r_request_roughness, int &mipmap_limit, int p_size_limit) {
 	alpha_cache.unref();
 
 	ERR_FAIL_COND_V(image.is_null(), ERR_INVALID_PARAMETER);
@@ -57,13 +57,7 @@ Error CompressedTexture2D::_load_data(const String &p_path, int &r_width, int &r
 	}
 	r_width = f->get_32();
 	r_height = f->get_32();
-
-#ifdef TOOLS_ENABLED
-	// df is only used in editor builds at the moment.
 	uint32_t df = f->get_32(); //data format
-#else
-	f->get_32();
-#endif
 
 	//skip reserved
 	mipmap_limit = int(f->get_32());
@@ -85,8 +79,11 @@ Error CompressedTexture2D::_load_data(const String &p_path, int &r_width, int &r
 	r_request_normal = false;
 
 #endif
+	if (!(df & FORMAT_BIT_STREAM)) {
+		p_size_limit = 0;
+	}
 
-	image = load_image_from_file(f);
+	image = load_image_from_file(f, p_size_limit);
 
 	if (image.is_null() || image->is_empty()) {
 		return ERR_CANT_OPEN;
@@ -132,14 +129,6 @@ Image::Format CompressedTexture2D::get_format() const {
 	return format;
 }
 
-int CompressedTexture2D::get_mipmap_count() const {
-	return mipmaps ? Image::get_image_required_mipmaps(w, h, format) : 0;
-}
-
-bool CompressedTexture2D::has_mipmaps() const {
-	return mipmaps;
-}
-
 Error CompressedTexture2D::load(const String &p_path) {
 	int lw, lh;
 	Ref<Image> image;
@@ -150,7 +139,10 @@ Error CompressedTexture2D::load(const String &p_path) {
 	bool request_roughness;
 	int mipmap_limit;
 
-	RETURN_IF_ERROR(_load_data(p_path, lw, lh, image, request_3d, request_normal, request_roughness, mipmap_limit));
+	Error err = _load_data(p_path, lw, lh, image, request_3d, request_normal, request_roughness, mipmap_limit);
+	if (err) {
+		return err;
+	}
 
 	if (texture.is_valid()) {
 		RID new_texture = RS::get_singleton()->texture_2d_create(image);
@@ -166,7 +158,6 @@ Error CompressedTexture2D::load(const String &p_path) {
 	h = lh;
 	path_to_file = p_path;
 	format = image->get_format();
-	mipmaps = image->has_mipmaps();
 
 	if (get_path().is_empty()) {
 		//temporarily set path if no path set for resource, helps find errors
@@ -306,7 +297,7 @@ void CompressedTexture2D::reload_from_file() {
 	load(path);
 }
 
-Ref<Image> CompressedTexture2D::load_image_from_file(Ref<FileAccess> f) {
+Ref<Image> CompressedTexture2D::load_image_from_file(Ref<FileAccess> f, int p_size_limit) {
 	uint32_t data_format = f->get_32();
 	uint32_t w = f->get_16();
 	uint32_t h = f->get_16();
@@ -315,12 +306,24 @@ Ref<Image> CompressedTexture2D::load_image_from_file(Ref<FileAccess> f) {
 
 	if (data_format == DATA_FORMAT_PNG || data_format == DATA_FORMAT_WEBP) {
 		//look for a PNG or WebP file inside
+
+		int sw = w;
+		int sh = h;
+
 		//mipmaps need to be read independently, they will be later combined
 		Vector<Ref<Image>> mipmap_images;
 		uint64_t total_size = 0;
 
 		for (uint32_t i = 0; i < mipmaps + 1; i++) {
 			uint32_t size = f->get_32();
+
+			if (p_size_limit > 0 && i < (mipmaps - 1) && (sw > p_size_limit || sh > p_size_limit)) {
+				//can't load this due to size limit
+				sw = MAX(sw >> 1, 1);
+				sh = MAX(sh >> 1, 1);
+				f->seek(f->get_position() + size);
+				continue;
+			}
 
 			Vector<uint8_t> pv;
 			pv.resize(size);
@@ -355,6 +358,9 @@ Ref<Image> CompressedTexture2D::load_image_from_file(Ref<FileAccess> f) {
 			total_size += img->get_data().size();
 
 			mipmap_images.push_back(img);
+
+			sw = MAX(sw >> 1, 1);
+			sh = MAX(sh >> 1, 1);
 		}
 
 		//print_line("mipmap read total: " + itos(mipmap_images.size()));
@@ -390,7 +396,16 @@ Ref<Image> CompressedTexture2D::load_image_from_file(Ref<FileAccess> f) {
 		}
 
 	} else if (data_format == DATA_FORMAT_BASIS_UNIVERSAL) {
+		int sw = w;
+		int sh = h;
 		uint32_t size = f->get_32();
+		if (p_size_limit > 0 && (sw > p_size_limit || sh > p_size_limit)) {
+			//can't load this due to size limit
+			sw = MAX(sw >> 1, 1);
+			sh = MAX(sh >> 1, 1);
+			f->seek(f->get_position() + size);
+			return Ref<Image>();
+		}
 		Vector<uint8_t> pv;
 		pv.resize(size);
 		{
@@ -403,14 +418,35 @@ Ref<Image> CompressedTexture2D::load_image_from_file(Ref<FileAccess> f) {
 			ERR_FAIL_COND_V(img.is_null() || img->is_empty(), Ref<Image>());
 		}
 		format = img->get_format();
+		sw = MAX(sw >> 1, 1);
+		sh = MAX(sh >> 1, 1);
 		return img;
 	} else if (data_format == DATA_FORMAT_IMAGE) {
-		int64_t size = Image::get_image_data_size(w, h, format, mipmaps > 0);
-		Vector<uint8_t> data;
-		data.resize(size);
-		f->get_buffer(data.ptrw(), size);
+		int size = Image::get_image_data_size(w, h, format, mipmaps ? true : false);
 
-		return Image::create_from_data(w, h, mipmaps > 0, format, data);
+		for (uint32_t i = 0; i < mipmaps + 1; i++) {
+			int tw, th;
+			int ofs = Image::get_image_mipmap_offset_and_dimensions(w, h, format, i, tw, th);
+
+			if (p_size_limit > 0 && i < mipmaps && (p_size_limit > tw || p_size_limit > th)) {
+				if (ofs) {
+					f->seek(f->get_position() + ofs);
+				}
+				continue; //oops, size limit enforced, go to next
+			}
+
+			Vector<uint8_t> data;
+			data.resize(size - ofs);
+
+			{
+				uint8_t *wr = data.ptrw();
+				f->get_buffer(wr, data.size());
+			}
+
+			Ref<Image> image = Image::create_from_data(tw, th, mipmaps - i ? true : false, format, data);
+
+			return image;
+		}
 	}
 
 	return Ref<Image>();
@@ -471,7 +507,7 @@ Error CompressedTexture3D::_load_data(const String &p_path, Vector<Ref<Image>> &
 	r_data.clear();
 
 	for (int i = 0; i < (r_depth + mipmap_count); i++) {
-		Ref<Image> image = CompressedTexture2D::load_image_from_file(f);
+		Ref<Image> image = CompressedTexture2D::load_image_from_file(f, 0);
 		ERR_FAIL_COND_V(image.is_null() || image->is_empty(), ERR_CANT_OPEN);
 		if (i == 0) {
 			r_format = image->get_format();
@@ -491,7 +527,10 @@ Error CompressedTexture3D::load(const String &p_path) {
 	Image::Format tfmt;
 	bool tmm;
 
-	RETURN_IF_ERROR(_load_data(p_path, data, tfmt, tw, th, td, tmm));
+	Error err = _load_data(p_path, data, tfmt, tw, th, td, tmm);
+	if (err) {
+		return err;
+	}
 
 	if (texture.is_valid()) {
 		RID new_texture = RS::get_singleton()->texture_3d_create(tfmt, tw, th, td, tmm, data);
@@ -594,7 +633,7 @@ Image::Format CompressedTextureLayered::get_format() const {
 	return format;
 }
 
-Error CompressedTextureLayered::_load_data(const String &p_path, Vector<Ref<Image>> &images, int &mipmap_limit) {
+Error CompressedTextureLayered::_load_data(const String &p_path, Vector<Ref<Image>> &images, int &mipmap_limit, int p_size_limit) {
 	ERR_FAIL_COND_V(images.size() != 0, ERR_INVALID_PARAMETER);
 
 	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::READ);
@@ -616,17 +655,21 @@ Error CompressedTextureLayered::_load_data(const String &p_path, Vector<Ref<Imag
 	uint32_t type = f->get_32(); //layer count
 	ERR_FAIL_COND_V((int)type != layered_type, ERR_INVALID_DATA);
 
-	/* uint32_t df = */ f->get_32(); //data format (currently unused)
+	uint32_t df = f->get_32(); //data format
 	mipmap_limit = int(f->get_32());
 	//reserved
 	f->get_32();
 	f->get_32();
 	f->get_32();
 
+	if (!(df & FORMAT_BIT_STREAM)) {
+		p_size_limit = 0;
+	}
+
 	images.resize(layer_count);
 
 	for (uint32_t i = 0; i < layer_count; i++) {
-		Ref<Image> image = CompressedTexture2D::load_image_from_file(f);
+		Ref<Image> image = CompressedTexture2D::load_image_from_file(f, p_size_limit);
 		ERR_FAIL_COND_V(image.is_null() || image->is_empty(), ERR_CANT_OPEN);
 		images.write[i] = image;
 	}
@@ -639,7 +682,10 @@ Error CompressedTextureLayered::load(const String &p_path) {
 
 	int mipmap_limit;
 
-	RETURN_IF_ERROR(_load_data(p_path, images, mipmap_limit));
+	Error err = _load_data(p_path, images, mipmap_limit);
+	if (err) {
+		return err;
+	}
 
 	if (texture.is_valid()) {
 		RID new_texture = RS::get_singleton()->texture_2d_layered_create(images, RSE::TextureLayeredType(layered_type));

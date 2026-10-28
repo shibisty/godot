@@ -171,6 +171,7 @@ TEST_CASE("[SceneTree][Timer] Check Timer timeout signal") {
 
 		SceneTree::get_singleton()->process(0.05);
 
+		Array signal_args = { {} };
 		SIGNAL_CHECK_FALSE(SNAME("timeout"));
 
 		SIGNAL_UNWATCH(test_timer, SNAME("timeout"));
@@ -196,6 +197,7 @@ TEST_CASE("[SceneTree][Timer] Check Timer timeout signal") {
 
 		SceneTree::get_singleton()->physics_process(0.05);
 
+		Array signal_args = { {} };
 		SIGNAL_CHECK_FALSE(SNAME("timeout"));
 
 		SIGNAL_UNWATCH(test_timer, SNAME("timeout"));

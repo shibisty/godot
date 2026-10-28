@@ -101,16 +101,10 @@ protected:
 
 #ifndef U_HIDE_INTERNAL_API
     /** @internal */
-    Node* makeNode(int32_t start,
-                   int32_t limit,
-                   int32_t unitIndex,
-                   UErrorCode& errorCode) U_LIFETIME_BOUND;
+    Node *makeNode(int32_t start, int32_t limit, int32_t unitIndex, UErrorCode &errorCode);
     /** @internal */
-    Node* makeBranchSubNode(int32_t start,
-                            int32_t limit,
-                            int32_t unitIndex,
-                            int32_t length,
-                            UErrorCode& errorCode) U_LIFETIME_BOUND;
+    Node *makeBranchSubNode(int32_t start, int32_t limit, int32_t unitIndex,
+                            int32_t length, UErrorCode &errorCode);
 #endif  /* U_HIDE_INTERNAL_API */
 
     /** @internal */
@@ -163,7 +157,7 @@ protected:
      *         an equivalent node if newNode is a duplicate.
      * @internal
      */
-    Node* registerNode(Node* newNode, UErrorCode& errorCode) U_LIFETIME_BOUND;
+    Node *registerNode(Node *newNode, UErrorCode &errorCode);
     /**
      * Makes sure that there is only one unique FinalValueNode registered
      * with this value.
@@ -174,7 +168,7 @@ protected:
      * @return A FinalValueNode with the given value.
      * @internal
      */
-    Node* registerFinalValue(int32_t value, UErrorCode& errorCode) U_LIFETIME_BOUND;
+    Node *registerFinalValue(int32_t value, UErrorCode &errorCode);
 #endif  /* U_HIDE_INTERNAL_API */
 
     /*
@@ -199,9 +193,9 @@ protected:
 
     // Do not conditionalize the following with #ifndef U_HIDE_INTERNAL_API,
     // it is needed for layout of other objects.
-    /// \cond
     /**
      * @internal
+     * \cond
      */
     class Node : public UObject {
     public:

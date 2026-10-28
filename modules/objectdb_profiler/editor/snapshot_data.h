@@ -51,8 +51,6 @@ public:
 
 	uint64_t remote_object_id = 0;
 	String type_name;
-	String remote_name;
-	String remote_path;
 	LocalVector<PropertyInfo> prop_list;
 	HashMap<StringName, Variant> prop_values;
 	bool _get(const StringName &p_name, Variant &r_ret) const;

@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -34,9 +34,7 @@
 #ifdef SDL_JOYSTICK_HIDAPI_SWITCH
 
 // Define this if you want to log all packets from the controller
-#if 0
-#define DEBUG_SWITCH_PROTOCOL
-#endif
+// #define DEBUG_SWITCH_PROTOCOL
 
 // Define this to get log output for rumble logic
 // #define DEBUG_RUMBLE
@@ -316,8 +314,6 @@ typedef struct
     Uint64 m_ulIMUUpdateIntervalNS;
     Uint64 m_ulTimestampNS;
     bool m_bVerticalMode;
-    SDL_PowerState m_ePowerState;
-    int m_nPowerPercent;
 
     SwitchInputOnlyControllerStatePacket_t m_lastInputOnlyState;
     SwitchSimpleStatePacket_t m_lastSimpleState;
@@ -450,7 +446,7 @@ static bool ReadProprietaryReply(SDL_DriverSwitch_Context *ctx, ESwitchProprieta
 
 static void ConstructSubcommand(SDL_DriverSwitch_Context *ctx, ESwitchSubcommandIDs ucCommandID, const Uint8 *pBuf, Uint8 ucLen, SwitchSubcommandOutputPacket_t *outPacket)
 {
-    SDL_zerop(outPacket);
+    SDL_memset(outPacket, 0, sizeof(*outPacket));
 
     outPacket->commonData.ucPacketType = k_eSwitchOutputReportIDs_RumbleAndSubcommand;
     outPacket->commonData.ucPacketNumber = ctx->m_nCommandNumber;
@@ -570,33 +566,15 @@ static Uint16 EncodeRumbleLowAmplitude(Uint16 amplitude)
     return lfa[100][1];
 }
 
-static void SetNeutralRumble(SDL_HIDAPI_Device *device, SwitchRumbleData_t *pRumble)
+static void SetNeutralRumble(SwitchRumbleData_t *pRumble)
 {
-    bool bStandardNeutralValue;
-    if (device->vendor_id == USB_VENDOR_NINTENDO &&
-        device->product_id == USB_PRODUCT_NINTENDO_N64_CONTROLLER) {
-        // The 8BitDo 64 Bluetooth Controller rumbles at startup with the standard neutral value,
-        // so we'll use a 0 amplitude value instead.
-        bStandardNeutralValue = false;
-    } else {
-        // The KingKong2 PRO Controller doesn't initialize correctly with a 0 amplitude value
-        // over Bluetooth, so we'll use the standard value in all other cases.
-        bStandardNeutralValue = true;
-    }
-    if (bStandardNeutralValue) {
-        pRumble->rgucData[0] = 0x00;
-        pRumble->rgucData[1] = 0x01;
-        pRumble->rgucData[2] = 0x40;
-        pRumble->rgucData[3] = 0x40;
-    } else {
-        pRumble->rgucData[0] = 0x00;
-        pRumble->rgucData[1] = 0x00;
-        pRumble->rgucData[2] = 0x01;
-        pRumble->rgucData[3] = 0x40;
-    }
+    pRumble->rgucData[0] = 0x00;
+    pRumble->rgucData[1] = 0x01;
+    pRumble->rgucData[2] = 0x40;
+    pRumble->rgucData[3] = 0x40;
 }
 
-static void EncodeRumble(SDL_HIDAPI_Device *device, SwitchRumbleData_t *pRumble, Uint16 usHighFreq, Uint8 ucHighFreqAmp, Uint8 ucLowFreq, Uint16 usLowFreqAmp)
+static void EncodeRumble(SwitchRumbleData_t *pRumble, Uint16 usHighFreq, Uint8 ucHighFreqAmp, Uint8 ucLowFreq, Uint16 usLowFreqAmp)
 {
     if (ucHighFreqAmp > 0 || usLowFreqAmp > 0) {
         // High-band frequency and low-band amplitude are actually nine-bits each so they
@@ -613,7 +591,7 @@ static void EncodeRumble(SDL_HIDAPI_Device *device, SwitchRumbleData_t *pRumble,
                 ucHighFreqAmp, ((usLowFreqAmp >> 8) & 0x80), usLowFreqAmp & 0xFF);
 #endif
     } else {
-        SetNeutralRumble(device, pRumble);
+        SetNeutralRumble(pRumble);
     }
 }
 
@@ -778,10 +756,9 @@ static void UpdateSlotLED(SDL_DriverSwitch_Context *ctx)
 {
     if (!ctx->m_bInputOnly) {
         Uint8 led_data = 0;
-        const Uint8 player_pattern[] = { 0x1, 0x3, 0x7, 0xf, 0x9, 0x5, 0xd, 0x6 };
 
         if (ctx->m_bPlayerLights && ctx->m_nPlayerIndex >= 0) {
-            led_data = player_pattern[ctx->m_nPlayerIndex % 8];
+            led_data = (1 << (ctx->m_nPlayerIndex % 4));
         }
         WriteSubcommand(ctx, k_eSwitchSubcommandIDs_SetPlayerLights, &led_data, sizeof(led_data), NULL);
     }
@@ -960,14 +937,14 @@ static bool SetIMUEnabled(SDL_DriverSwitch_Context *ctx, bool enabled)
 
 static bool LoadStickCalibration(SDL_DriverSwitch_Context *ctx)
 {
-    Uint8 pLeftStickCal[9];
-    Uint8 pRightStickCal[9];
-    bool have_left_stick_cal = false, have_right_stick_cal = false;
+    Uint8 *pLeftStickCal = NULL;
+    Uint8 *pRightStickCal = NULL;
     size_t stick, axis;
     SwitchSubcommandInputPacket_t *user_reply = NULL;
     SwitchSubcommandInputPacket_t *factory_reply = NULL;
     SwitchSPIOpData_t readUserParams;
     SwitchSPIOpData_t readFactoryParams;
+    Uint8 userParamsReadSuccessCount = 0;
 
     // Read User Calibration Info
     readUserParams.unAddress = k_unSPIStickUserCalibrationStartOffset;
@@ -982,17 +959,17 @@ static bool LoadStickCalibration(SDL_DriverSwitch_Context *ctx)
 
     // Automatically select the user calibration if magic bytes are set
     if (user_reply && user_reply->stickUserCalibration.rgucLeftMagic[0] == 0xB2 && user_reply->stickUserCalibration.rgucLeftMagic[1] == 0xA1) {
-        have_left_stick_cal = true;
-        SDL_memcpy(pLeftStickCal, user_reply->stickUserCalibration.rgucLeftCalibration, sizeof(pLeftStickCal));
+        userParamsReadSuccessCount += 1;
+        pLeftStickCal = user_reply->stickUserCalibration.rgucLeftCalibration;
     }
 
     if (user_reply && user_reply->stickUserCalibration.rgucRightMagic[0] == 0xB2 && user_reply->stickUserCalibration.rgucRightMagic[1] == 0xA1) {
-        have_right_stick_cal = true;
-        SDL_memcpy(pRightStickCal, user_reply->stickUserCalibration.rgucRightCalibration, sizeof(pRightStickCal));
-    }
+        userParamsReadSuccessCount += 1;
+        pRightStickCal = user_reply->stickUserCalibration.rgucRightCalibration;
+    } 
 
     // Only read the factory calibration info if we failed to receive the correct magic bytes
-    if (!have_left_stick_cal || !have_right_stick_cal) {
+    if (userParamsReadSuccessCount < 2) {
         // Read Factory Calibration Info
         readFactoryParams.unAddress = k_unSPIStickFactoryCalibrationStartOffset;
         readFactoryParams.ucLength = k_unSPIStickFactoryCalibrationLength;
@@ -1005,17 +982,8 @@ static bool LoadStickCalibration(SDL_DriverSwitch_Context *ctx)
 
             if (factory_reply->stickFactoryCalibration.opData.unAddress == k_unSPIStickFactoryCalibrationStartOffset) {
                 // We successfully read the calibration data
-                // Avoid overriding user calibration if it's present for only one stick (known to happen on JoyCons)
-                if (!have_left_stick_cal) {
-                    have_left_stick_cal = true;
-                    SDL_memcpy(pLeftStickCal, factory_reply->stickFactoryCalibration.rgucLeftCalibration, sizeof(pLeftStickCal));
-                }
-
-                if (!have_right_stick_cal) {
-                    have_right_stick_cal = true;
-                    SDL_memcpy(pRightStickCal, factory_reply->stickFactoryCalibration.rgucRightCalibration, sizeof(pRightStickCal));
-                }
-
+                pLeftStickCal = factory_reply->stickFactoryCalibration.rgucLeftCalibration;
+                pRightStickCal = factory_reply->stickFactoryCalibration.rgucRightCalibration;
                 break;
             }
 
@@ -1026,7 +994,7 @@ static bool LoadStickCalibration(SDL_DriverSwitch_Context *ctx)
     }
 
     // If we still don't have calibration data, return false
-    if (!have_left_stick_cal || !have_right_stick_cal)
+    if (pLeftStickCal == NULL || pRightStickCal == NULL)
     {
         return false;
     }
@@ -1427,15 +1395,7 @@ static bool HIDAPI_DriverSwitch_IsSupportedDevice(SDL_HIDAPI_Device *device, con
         return false;
     }
 
-    if (type != SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO) {
-        return false;
-    }
-
-    // The Nintendo Switch 2 Pro uses another driver
-    if (vendor_id == USB_VENDOR_NINTENDO && product_id == USB_PRODUCT_NINTENDO_SWITCH2_PRO) {
-        return false;
-    }
-    return true;
+    return (type == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO);
 }
 
 static void UpdateDeviceIdentity(SDL_HIDAPI_Device *device)
@@ -1444,7 +1404,7 @@ static void UpdateDeviceIdentity(SDL_HIDAPI_Device *device)
 
     if (ctx->m_bInputOnly) {
         if (SDL_IsJoystickGameCube(device->vendor_id, device->product_id)) {
-            device->type = SDL_GAMEPAD_TYPE_GAMECUBE;
+            device->type = SDL_GAMEPAD_TYPE_STANDARD;
         }
     } else {
         char serial[18];
@@ -1467,11 +1427,11 @@ static void UpdateDeviceIdentity(SDL_HIDAPI_Device *device)
             device->type = SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO;
             break;
         case k_eSwitchDeviceInfoControllerType_HVCLeft:
-            HIDAPI_SetDeviceName(device, "Nintendo Family Computer Controller (1)");
+            HIDAPI_SetDeviceName(device, "Nintendo HVC Controller (1)");
             device->type = SDL_GAMEPAD_TYPE_STANDARD;
             break;
         case k_eSwitchDeviceInfoControllerType_HVCRight:
-            HIDAPI_SetDeviceName(device, "Nintendo Family Computer Controller (2)");
+            HIDAPI_SetDeviceName(device, "Nintendo HVC Controller (2)");
             device->type = SDL_GAMEPAD_TYPE_STANDARD;
             break;
         case k_eSwitchDeviceInfoControllerType_NESLeft:
@@ -1556,8 +1516,8 @@ static bool HIDAPI_DriverSwitch_InitDevice(SDL_HIDAPI_Device *device)
     ctx->m_bInputOnly = SDL_IsJoystickNintendoSwitchProInputOnly(device->vendor_id, device->product_id);
     if (!ctx->m_bInputOnly) {
         // Initialize rumble data, important for reading device info on the MOBAPAD M073
-        SetNeutralRumble(device, &ctx->m_RumblePacket.rumbleData[0]);
-        SetNeutralRumble(device, &ctx->m_RumblePacket.rumbleData[1]);
+        SetNeutralRumble(&ctx->m_RumblePacket.rumbleData[0]);
+        SetNeutralRumble(&ctx->m_RumblePacket.rumbleData[1]);
 
         BReadDeviceInfo(ctx);
     }
@@ -1611,8 +1571,8 @@ static bool HIDAPI_DriverSwitch_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joys
         ctx->m_nCurrentInputMode = ctx->m_nInitialInputMode;
 
         // Initialize rumble data
-        SetNeutralRumble(device, &ctx->m_RumblePacket.rumbleData[0]);
-        SetNeutralRumble(device, &ctx->m_RumblePacket.rumbleData[1]);
+        SetNeutralRumble(&ctx->m_RumblePacket.rumbleData[0]);
+        SetNeutralRumble(&ctx->m_RumblePacket.rumbleData[1]);
 
         if (!device->is_bluetooth) {
             if (!BTrySetupUSB(ctx)) {
@@ -1632,8 +1592,7 @@ static bool HIDAPI_DriverSwitch_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joys
             ctx->m_eControllerType != k_eSwitchDeviceInfoControllerType_NESRight &&
             ctx->m_eControllerType != k_eSwitchDeviceInfoControllerType_SNES &&
             ctx->m_eControllerType != k_eSwitchDeviceInfoControllerType_N64 &&
-            ctx->m_eControllerType != k_eSwitchDeviceInfoControllerType_SEGA_Genesis &&
-            !(device->vendor_id == USB_VENDOR_PDP && device->product_id == USB_PRODUCT_PDP_REALMZ_WIRELESS)) {
+            ctx->m_eControllerType != k_eSwitchDeviceInfoControllerType_SEGA_Genesis) {
             if (LoadIMUCalibration(ctx)) {
                 ctx->m_bSensorsSupported = true;
             }
@@ -1710,11 +1669,11 @@ static bool HIDAPI_DriverSwitch_ActuallyRumbleJoystick(SDL_DriverSwitch_Context 
     const Uint16 k_usLowFreqAmp = EncodeRumbleLowAmplitude(low_frequency_rumble);
 
     if (low_frequency_rumble || high_frequency_rumble) {
-        EncodeRumble(ctx->device, &ctx->m_RumblePacket.rumbleData[0], k_usHighFreq, k_ucHighFreqAmp, k_ucLowFreq, k_usLowFreqAmp);
-        EncodeRumble(ctx->device, &ctx->m_RumblePacket.rumbleData[1], k_usHighFreq, k_ucHighFreqAmp, k_ucLowFreq, k_usLowFreqAmp);
+        EncodeRumble(&ctx->m_RumblePacket.rumbleData[0], k_usHighFreq, k_ucHighFreqAmp, k_ucLowFreq, k_usLowFreqAmp);
+        EncodeRumble(&ctx->m_RumblePacket.rumbleData[1], k_usHighFreq, k_ucHighFreqAmp, k_ucLowFreq, k_usLowFreqAmp);
     } else {
-        SetNeutralRumble(ctx->device, &ctx->m_RumblePacket.rumbleData[0]);
-        SetNeutralRumble(ctx->device, &ctx->m_RumblePacket.rumbleData[1]);
+        SetNeutralRumble(&ctx->m_RumblePacket.rumbleData[0]);
+        SetNeutralRumble(&ctx->m_RumblePacket.rumbleData[1]);
     }
 
     ctx->m_bRumbleActive = (low_frequency_rumble || high_frequency_rumble);
@@ -1821,29 +1780,24 @@ static Uint32 HIDAPI_DriverSwitch_GetJoystickCapabilities(SDL_HIDAPI_Device *dev
     if (ctx->m_eControllerType == k_eSwitchDeviceInfoControllerType_ProController && !ctx->m_bInputOnly) {
         // Doesn't have an RGB LED, so don't return SDL_JOYSTICK_CAP_RGB_LED here
         result |= SDL_JOYSTICK_CAP_RUMBLE;
-        // But has the HOME LED, so treat it like a mono LED
-        result |= SDL_JOYSTICK_CAP_MONO_LED;
+		// But has the HOME LED, so
+		result |= SDL_JOYSTICK_CAP_MONO_LED;
     } else if (ctx->m_eControllerType == k_eSwitchDeviceInfoControllerType_JoyConLeft ||
                ctx->m_eControllerType == k_eSwitchDeviceInfoControllerType_JoyConRight) {
         result |= SDL_JOYSTICK_CAP_RUMBLE;
-        if (ctx->m_eControllerType == k_eSwitchDeviceInfoControllerType_JoyConRight) {
-            result |= SDL_JOYSTICK_CAP_MONO_LED; // Right JoyCon also have the HOME LED
-        }
+		if (ctx->m_eControllerType == k_eSwitchDeviceInfoControllerType_JoyConRight) {
+			result |= SDL_JOYSTICK_CAP_MONO_LED; // Those types of controllers also have the Home LED.
+		}
     }
+
     return result;
 }
 
 static bool HIDAPI_DriverSwitch_SetJoystickLED(SDL_HIDAPI_Device *device, SDL_Joystick *joystick, Uint8 red, Uint8 green, Uint8 blue)
 {
-    SDL_DriverSwitch_Context *ctx = (SDL_DriverSwitch_Context *)device->context;
-
-    if (!(ctx->m_eControllerType == k_eSwitchDeviceInfoControllerType_ProController && !ctx->m_bInputOnly) &&
-        ctx->m_eControllerType != k_eSwitchDeviceInfoControllerType_JoyConRight) {
-        return SDL_Unsupported();
-    }
-
-    int value = (int)((SDL_max(red, SDL_max(green, blue)) / 255.0f) * 100.0f); // The colors are received between 0-255 and we need them to be 0-100
-    return SetHomeLED(ctx, (Uint8)value);
+	SDL_DriverSwitch_Context *ctx = (SDL_DriverSwitch_Context *)device->context;
+	int value = (int)((SDL_max(red, SDL_max(green, blue)) / 255.0f) * 100.0f); // The colors are received between 0-255 and we need them to be 0-100.
+	return SetHomeLED(ctx, (Uint8)value);
 }
 
 static bool HIDAPI_DriverSwitch_SendJoystickEffect(SDL_HIDAPI_Device *device, SDL_Joystick *joystick, const void *data, int size)
@@ -2635,35 +2589,27 @@ static void HandleFullControllerState(SDL_Joystick *joystick, SDL_DriverSwitch_C
      * LSB of the battery nibble is used to report charging.
      * The battery level is reported from 0(empty)-8(full)
      */
+    SDL_PowerState state;
     int charging = (packet->controllerState.ucBatteryAndConnection & 0x10);
     int level = (packet->controllerState.ucBatteryAndConnection & 0xE0) >> 4;
+    int percent = (int)SDL_roundf((level / 8.0f) * 100.0f);
+
     if (charging) {
         if (level == 8) {
-            ctx->m_ePowerState = SDL_POWERSTATE_CHARGED;
+            state = SDL_POWERSTATE_CHARGED;
         } else {
-            ctx->m_ePowerState = SDL_POWERSTATE_CHARGING;
+            state = SDL_POWERSTATE_CHARGING;
         }
     } else {
-        ctx->m_ePowerState = SDL_POWERSTATE_ON_BATTERY;
+        state = SDL_POWERSTATE_ON_BATTERY;
     }
-    ctx->m_nPowerPercent = (int)SDL_roundf((level / 8.0f) * 100.0f);
-
-    if (!ctx->device->parent) {
-        SDL_PowerState state = ctx->m_ePowerState;
-        int percent = ctx->m_nPowerPercent;
-        SDL_SendJoystickPowerInfo(joystick, state, percent);
-    } else if (ctx->m_eControllerType == k_eSwitchDeviceInfoControllerType_JoyConRight) {
-        SDL_DriverSwitch_Context *other = (SDL_DriverSwitch_Context *)ctx->device->parent->children[0]->context;
-        SDL_PowerState state = (SDL_PowerState)SDL_min(ctx->m_ePowerState, other->m_ePowerState);
-        int percent = SDL_min(ctx->m_nPowerPercent, other->m_nPowerPercent);
-        SDL_SendJoystickPowerInfo(joystick, state, percent);
-    }
+    SDL_SendJoystickPowerInfo(joystick, state, percent);
 
     if (ctx->m_bReportSensors) {
         // Need to copy the imuState to an aligned variable
         SwitchControllerIMUState_t imuState[3];
-        SDL_COMPILE_TIME_ASSERT(imuState_size, sizeof(imuState) == sizeof(packet->imuState));
-        SDL_memcpy(imuState, packet->imuState, sizeof(packet->imuState));
+        SDL_assert(sizeof(imuState) == sizeof(packet->imuState));
+        SDL_memcpy(imuState, packet->imuState, sizeof(imuState));
 
         bool bHasSensorData = (imuState[0].sAccelZ != 0 ||
                                imuState[0].sAccelY != 0 ||

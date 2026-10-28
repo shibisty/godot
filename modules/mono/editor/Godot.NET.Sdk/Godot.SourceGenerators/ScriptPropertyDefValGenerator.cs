@@ -111,9 +111,7 @@ namespace Godot.SourceGenerators
 
             var exportedMembers = new List<ExportedPropertyMetadata>();
 
-            var members = symbol.GetMembers()
-                .Where(m => !m.GetAttributes()
-                    .Any(a => a.AttributeClass?.IsGodotIgnoreMemberAttribute() ?? false));
+            var members = symbol.GetMembers();
 
             var exportedProperties = members
                 .Where(s => s.Kind == SymbolKind.Property)
@@ -165,7 +163,7 @@ namespace Godot.SourceGenerators
                     continue;
                 }
 
-                if (property.IsReadOnly || property.SetMethodOrBaseSetMethod() is not { IsInitOnly: false })
+                if (property.IsReadOnly || property.SetMethod!.IsInitOnly)
                 {
                     context.ReportDiagnostic(Diagnostic.Create(
                         Common.ExportedMemberIsReadOnlyRule,

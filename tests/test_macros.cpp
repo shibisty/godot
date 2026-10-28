@@ -29,7 +29,6 @@
 /**************************************************************************/
 
 #define DOCTEST_CONFIG_IMPLEMENT
-#define DOCTEST_CONFIG_COLORS_ANSI
 #include "test_macros.h"
 
 HashMap<String, TestFunc> *test_commands = nullptr;

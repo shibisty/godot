@@ -90,11 +90,9 @@ UnicodeString::doCaseCompare(int32_t start,
 // Write implementation
 //========================================
 
-UnicodeString&
-UnicodeString::caseMap(
-    int32_t caseLocale,
-    uint32_t options,
-    UCASEMAP_BREAK_ITERATOR_PARAM UStringCaseMapper* stringCaseMapper) U_LIFETIME_BOUND {
+UnicodeString &
+UnicodeString::caseMap(int32_t caseLocale, uint32_t options, UCASEMAP_BREAK_ITERATOR_PARAM
+                       UStringCaseMapper *stringCaseMapper) {
   if(isEmpty() || !isWritable()) {
     // nothing to do
     return *this;
@@ -215,8 +213,8 @@ UnicodeString::caseMap(
   return *this;
 }
 
-UnicodeString&
-UnicodeString::foldCase(uint32_t options) U_LIFETIME_BOUND {
+UnicodeString &
+UnicodeString::foldCase(uint32_t options) {
   return caseMap(UCASE_LOC_ROOT, options, UCASEMAP_BREAK_ITERATOR_NULL ustrcase_internalFold);
 }
 

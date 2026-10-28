@@ -41,6 +41,5 @@ enum TestType {
 };
 
 void test(TestType p_type);
-int generate_tests();
 
 } // namespace GDScriptTests

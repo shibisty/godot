@@ -48,7 +48,9 @@ def make_default_controller_mappings(target, source, env):
                     guid = line_parts[0]
                     if guid in platform_mappings[current_platform]:
                         file.write(
-                            f"// WARNING: DATABASE {src_path} OVERWROTE PRIOR MAPPING: {current_platform} {platform_mappings[current_platform][guid]}\n"
+                            "// WARNING: DATABASE {} OVERWROTE PRIOR MAPPING: {} {}\n".format(
+                                src_path, current_platform, platform_mappings[current_platform][guid]
+                            )
                         )
                     platform_mappings[current_platform][guid] = line
 

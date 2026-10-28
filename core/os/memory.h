@@ -156,9 +156,6 @@ _ALWAYS_INLINE_ bool predelete_handler(void *) {
 
 template <typename T>
 void memdelete(T *p_class) {
-	if (unlikely(p_class == nullptr)) {
-		return;
-	}
 	if (!predelete_handler(p_class)) {
 		return; // doesn't want to be deleted
 	}
@@ -171,9 +168,6 @@ void memdelete(T *p_class) {
 
 template <typename T, typename A>
 void memdelete_allocator(T *p_class) {
-	if (unlikely(p_class == nullptr)) {
-		return;
-	}
 	if (!predelete_handler(p_class)) {
 		return; // doesn't want to be deleted
 	}
@@ -183,6 +177,13 @@ void memdelete_allocator(T *p_class) {
 
 	A::free(p_class);
 }
+
+#define memdelete_notnull(m_v) \
+	{ \
+		if (m_v) { \
+			memdelete(m_v); \
+		} \
+	}
 
 #define memnew_arr(m_class, m_count) memnew_arr_template<m_class>(m_count)
 

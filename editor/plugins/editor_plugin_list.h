@@ -35,9 +35,7 @@
 class Control;
 class InputEvent;
 
-class EditorPluginList : public Object {
-	GDCLASS(EditorPluginList, Object);
-
+class EditorPluginList {
 	LocalVector<EditorPlugin *> plugins_list;
 
 public:

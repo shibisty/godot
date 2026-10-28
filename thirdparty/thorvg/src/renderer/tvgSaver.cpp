@@ -23,7 +23,6 @@
 #include <cstring>
 #include "tvgCommon.h"
 #include "tvgStr.h"
-#include "tvgMath.h"
 #include "tvgSaveModule.h"
 
 #ifdef THORVG_GIF_SAVER_SUPPORT
@@ -34,21 +33,18 @@
 /* Internal Class Implementation                                        */
 /************************************************************************/
 
-#define IMPL static_cast<SaverImpl*>(this)
-
-Saver::Saver() = default;
-
-struct SaverImpl : Saver
+struct Saver::Impl
 {
     SaveModule* saveModule = nullptr;
     Paint* bg = nullptr;
 
-    ~SaverImpl()
+    ~Impl()
     {
         delete(saveModule);
         if (bg) bg->unref();
     }
 };
+
 
 static SaveModule* _find(FileType type)
 {
@@ -81,6 +77,7 @@ static SaveModule* _find(FileType type)
     return nullptr;
 }
 
+
 static SaveModule* _find(const char* filename)
 {
     auto ext = fileext(filename);
@@ -88,23 +85,35 @@ static SaveModule* _find(const char* filename)
     return nullptr;
 }
 
+
 /************************************************************************/
 /* External Class Implementation                                        */
 /************************************************************************/
+
+Saver::Saver() : pImpl(new Impl())
+{
+}
+
+
+Saver::~Saver()
+{
+    delete(pImpl);
+}
+
 
 Result Saver::save(Paint* paint, const char* filename, uint32_t quality) noexcept
 {
     if (!paint) return Result::InvalidArguments;
 
     //Already on saving another resource.
-    if (IMPL->saveModule) {
+    if (pImpl->saveModule) {
         Paint::rel(paint);
         return Result::InsufficientCondition;
     }
 
     if (auto saveModule = _find(filename)) {
-        if (saveModule->save(paint, IMPL->bg, filename, quality)) {
-            IMPL->saveModule = saveModule;
+        if (saveModule->save(paint, pImpl->bg, filename, quality)) {
+            pImpl->saveModule = saveModule;
             return Result::Success;
         } else {
             Paint::rel(paint);
@@ -116,16 +125,18 @@ Result Saver::save(Paint* paint, const char* filename, uint32_t quality) noexcep
     return Result::NonSupport;
 }
 
+
 Result Saver::background(Paint* paint) noexcept
 {
     if (!paint) return Result::InvalidArguments;
 
-    if (IMPL->bg) IMPL->bg->unref();
+    if (pImpl->bg) pImpl->bg->unref();
     paint->ref();
-    IMPL->bg = paint;
+    pImpl->bg = paint;
 
     return Result::Success;
 }
+
 
 Result Saver::save(Animation* animation, const char* filename, uint32_t quality, uint32_t fps) noexcept
 {
@@ -140,14 +151,14 @@ Result Saver::save(Animation* animation, const char* filename, uint32_t quality,
     }
 
     //Already on saving another resource.
-    if (IMPL->saveModule) {
+    if (pImpl->saveModule) {
         if (remove) delete(animation);
         return Result::InsufficientCondition;
     }
 
     if (auto saveModule = _find(filename)) {
-        if (saveModule->save(animation, IMPL->bg, filename, quality, fps)) {
-            IMPL->saveModule = saveModule;
+        if (saveModule->save(animation, pImpl->bg, filename, quality, fps)) {
+            pImpl->saveModule = saveModule;
             return Result::Success;
         } else {
             if (remove) delete(animation);
@@ -159,17 +170,19 @@ Result Saver::save(Animation* animation, const char* filename, uint32_t quality,
     return Result::NonSupport;
 }
 
+
 Result Saver::sync() noexcept
 {
-    if (!IMPL->saveModule) return Result::InsufficientCondition;
-    IMPL->saveModule->close();
-    delete(IMPL->saveModule);
-    IMPL->saveModule = nullptr;
+    if (!pImpl->saveModule) return Result::InsufficientCondition;
+    pImpl->saveModule->close();
+    delete(pImpl->saveModule);
+    pImpl->saveModule = nullptr;
 
     return Result::Success;
 }
 
+
 Saver* Saver::gen() noexcept
 {
-    return new SaverImpl;
+    return new Saver;
 }

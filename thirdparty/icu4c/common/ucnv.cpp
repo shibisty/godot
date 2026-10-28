@@ -155,10 +155,7 @@ and created from a converter that is shared across threads.
 */
 
 U_CAPI UConverter* U_EXPORT2
-ucnv_safeClone(const UConverter* cnv,
-               void* stackBuffer U_LIFETIME_BOUND,
-               int32_t* pBufferSize,
-               UErrorCode* status)
+ucnv_safeClone(const UConverter* cnv, void *stackBuffer, int32_t *pBufferSize, UErrorCode *status)
 {
     UConverter *localConverter, *allocatedConverter;
     int32_t stackBufferSize;
@@ -663,8 +660,9 @@ ucnv_getMinCharSize (const UConverter * converter)
     return converter->sharedData->staticData->minBytesPerChar;
 }
 
-U_CAPI const char* U_EXPORT2
-ucnv_getName(const UConverter* converter U_LIFETIME_BOUND, UErrorCode* err)
+U_CAPI const char*   U_EXPORT2
+ucnv_getName (const UConverter * converter, UErrorCode * err)
+     
 {
     if (U_FAILURE (*err))
         return nullptr;
@@ -879,10 +877,6 @@ _fromUnicodeWithCallback(UConverterFromUnicodeArgs *pArgs, UErrorCode *err) {
          * and failed to consume all of them.
          * We need to "replay" them from a temporary buffer and convert them first.
          */
-        if (!pArgs->source) {
-            *err=U_ILLEGAL_ARGUMENT_ERROR;
-            return;
-        }
         realSource=pArgs->source;
         realSourceLimit=pArgs->sourceLimit;
         realFlush=pArgs->flush;
@@ -1328,10 +1322,6 @@ _toUnicodeWithCallback(UConverterToUnicodeArgs *pArgs, UErrorCode *err) {
          * and failed to consume all of them.
          * We need to "replay" them from a temporary buffer and convert them first.
          */
-        if (!pArgs->source) {
-            *err=U_ILLEGAL_ARGUMENT_ERROR;
-            return;
-        }
         realSource=pArgs->source;
         realSourceLimit=pArgs->sourceLimit;
         realFlush=pArgs->flush;

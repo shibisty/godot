@@ -40,10 +40,8 @@ class U_COMMON_API LocaleBased : public UMemory {
      * @return the indicated locale
      */
     static const Locale& getLocale(
-        const Locale& valid U_LIFETIME_BOUND,
-        const Locale& actual U_LIFETIME_BOUND,
-        ULocDataLocaleType type,
-        UErrorCode& status);
+        const Locale& valid, const Locale& actual,
+        ULocDataLocaleType type, UErrorCode& status);
 
     /**
      * Return the locale ID for the service object wrapped by this

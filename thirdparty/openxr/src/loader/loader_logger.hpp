@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2026 The Khronos Group Inc.
+// Copyright (c) 2017-2025 The Khronos Group Inc.
 // Copyright (c) 2017-2019 Valve Corporation
 // Copyright (c) 2017-2019 LunarG, Inc.
 //
@@ -64,26 +64,27 @@ enum XrLoaderLogType {
 class LoaderLogRecorder {
    public:
     LoaderLogRecorder(XrLoaderLogType type, void* user_data, XrLoaderLogMessageSeverityFlags message_severities,
-                      XrLoaderLogMessageTypeFlags message_types)
-        : _active(false),
-          _type(type),
-          _unique_id(0),
-          _user_data(user_data),
-          _message_severities(message_severities),
-          _message_types(message_types) {}
+                      XrLoaderLogMessageTypeFlags message_types) {
+        _active = false;
+        _user_data = user_data;
+        _type = type;
+        _unique_id = 0;
+        _message_severities = message_severities;
+        _message_types = message_types;
+    }
     virtual ~LoaderLogRecorder() = default;
 
-    XrLoaderLogType Type() const { return _type; }
+    XrLoaderLogType Type() { return _type; }
 
-    uint64_t UniqueId() const { return _unique_id; }
+    uint64_t UniqueId() { return _unique_id; }
 
-    XrLoaderLogMessageSeverityFlags MessageSeverities() const { return _message_severities; }
+    XrLoaderLogMessageSeverityFlags MessageSeverities() { return _message_severities; }
 
-    XrLoaderLogMessageTypeFlags MessageTypes() const { return _message_types; }
+    XrLoaderLogMessageTypeFlags MessageTypes() { return _message_types; }
 
     virtual void Start() { _active = true; }
 
-    bool IsPaused() const { return _active; }
+    bool IsPaused() { return _active; }
 
     virtual void Pause() { _active = false; }
 

@@ -7,14 +7,13 @@
  *
  * ``const MyConfig = { executable: 'godot', unloadAfterInit: false }``
  *
- * @typedef {!Object} EngineConfig
+ * @typedef {Object} EngineConfig
  */
 const EngineConfig = {}; // eslint-disable-line no-unused-vars
 
 /**
  * @struct
  * @constructor
- * @param {?EngineConfig} initConfig
  * @ignore
  */
 const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-vars
@@ -22,7 +21,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		/**
 		 * Whether to unload the engine automatically after the instance is initialized.
 		 *
-		 * @export
 		 * @memberof EngineConfig
 		 * @default
 		 * @type {boolean}
@@ -33,7 +31,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		 *
 		 * By default, the first canvas element in the document will be used is none is specified.
 		 *
-		 * @export
 		 * @memberof EngineConfig
 		 * @default
 		 * @type {?HTMLCanvasElement}
@@ -42,7 +39,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		/**
 		 * The name of the WASM file without the extension. (Set by Godot Editor export process).
 		 *
-		 * @export
 		 * @memberof EngineConfig
 		 * @default
 		 * @type {string}
@@ -51,7 +47,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		/**
 		 * An alternative name for the game pck to load. The executable name is used otherwise.
 		 *
-		 * @export
 		 * @memberof EngineConfig
 		 * @default
 		 * @type {?string}
@@ -63,7 +58,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		 * The browser locale will be used if none is specified. See complete list of
 		 * :ref:`supported locales <doc_locales>`.
 		 *
-		 * @export
 		 * @memberof EngineConfig
 		 * @type {?string}
 		 * @default
@@ -73,13 +67,12 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		 * The canvas resize policy determines how the canvas should be resized by Godot.
 		 *
 		 * ``0`` means Godot won't do any resizing. This is useful if you want to control the canvas size from
-		 * JavaScript code in your template.
+		 * javascript code in your template.
 		 *
 		 * ``1`` means Godot will resize the canvas on start, and when changing window size via engine functions.
 		 *
 		 * ``2`` means Godot will adapt the canvas size to match the whole browser window.
 		 *
-		 * @export
 		 * @memberof EngineConfig
 		 * @type {number}
 		 * @default
@@ -92,16 +85,14 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		 *
 		 * **Note**: :js:meth:`startGame <Engine.prototype.startGame>` will always add the ``--main-pack`` argument.
 		 *
-		 * @export
 		 * @memberof EngineConfig
-		 * @type {!Array<string>}
+		 * @type {Array<string>}
 		 * @default
 		 */
 		args: [],
 		/**
 		 * When enabled, the game canvas will automatically grab the focus when the engine starts.
 		 *
-		 * @export
 		 * @memberof EngineConfig
 		 * @type {boolean}
 		 * @default
@@ -110,7 +101,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		/**
 		 * When enabled, this will turn on experimental virtual keyboard support on mobile.
 		 *
-		 * @export
 		 * @memberof EngineConfig
 		 * @type {boolean}
 		 * @default
@@ -118,8 +108,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		experimentalVK: false,
 		/**
 		 * The progressive web app service worker to install.
-		 *
-		 * @export
 		 * @memberof EngineConfig
 		 * @default
 		 * @type {string}
@@ -127,79 +115,48 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		serviceWorker: '',
 		/**
 		 * @ignore
-		 * @export
-		 * @type {!Array<string>}
+		 * @type {Array.<string>}
 		 */
 		persistentPaths: ['/userfs'],
 		/**
 		 * @ignore
-		 * @export
-		 * @type {!Array<string>}
+		 * @type {boolean}
+		 */
+		persistentDrops: false,
+		/**
+		 * @ignore
+		 * @type {Array.<string>}
 		 */
 		gdextensionLibs: [],
 		/**
 		 * @ignore
-		 * @export
-		 * @type {!Object<string, number>}
+		 * @type {Array.<string>}
 		 */
-		fileSizes: {},
+		fileSizes: [],
 		/**
 		 * @ignore
-		 * @export
 		 * @type {number}
 		 */
 		emscriptenPoolSize: 8,
 		/**
 		 * @ignore
-		 * @export
 		 * @type {number}
 		 */
 		godotPoolSize: 4,
 		/**
-		 * A MessagePort used to send debug messages when using protocol messageport://
-		 * @export
-		 * @memberof EngineConfig
-		 * @default
-		 * @type {?MessagePort}
-		 */
-		debugPort: null,
-		/**
-		 * The Process ID assigned to this instance (useful for debugging).
-		 * @memberof EngineConfig
-		 * @export
-		 * @default
-		 * @type {number}
-		 */
-		pid: 0,
-		/**
 		 * A callback function for handling Godot's ``OS.execute`` calls.
 		 *
-		 * This is for example used in the Web Editor template to switch between Project Manager and editor, and for running the game.
+		 * This is for example used in the Web Editor template to switch between project manager and editor, and for running the game.
 		 *
 		 * @callback EngineConfig.onExecute
 		 * @param {string} path The path that Godot's wants executed.
-		 * @param {!Array<string>} args The arguments of the "command" to execute.
+		 * @param {Array.<string>} args The arguments of the "command" to execute.
 		 */
 		/**
 		 * @ignore
-		 * @export
-		 * @type {?function(string, !Array<string>):?number}
+		 * @type {?function(string, Array.<string>)}
 		 */
 		onExecute: null,
-		/**
-		 * A callback function for handling Godot's ``OS.kill`` calls.
-		 *
-		 * This is for example used in the Web Editor template to forcefully terminate a running game instance.
-		 *
-		 * @callback EngineConfig.onTerminatePID
-		 * @param {number} pid The Process ID to terminate.
-		 */
-		/**
-		 * @ignore
-		 * @export
-		 * @type {?function(number)}
-		 */
-		onTerminatePID: null,
 		/**
 		 * A callback function for being notified when the Godot instance quits.
 		 *
@@ -210,7 +167,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		 */
 		/**
 		 * @ignore
-		 * @export
 		 * @type {?function(number)}
 		 */
 		onExit: null,
@@ -233,7 +189,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		 */
 		/**
 		 * @ignore
-		 * @export
 		 * @type {?function(number, number)}
 		 */
 		onProgress: null,
@@ -247,7 +202,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		 */
 		/**
 		 * @ignore
-		 * @export
 		 * @type {?function(...*)}
 		 */
 		onPrint: function () {
@@ -263,7 +217,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		*/
 		/**
 		 * @ignore
-		 * @export
 		 * @type {?function(...*)}
 		 */
 		onPrintError: function (var_args) {
@@ -273,9 +226,9 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 
 	/**
 	 * @ignore
-	 * @constructor
 	 * @struct
-	 * @param {?EngineConfig} opts
+	 * @constructor
+	 * @param {EngineConfig} opts
 	 */
 	function Config(opts) {
 		this.update(opts);
@@ -285,25 +238,48 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 
 	/**
 	 * @ignore
-	 * @param {?EngineConfig} opts
+	 * @param {EngineConfig} opts
 	 */
 	Config.prototype.update = function (opts) {
 		const config = opts || {};
-		const me = this;
-		Object.keys(cfg).forEach((key) => {
-			/**
-			 * @ignore
-			 * @suppress {checkTypes}
-			 */
-			me[key] = typeof (config[key]) === 'undefined' ? me[key] : config[key];
-		});
+		// NOTE: We must explicitly pass the default, accessing it via
+		// the key will fail due to closure compiler renames.
+		function parse(key, def) {
+			if (typeof (config[key]) === 'undefined') {
+				return def;
+			}
+			return config[key];
+		}
+		// Module config
+		this.unloadAfterInit = parse('unloadAfterInit', this.unloadAfterInit);
+		this.onPrintError = parse('onPrintError', this.onPrintError);
+		this.onPrint = parse('onPrint', this.onPrint);
+		this.onProgress = parse('onProgress', this.onProgress);
+
+		// Godot config
+		this.canvas = parse('canvas', this.canvas);
+		this.executable = parse('executable', this.executable);
+		this.mainPack = parse('mainPack', this.mainPack);
+		this.locale = parse('locale', this.locale);
+		this.canvasResizePolicy = parse('canvasResizePolicy', this.canvasResizePolicy);
+		this.persistentPaths = parse('persistentPaths', this.persistentPaths);
+		this.persistentDrops = parse('persistentDrops', this.persistentDrops);
+		this.experimentalVK = parse('experimentalVK', this.experimentalVK);
+		this.focusCanvas = parse('focusCanvas', this.focusCanvas);
+		this.serviceWorker = parse('serviceWorker', this.serviceWorker);
+		this.gdextensionLibs = parse('gdextensionLibs', this.gdextensionLibs);
+		this.fileSizes = parse('fileSizes', this.fileSizes);
+		this.emscriptenPoolSize = parse('emscriptenPoolSize', this.emscriptenPoolSize);
+		this.godotPoolSize = parse('godotPoolSize', this.godotPoolSize);
+		this.args = parse('args', this.args);
+		this.onExecute = parse('onExecute', this.onExecute);
+		this.onExit = parse('onExit', this.onExit);
 	};
 
 	/**
 	 * @ignore
 	 * @param {string} loadPath
-	 * @param {!Response} response
-	 * @return {!Object}
+	 * @param {Response} response
 	 */
 	Config.prototype.getModuleConfig = function (loadPath, response) {
 		let r = response;
@@ -353,7 +329,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 	/**
 	 * @ignore
 	 * @param {function()} cleanup
-	 * @return {!Object}
 	 */
 	Config.prototype.getGodotConfig = function (cleanup) {
 		// Try to find a canvas
@@ -383,16 +358,14 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 
 		// Godot configuration.
 		return {
-			'pid': this.pid,
 			'canvas': this.canvas,
 			'canvasResizePolicy': this.canvasResizePolicy,
 			'locale': locale,
+			'persistentDrops': this.persistentDrops,
 			'virtualKeyboard': this.experimentalVK,
 			'godotPoolSize': this.godotPoolSize,
 			'focusCanvas': this.focusCanvas,
-			'debugPort': this.debugPort,
 			'onExecute': this.onExecute,
-			'onTerminatePID': this.onTerminatePID,
 			'onExit': function (p_code) {
 				cleanup(); // We always need to call the cleanup callback to free memory.
 				if (typeof (onExit) === 'function') {

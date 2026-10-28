@@ -93,7 +93,7 @@ public:
      * Assignment operator
      * @stable ICU 2.0
      */
-    inline ParsePosition& operator=(const ParsePosition& copy) U_LIFETIME_BOUND;
+    inline ParsePosition&      operator=(const ParsePosition& copy);
 
     /**
      * Equality operator.
@@ -185,7 +185,7 @@ private:
 };
 
 inline ParsePosition&
-ParsePosition::operator=(const ParsePosition& copy) U_LIFETIME_BOUND
+ParsePosition::operator=(const ParsePosition& copy)
 {
   index = copy.index;
   errorIndex = copy.errorIndex;

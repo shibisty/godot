@@ -32,7 +32,6 @@
 
 #include "core/math/geometry_2d.h"
 #include "core/templates/sort_array.h"
-#include "core/variant/variant.h"
 
 void GodotShape2D::configure(const Rect2 &p_aabb) {
 	aabb = p_aabb;

@@ -189,10 +189,6 @@ void ActionMapEditor::_tree_button_pressed(Object *p_item, int p_column, int p_i
 			// Send removed action name
 			String name = item->get_meta("__name");
 			emit_signal(SNAME("action_removed"), name);
-
-			// Update the "Add" button in case the deleted action shares
-			// the same name as the new one.
-			_add_edit_text_changed(add_edit->get_text());
 		} break;
 		case ActionMapEditor::BUTTON_REMOVE_EVENT: {
 			// Remove event and send updated action
@@ -532,27 +528,7 @@ void ActionMapEditor::update_action_list(const Vector<ActionInfo> &p_action_info
 
 			Ref<InputEventMouseButton> mb = event;
 			if (mb.is_valid()) {
-				if (mb->get_button_index() == MouseButton::LEFT) {
-					event_item->set_icon(0, get_editor_theme_icon(SNAME("MouseButtonLeft")));
-				} else if (mb->get_button_index() == MouseButton::RIGHT) {
-					event_item->set_icon(0, get_editor_theme_icon(SNAME("MouseButtonRight")));
-				} else if (mb->get_button_index() == MouseButton::MIDDLE) {
-					event_item->set_icon(0, get_editor_theme_icon(SNAME("MouseButtonMiddle")));
-				} else if (mb->get_button_index() == MouseButton::WHEEL_UP) {
-					event_item->set_icon(0, get_editor_theme_icon(SNAME("MouseButtonWheelUp")));
-				} else if (mb->get_button_index() == MouseButton::WHEEL_DOWN) {
-					event_item->set_icon(0, get_editor_theme_icon(SNAME("MouseButtonWheelDown")));
-				} else if (mb->get_button_index() == MouseButton::WHEEL_LEFT) {
-					event_item->set_icon(0, get_editor_theme_icon(SNAME("MouseButtonWheelLeft")));
-				} else if (mb->get_button_index() == MouseButton::WHEEL_RIGHT) {
-					event_item->set_icon(0, get_editor_theme_icon(SNAME("MouseButtonWheelRight")));
-				} else if (mb->get_button_index() == MouseButton::MB_XBUTTON1) {
-					event_item->set_icon(0, get_editor_theme_icon(SNAME("MouseButtonXButton1")));
-				} else if (mb->get_button_index() == MouseButton::MB_XBUTTON2) {
-					event_item->set_icon(0, get_editor_theme_icon(SNAME("MouseButtonXButton2")));
-				} else {
-					event_item->set_icon(0, get_editor_theme_icon(SNAME("Mouse")));
-				}
+				event_item->set_icon(0, get_editor_theme_icon(SNAME("Mouse")));
 			}
 
 			Ref<InputEventJoypadButton> jb = event;
@@ -628,7 +604,7 @@ ActionMapEditor::ActionMapEditor() {
 
 	MarginContainer *mc = memnew(MarginContainer);
 	mc->set_v_size_flags(Control::SIZE_EXPAND_FILL);
-	mc->set_theme_type_variation("NoBorderBottomPanel");
+	mc->set_theme_type_variation("NoBorderHorizontalBottom");
 	main_vbox->add_child(mc);
 
 	// Action Editor Tree

@@ -224,83 +224,41 @@ bool PListNode::push_subnode(const Ref<PListNode> &p_node, const String &p_key) 
 	}
 }
 
-uint8_t PListNode::_get_len_octets(size_t p_size) {
-	uint8_t len_octets = 0;
-	if (p_size <= 0xFF) {
-		len_octets = 1;
-	} else if (p_size <= 0xFFFF) {
-		len_octets = 2;
-	} else if (p_size <= 0xFFFFFF) {
-		len_octets = 3;
-	} else if (p_size <= 0xFFFFFFFF) {
-		len_octets = 4;
-	} else {
-		ERR_FAIL_V_MSG(0, "PList: Data is too big for ASN.1 serializer, should be < 4 GiB.");
-	}
-	return len_octets;
-}
-
-int PListNode::_asn1_size_len(size_t p_size) {
-	uint8_t len_octets = _get_len_octets(p_size);
-	if (len_octets > 1 || p_size >= 0x80) {
-		return len_octets + 1;
-	} else {
-		return 1;
-	}
-}
-
-void PListNode::_store_asn1_size(PackedByteArray &p_stream, size_t p_size) {
-	uint8_t len_octets = _get_len_octets(p_size);
-
-	if (len_octets > 1 || p_size >= 0x80) {
-		p_stream.push_back(0x80 + len_octets);
-	}
-	for (int i = len_octets - 1; i >= 0; i--) {
-		uint8_t x = (p_size >> i * 8) & 0xFF;
-		p_stream.push_back(x);
-	}
-}
-
-size_t PListNode::_get_asn1_size() const {
+size_t PListNode::get_asn1_size(uint8_t p_len_octets) const {
 	// Get size of all data, excluding type and size information.
 	switch (data_type) {
 		case PList::PLNodeType::PL_NODE_TYPE_NIL: {
-			return 2;
+			return 0;
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_DATA:
 		case PList::PLNodeType::PL_NODE_TYPE_DATE: {
 			ERR_FAIL_V_MSG(0, "PList: DATE and DATA nodes are not supported by ASN.1 serialization.");
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_STRING: {
-			size_t len = data_string.length();
-			len += _asn1_size_len(len) + 1;
-			return len;
+			return data_string.length();
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_BOOLEAN: {
-			return _asn1_size_len(1) + 1 + 1;
+			return 1;
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_INTEGER:
 		case PList::PLNodeType::PL_NODE_TYPE_REAL: {
-			return _asn1_size_len(4) + 1 + 4;
+			return 4;
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_ARRAY: {
 			size_t size = 0;
 			for (int i = 0; i < data_array.size(); i++) {
-				size += data_array[i]->_get_asn1_size();
+				size += 1 + _asn1_size_len(p_len_octets) + data_array[i]->get_asn1_size(p_len_octets);
 			}
-			size += _asn1_size_len(size) + 1;
 			return size;
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_DICT: {
 			size_t size = 0;
-			for (const KeyValue<String, Ref<PListNode>> &E : data_dict) {
-				CharString cs = E.key.utf8();
-				uint32_t str_size = cs.length();
 
-				size_t seq_size = E.value->_get_asn1_size() + str_size + 1 + str_size;
-				size += 1 + _asn1_size_len(seq_size) + seq_size;
+			for (const KeyValue<String, Ref<PListNode>> &E : data_dict) {
+				size += 1 + _asn1_size_len(p_len_octets); // Sequence.
+				size += 1 + _asn1_size_len(p_len_octets) + E.key.utf8().length(); //Key.
+				size += 1 + _asn1_size_len(p_len_octets) + E.value->get_asn1_size(p_len_octets); // Value.
 			}
-			size += 1 + _asn1_size_len(size);
 			return size;
 		} break;
 		default: {
@@ -309,13 +267,31 @@ size_t PListNode::_get_asn1_size() const {
 	}
 }
 
-bool PListNode::store_asn1(PackedByteArray &p_stream) const {
+int PListNode::_asn1_size_len(uint8_t p_len_octets) {
+	if (p_len_octets > 1) {
+		return p_len_octets + 1;
+	} else {
+		return 1;
+	}
+}
+
+void PListNode::store_asn1_size(PackedByteArray &p_stream, uint8_t p_len_octets) const {
+	uint32_t size = get_asn1_size(p_len_octets);
+	if (p_len_octets > 1) {
+		p_stream.push_back(0x80 + p_len_octets);
+	}
+	for (int i = p_len_octets - 1; i >= 0; i--) {
+		uint8_t x = (size >> i * 8) & 0xFF;
+		p_stream.push_back(x);
+	}
+}
+
+bool PListNode::store_asn1(PackedByteArray &p_stream, uint8_t p_len_octets) const {
 	// Convert to binary ASN1 stream.
 	bool valid = true;
 	switch (data_type) {
 		case PList::PLNodeType::PL_NODE_TYPE_NIL: {
-			p_stream.push_back(0x05);
-			p_stream.push_back(0x00);
+			// Nothing to store.
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_DATE:
 		case PList::PLNodeType::PL_NODE_TYPE_DATA: {
@@ -323,23 +299,23 @@ bool PListNode::store_asn1(PackedByteArray &p_stream) const {
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_STRING: {
 			p_stream.push_back(0x0C);
-			_store_asn1_size(p_stream, data_string.size());
+			store_asn1_size(p_stream, p_len_octets);
 			for (int i = 0; i < data_string.size(); i++) {
 				p_stream.push_back(data_string[i]);
 			}
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_BOOLEAN: {
 			p_stream.push_back(0x01);
-			_store_asn1_size(p_stream, 1);
+			store_asn1_size(p_stream, p_len_octets);
 			if (data_bool) {
-				p_stream.push_back(0xFF);
+				p_stream.push_back(0x01);
 			} else {
 				p_stream.push_back(0x00);
 			}
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_INTEGER: {
 			p_stream.push_back(0x02);
-			_store_asn1_size(p_stream, 4);
+			store_asn1_size(p_stream, p_len_octets);
 			for (int i = 4; i >= 0; i--) {
 				uint8_t x = (data_int >> i * 8) & 0xFF;
 				p_stream.push_back(x);
@@ -347,7 +323,7 @@ bool PListNode::store_asn1(PackedByteArray &p_stream) const {
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_REAL: {
 			p_stream.push_back(0x03);
-			_store_asn1_size(p_stream, 4);
+			store_asn1_size(p_stream, p_len_octets);
 			for (int i = 4; i >= 0; i--) {
 				uint8_t x = (data_int >> i * 8) & 0xFF;
 				p_stream.push_back(x);
@@ -355,42 +331,42 @@ bool PListNode::store_asn1(PackedByteArray &p_stream) const {
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_ARRAY: {
 			p_stream.push_back(0x30); // Sequence.
-			size_t size = 0;
+			store_asn1_size(p_stream, p_len_octets);
 			for (int i = 0; i < data_array.size(); i++) {
-				size += data_array[i]->_get_asn1_size();
-			}
-			_store_asn1_size(p_stream, size);
-			for (int i = 0; i < data_array.size(); i++) {
-				valid = valid && data_array[i]->store_asn1(p_stream);
+				valid = valid && data_array[i]->store_asn1(p_stream, p_len_octets);
 			}
 		} break;
 		case PList::PLNodeType::PL_NODE_TYPE_DICT: {
 			p_stream.push_back(0x31); // Set.
-			size_t size = 0;
+			store_asn1_size(p_stream, p_len_octets);
 			for (const KeyValue<String, Ref<PListNode>> &E : data_dict) {
 				CharString cs = E.key.utf8();
-				uint32_t str_size = cs.length();
-
-				size_t seq_size = E.value->_get_asn1_size() + str_size + 1 + _asn1_size_len(str_size);
-				size += 1 + _asn1_size_len(seq_size) + seq_size;
-			}
-			_store_asn1_size(p_stream, size);
-			for (const KeyValue<String, Ref<PListNode>> &E : data_dict) {
-				CharString cs = E.key.utf8();
-				uint32_t str_size = cs.length();
+				uint32_t size = cs.length();
 
 				// Sequence.
 				p_stream.push_back(0x30);
-				size_t seq_size = E.value->_get_asn1_size() + str_size + 1 + _asn1_size_len(str_size);
-				_store_asn1_size(p_stream, seq_size);
+				uint32_t seq_size = 2 * (1 + _asn1_size_len(p_len_octets)) + size + E.value->get_asn1_size(p_len_octets);
+				if (p_len_octets > 1) {
+					p_stream.push_back(0x80 + p_len_octets);
+				}
+				for (int i = p_len_octets - 1; i >= 0; i--) {
+					uint8_t x = (seq_size >> i * 8) & 0xFF;
+					p_stream.push_back(x);
+				}
 				// Key.
 				p_stream.push_back(0x0C);
-				_store_asn1_size(p_stream, str_size);
-				for (uint32_t i = 0; i < str_size; i++) {
+				if (p_len_octets > 1) {
+					p_stream.push_back(0x80 + p_len_octets);
+				}
+				for (int i = p_len_octets - 1; i >= 0; i--) {
+					uint8_t x = (size >> i * 8) & 0xFF;
+					p_stream.push_back(x);
+				}
+				for (uint32_t i = 0; i < size; i++) {
 					p_stream.push_back(cs[i]);
 				}
 				// Value.
-				valid = valid && E.value->store_asn1(p_stream);
+				valid = valid && E.value->store_asn1(p_stream, p_len_octets);
 			}
 		} break;
 	}
@@ -844,8 +820,31 @@ PackedByteArray PList::save_asn1() const {
 	if (root.is_null()) {
 		ERR_FAIL_V_MSG(PackedByteArray(), "PList: Invalid PList, no root node.");
 	}
+	size_t size = root->get_asn1_size(1);
+	uint8_t len_octets = 0;
+	if (size < 0x80) {
+		len_octets = 1;
+	} else {
+		size = root->get_asn1_size(2);
+		if (size < 0xFFFF) {
+			len_octets = 2;
+		} else {
+			size = root->get_asn1_size(3);
+			if (size < 0xFFFFFF) {
+				len_octets = 3;
+			} else {
+				size = root->get_asn1_size(4);
+				if (size < 0xFFFFFFFF) {
+					len_octets = 4;
+				} else {
+					ERR_FAIL_V_MSG(PackedByteArray(), "PList: Data is too big for ASN.1 serializer, should be < 4 GiB.");
+				}
+			}
+		}
+	}
+
 	PackedByteArray ret;
-	if (!root->store_asn1(ret)) {
+	if (!root->store_asn1(ret, len_octets)) {
 		ERR_FAIL_V_MSG(PackedByteArray(), "PList: ASN.1 serializer error.");
 	}
 	return ret;

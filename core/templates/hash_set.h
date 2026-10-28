@@ -35,20 +35,18 @@
 #include "core/templates/hashfuncs.h"
 
 /**
- * Set container using robin hood hashing.
+ * Implementation of Set using a bidi indexed hash map.
+ * Use RBSet instead of this only if the following conditions are met:
  *
- * Elements are not pointer stable.
- * The element order is arbitrary.
+ * - You need to keep an iterator or const pointer to Key and you intend to add/remove elements in the meantime.
+ * - Iteration order does matter (via operator<)
  *
- * Elements are relocated by naive memory moves; they must not store their own address (see GH-100509).
- *
- * Core container guidance:
- * https://docs.godotengine.org/en/latest/engine_details/architecture/core_types.html#containers
  */
+
 template <typename TKey,
 		typename Hasher = HashMapHasherDefault,
 		typename Comparator = HashMapComparatorDefault<TKey>>
-class _WARN_UNUSED_ HashSet {
+class HashSet {
 public:
 	static constexpr uint32_t MIN_CAPACITY_INDEX = 2; // Use a prime.
 	static constexpr float MAX_OCCUPANCY = 0.75;
@@ -352,8 +350,8 @@ public:
 			return *this;
 		}
 
-		_FORCE_INLINE_ bool operator==(const Iterator &p_other) const { return _keys == p_other._keys && _key_idx == p_other._key_idx; }
-		_FORCE_INLINE_ bool operator!=(const Iterator &p_other) const { return _keys != p_other._keys || _key_idx != p_other._key_idx; }
+		_FORCE_INLINE_ bool operator==(const Iterator &b) const { return _keys == b._keys && _key_idx == b._key_idx; }
+		_FORCE_INLINE_ bool operator!=(const Iterator &b) const { return _keys != b._keys || _key_idx != b._key_idx; }
 
 		_FORCE_INLINE_ explicit operator bool() const {
 			return _keys != nullptr;
@@ -382,20 +380,20 @@ public:
 		int32_t _key_idx = -1;
 	};
 
-	_FORCE_INLINE_ Iterator begin() const _LIFETIME_BOUND_ {
+	_FORCE_INLINE_ Iterator begin() const {
 		return _size ? Iterator(_keys, _size, 0) : Iterator();
 	}
-	_FORCE_INLINE_ Iterator end() const _LIFETIME_BOUND_ {
+	_FORCE_INLINE_ Iterator end() const {
 		return Iterator();
 	}
-	_FORCE_INLINE_ Iterator last() const _LIFETIME_BOUND_ {
+	_FORCE_INLINE_ Iterator last() const {
 		if (_size == 0) {
 			return Iterator();
 		}
 		return Iterator(_keys, _size, _size - 1);
 	}
 
-	_FORCE_INLINE_ Iterator find(const TKey &p_key) const _LIFETIME_BOUND_ {
+	_FORCE_INLINE_ Iterator find(const TKey &p_key) const {
 		uint32_t key_idx = 0;
 		bool exists = _lookup_key_idx(p_key, key_idx);
 		if (!exists) {
@@ -412,7 +410,7 @@ public:
 
 	/* Insert */
 
-	Iterator insert(const TKey &p_key) _LIFETIME_BOUND_ {
+	Iterator insert(const TKey &p_key) {
 		uint32_t key_idx = _insert(p_key);
 		return Iterator(_keys, _size, key_idx);
 	}
@@ -491,7 +489,7 @@ public:
 		return !(*this == p_other);
 	}
 
-	explicit HashSet(uint32_t p_initial_capacity) {
+	HashSet(uint32_t p_initial_capacity) {
 		// Capacity can't be 0.
 		_capacity_idx = 0;
 		reserve(p_initial_capacity);

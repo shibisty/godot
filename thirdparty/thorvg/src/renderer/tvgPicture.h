@@ -25,11 +25,37 @@
 
 #include "tvgPaint.h"
 #include "tvgScene.h"
-#include "tvgAccessor.h"
-#include "tvgLoaderMgr.h"
+#include "tvgLoader.h"
 
 namespace tvg
 {
+
+struct PictureIterator : Iterator
+{
+    Paint* paint = nullptr;
+    Paint* ptr = nullptr;
+
+    PictureIterator(Paint* p) : paint(p) {}
+
+    const Paint* next() override
+    {
+        if (!ptr) ptr = paint;
+        else ptr = nullptr;
+        return ptr;
+    }
+
+    uint32_t count() override
+    {
+        if (paint) return 1;
+        else return 0;
+    }
+
+    void begin() override
+    {
+        ptr = nullptr;
+    }
+};
+
 
 struct PictureImpl : Picture
 {
@@ -56,22 +82,17 @@ struct PictureImpl : Picture
 
     bool skip(RenderUpdateFlag flag)
     {
-        // The media have its own playback update
-        return !loader || (flag == RenderUpdateFlag::None && loader->type != FileType::Media);
+        if (flag == RenderUpdateFlag::None) return true;
+        return false;
     }
 
     bool update(RenderMethod* renderer, const Matrix& transform, Array<RenderData>& clips, uint8_t opacity, RenderUpdateFlag flag, TVG_UNUSED bool clipper)
     {
-        flag |= load();
-        if (flag == RenderUpdateFlag::None) return true;
+        load();
 
         auto pivot = Point{-origin.x * float(w), -origin.y * float(h)};
 
         if (bitmap) {
-            if (bitmap->cs == ColorSpace::Unknown) {
-                TVGERR("RENDERER", "Unknown colorspace picture data");
-                return false;
-            }
             //Overriding Transformation by the desired image size
             auto sx = w / loader->w;
             auto sy = h / loader->h;
@@ -115,12 +136,12 @@ struct PictureImpl : Picture
         return Result::Success;
     }
 
-    bool intersects(const RenderRegion& region, bool visibleOnly)
+    bool intersects(const RenderRegion& region)
     {
         if (!impl.renderer) return false;
-        impl.mark(load());
+        load();
         if (impl.rd) return impl.renderer->intersectsImage(impl.rd, region);
-        else if (vector) return PAINT(vector)->intersects(region, visibleOnly);
+        else if (vector) return to<SceneImpl>(vector)->intersects(region);
         return false;
     }
 
@@ -137,29 +158,33 @@ struct PictureImpl : Picture
     {
         if (vector || bitmap) return Result::InsufficientCondition;
 
-        PictureOps ops = {Ownership::Transfer, resolver, nullptr, accessible};
-        auto ret = Result::InvalidArguments;
-        auto loader = LoaderMgr::loader(filename, ops, ret);
-        return loader ? load(loader) : ret;
+        bool invalid;  //Invalid Path
+        auto loader = static_cast<ImageLoader*>(LoaderMgr::loader(filename, &invalid));
+        if (!loader) {
+            if (invalid) return Result::InvalidArguments;
+            return Result::NonSupport;
+        }
+        return load(loader);
     }
 
-    Result load(const char* data, uint32_t size, const char* mimeType, const char* rpath, const Ownership owner)
+    Result load(const char* data, uint32_t size, const char* mimeType, const char* rpath, bool copy)
     {
         if (!data || size <= 0) return Result::InvalidArguments;
         if (vector || bitmap) return Result::InsufficientCondition;
-
-        PictureOps ops = {owner, resolver, rpath, accessible};
-        auto ret = Result::InvalidArguments;
-        auto loader = LoaderMgr::loader(data, size, mimeType, ops, ret);
-        return loader ? load(loader) : ret;
+        auto loader = static_cast<ImageLoader*>(LoaderMgr::loader(data, size, mimeType, rpath, copy));
+        if (!loader) return Result::NonSupport;
+        return load(loader);
     }
 
-    Result load(const uint32_t* data, uint32_t w, uint32_t h, ColorSpace cs, Ownership owner)
+    Result load(const uint32_t* data, uint32_t w, uint32_t h, ColorSpace cs, bool copy)
     {
         if (!data || w <= 0 || h <= 0 || cs == ColorSpace::Unknown)  return Result::InvalidArguments;
-        if (vector) return Result::InsufficientCondition;
-        auto loader = LoaderMgr::loader(data, w, h, cs, owner);
-        return loader ? load(loader) : Result::NonSupport;
+        if (vector || bitmap) return Result::InsufficientCondition;
+
+        auto loader = static_cast<ImageLoader*>(LoaderMgr::loader(data, w, h, cs, copy));
+        if (!loader) return Result::FailedAllocation;
+
+        return load(loader);
     }
 
     Result set(std::function<bool(Paint* paint, const char* src, void* data)> resolver, void* data)
@@ -181,7 +206,7 @@ struct PictureImpl : Picture
     {
         if (ret) TVGERR("RENDERER", "TODO: duplicate()");
 
-        impl.mark(load());
+        load();
 
         auto picture = Picture::gen();
         auto dup = to<PictureImpl>(picture);
@@ -207,38 +232,34 @@ struct PictureImpl : Picture
         return picture;
     }
 
-    AccessorIterator* iterator()
+    Iterator* iterator()
     {
-        impl.mark(load());
-
-        struct PictureIterator : AccessorIterator
-        {
-            Paint* ptr = nullptr;
-
-            PictureIterator(Paint* p) : ptr(p) {}
-
-            const Paint* next() override
-            {
-                auto ret = ptr;
-                ptr = nullptr;
-                return ret;
-            }
-        };
-
+        load();
         return new PictureIterator(vector);
     }
 
-    RenderUpdateFlag load()
+    uint32_t* data(uint32_t* w, uint32_t* h)
     {
-        if (!loader) return RenderUpdateFlag::None;
+        //Try it, If not loaded yet.
+        load();
 
-        // reload the next frame if any
-        if (vector || bitmap) {
-            // sync call must be guaranteed.
-            if (loader->sync() && bitmap) return RenderUpdateFlag::Image;
-        // load the first frame
+        if (loader) {
+            if (w) *w = static_cast<uint32_t>(loader->w);
+            if (h) *h = static_cast<uint32_t>(loader->h);
         } else {
-            if ((vector = loader->paint())) {
+            if (w) *w = 0;
+            if (h) *h = 0;
+        }
+        if (bitmap) return bitmap->buf32;
+        else return nullptr;
+    }
+
+    void load()
+    {
+        if (loader) {
+            if (vector) {
+                loader->sync();
+            } else if ((vector = loader->paint())) {
                 vector->ref();
                 PAINT(vector)->parent = this;
                 if (w != loader->w || h != loader->h) {
@@ -249,13 +270,10 @@ struct PictureImpl : Picture
                     loader->resize(vector, w, h);
                     resizing = false;
                 }
-            } else {
+            } else if (!bitmap) {
                 bitmap = loader->bitmap();
-                if (bitmap) return RenderUpdateFlag::Image;
             }
         }
-        // animations updates the properties essentially. here update is not necessary.
-        return RenderUpdateFlag::None;
     }
 
     void needComposition(uint8_t opacity)
@@ -294,51 +312,29 @@ struct PictureImpl : Picture
     RenderRegion bounds()
     {
         if (vector) return vector->pImpl->bounds();
-        else if (impl.renderer) return impl.renderer->region(impl.rd);
-        return {};
+        return impl.renderer->region(impl.rd);
     }
 
-    Result load(Loader* loader)
+    Result load(ImageLoader* loader)
     {
         //Same resource has been loaded.
         if (this->loader == loader) {
             this->loader->sharing--;  //make it sure the reference counting.
-            if (bitmap) impl.mark(RenderUpdateFlag::Image);  // force the bitmap updated
             return Result::Success;
         } else if (this->loader) {
             LoaderMgr::retrieve(this->loader);
         }
 
-        this->loader = static_cast<ImageLoader*>(loader);
+        this->loader = loader;
+        loader->set(resolver);
         if (!loader->read()) return Result::Unknown;
 
-        this->w = this->loader->w;
-        this->h = this->loader->h;
+        this->w = loader->w;
+        this->h = loader->h;
 
         impl.mark(RenderUpdateFlag::All);
 
         return Result::Success;
-    }
-
-    const AccessorEntity* access(uint32_t id)
-    {
-        if (loader) return loader->access(id);
-        return nullptr;
-    }
-
-    void access(AccessorCallback& cb)
-    {
-        if (loader) loader->access(cb);
-    }
-
-    template<class T>
-    T* fetch(FileType expect)
-    {
-        if (loader) {
-            if (loader->type == expect) return static_cast<T*>(loader);
-            TVGERR("RENDERER", "Invalid loaded data type (expected: %d, got: %d)", (int)expect, (int)loader->type);
-        }
-        return nullptr;
     }
 };
 

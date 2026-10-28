@@ -39,7 +39,6 @@
 #include "editor/editor_node.h"
 #include "editor/editor_string_names.h"
 #include "editor/file_system/editor_file_system.h"
-#include "editor/gui/editor_icon_manager.h"
 #include "editor/gui/editor_spin_slider.h"
 #include "editor/gui/editor_variant_type_selectors.h"
 #include "editor/inspector/editor_properties.h"
@@ -284,7 +283,7 @@ void EditorPropertyArray::_property_changed(const String &p_property, Variant p_
 
 	Variant array = object->get_array().duplicate();
 	array.set(index, p_value);
-	emit_changed(get_edited_property(), array, "", p_changing);
+	emit_changed(get_edited_property(), array, p_name, p_changing);
 	if (p_changing) {
 		object->set_array(array);
 	}
@@ -334,7 +333,7 @@ void EditorPropertyArray::_create_new_property_slot() {
 
 	Button *reorder_button = memnew(Button);
 	reorder_button->set_accessibility_name(TTRC("Reorder"));
-	reorder_button->set_button_icon(EditorIconManager::get_icon(SNAME("DragHandle")));
+	reorder_button->set_button_icon(get_editor_theme_icon(SNAME("TripleBar")));
 	reorder_button->set_default_cursor_shape(Control::CURSOR_MOVE);
 	reorder_button->set_disabled(is_read_only());
 	reorder_button->set_theme_type_variation(SNAME("EditorInspectorFlatButton"));
@@ -352,7 +351,7 @@ void EditorPropertyArray::_create_new_property_slot() {
 	if (is_untyped_array) {
 		edit_btn = memnew(Button);
 		edit_btn->set_accessibility_name(TTRC("Edit"));
-		edit_btn->set_button_icon(EditorIconManager::get_icon(SNAME("Edit")));
+		edit_btn->set_button_icon(get_editor_theme_icon(SNAME("Edit")));
 		edit_btn->set_disabled(is_read_only());
 		edit_btn->set_theme_type_variation(SNAME("EditorInspectorFlatButton"));
 		edit_btn->connect(SceneStringName(pressed), callable_mp(this, &EditorPropertyArray::_change_type).bind(edit_btn, idx));
@@ -360,7 +359,7 @@ void EditorPropertyArray::_create_new_property_slot() {
 	} else {
 		remove_btn = memnew(Button);
 		remove_btn->set_accessibility_name(TTRC("Remove"));
-		remove_btn->set_button_icon(EditorIconManager::get_icon(SNAME("Remove")));
+		remove_btn->set_button_icon(get_editor_theme_icon(SNAME("Remove")));
 		remove_btn->set_disabled(is_read_only());
 		remove_btn->set_theme_type_variation(SNAME("EditorInspectorFlatButton"));
 		remove_btn->connect(SceneStringName(pressed), callable_mp(this, &EditorPropertyArray::_remove_pressed).bind(idx));
@@ -381,10 +380,6 @@ void EditorPropertyArray::_create_new_property_slot() {
 
 void EditorPropertyArray::set_preview_value(bool p_preview_value) {
 	preview_value = p_preview_value;
-}
-
-void EditorPropertyArray::make_passthrough(bool p_passthrough) {
-	edit->set_mouse_filter(p_passthrough ? MOUSE_FILTER_PASS : MOUSE_FILTER_STOP);
 }
 
 void EditorPropertyArray::update_property() {
@@ -410,7 +405,7 @@ void EditorPropertyArray::update_property() {
 	if (!array.is_array()) {
 		if (preview_value) {
 			edit->set_text_alignment(HORIZONTAL_ALIGNMENT_LEFT);
-			edit->set_button_icon(EditorIconManager::get_icon(SNAME("Nil")));
+			edit->set_button_icon(get_editor_theme_icon(SNAME("Nil")));
 			edit->set_text(array_type_name);
 		} else {
 			edit->set_text_alignment(HORIZONTAL_ALIGNMENT_CENTER);
@@ -447,7 +442,7 @@ void EditorPropertyArray::update_property() {
 
 		edit->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
 		edit->set_text_alignment(HORIZONTAL_ALIGNMENT_LEFT);
-		edit->set_button_icon(EditorIconManager::get_icon(array_type_name));
+		edit->set_button_icon(get_editor_theme_icon(array_type_name));
 		edit->set_text(vformat("%s%s", array_sub_type_name, ctr_str));
 		edit->set_tooltip_text(vformat(TTR("%s%s (size %d)"), array_type_name, array_sub_type_name, size));
 	} else {
@@ -567,16 +562,12 @@ void EditorPropertyArray::update_property() {
 					new_prop->add_inline_control(slot.remove_button, INLINE_CONTROL_RIGHT);
 				}
 
-				// Move the right container to be the last child, so that focusing on the next Control behaves in the expected order.
-				Control *right_cont = new_prop->get_inline_container(INLINE_CONTROL_RIGHT);
-				right_cont->get_parent()->move_child(right_cont, new_prop->get_child_count() - 1);
-
 				slot.prop->add_sibling(new_prop, false);
 				slot.prop->queue_free();
 				slot.prop = new_prop;
 				slot.set_index(idx);
 			}
-			if (slot.index == changing_type_index && (!change_type || !change_type->is_visible())) {
+			if (slot.index == changing_type_index) {
 				callable_mp(slot.prop, &EditorProperty::grab_focus).call_deferred(0);
 				changing_type_index = EditorPropertyArrayObject::NOT_CHANGING_TYPE;
 			}
@@ -595,14 +586,6 @@ void EditorPropertyArray::update_property() {
 			button_add_item = nullptr;
 			container = nullptr;
 			slots.clear();
-		}
-	}
-}
-
-void EditorPropertyArray::update_properties_recursive() {
-	for (const Slot &slot : slots) {
-		if (slot.prop) {
-			slot.prop->update_properties_recursive();
 		}
 	}
 }
@@ -649,7 +632,7 @@ bool EditorPropertyArray::_is_drop_valid(const Dictionary &p_drag_data) const {
 
 		for (const String &file : files) {
 			int idx_in_dir;
-			const EditorFileSystemDirectory *dir = EditorFileSystem::get_singleton()->find_file(file, &idx_in_dir);
+			EditorFileSystemDirectory const *dir = EditorFileSystem::get_singleton()->find_file(file, &idx_in_dir);
 			if (!dir) {
 				return false;
 			}
@@ -675,6 +658,7 @@ bool EditorPropertyArray::_is_drop_valid(const Dictionary &p_drag_data) const {
 			return false;
 		}
 
+		String res_type = res->get_class();
 		StringName script_class;
 		if (res->get_script()) {
 			script_class = EditorNode::get_singleton()->get_object_custom_type_name(res->get_script());
@@ -682,7 +666,7 @@ bool EditorPropertyArray::_is_drop_valid(const Dictionary &p_drag_data) const {
 
 		for (String at : allowed_type.split(",", false)) {
 			at = at.strip_edges();
-			if (res->is_class(at) || EditorNode::get_editor_data().script_class_is_parent(script_class, at)) {
+			if (ClassDB::is_parent_class(res_type, at) || EditorNode::get_editor_data().script_class_is_parent(script_class, at)) {
 				return true;
 			}
 		}
@@ -712,7 +696,7 @@ bool EditorPropertyArray::_is_drop_valid(const Dictionary &p_drag_data) const {
 			ERR_FAIL_NULL_V_MSG(dropped_node, false, "Could not get the dropped node by its path.");
 
 			if (allowed_type != "NodePath") {
-				if (!dropped_node->is_class(allowed_type) &&
+				if (!ClassDB::is_parent_class(dropped_node->get_class_name(), allowed_type) &&
 						!EditorNode::get_singleton()->is_object_of_custom_type(dropped_node, allowed_type)) {
 					// Fail if one of the nodes is not of allowed type.
 					return false;
@@ -724,7 +708,7 @@ bool EditorPropertyArray::_is_drop_valid(const Dictionary &p_drag_data) const {
 				if (!allowed_subtype_array.has(dropped_node->get_class_name())) {
 					// The dropped node type was not found in the allowed subtype array, we must check if it inherits one of them.
 					for (const String &ast : allowed_subtype_array) {
-						if (dropped_node->is_class(ast) ||
+						if (ClassDB::is_parent_class(dropped_node->get_class_name(), ast) ||
 								EditorNode::get_singleton()->is_object_of_custom_type(dropped_node, ast)) {
 							is_drop_allowed = true;
 							break;
@@ -818,6 +802,17 @@ Node *EditorPropertyArray::get_base_node() {
 void EditorPropertyArray::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_THEME_CHANGED: {
+			for (Slot &slot : slots) {
+				if (slot.edit_button) {
+					slot.edit_button->set_button_icon(get_editor_theme_icon(SNAME("Edit")));
+				}
+				if (slot.reorder_button) {
+					slot.reorder_button->set_button_icon(get_editor_theme_icon(SNAME("TripleBar")));
+				}
+				if (slot.remove_button) {
+					slot.remove_button->set_button_icon(get_editor_theme_icon(SNAME("Remove")));
+				}
+			}
 			_update_slots_size();
 		} break;
 		case NOTIFICATION_DRAG_BEGIN: {
@@ -1070,7 +1065,7 @@ void EditorPropertyDictionary::_property_changed(const String &p_property, Varia
 
 	object->set(p_property, p_value);
 	bool new_item_or_key = !p_property.begins_with("indices");
-	emit_changed(get_edited_property(), object->get_dict(), "", p_changing || new_item_or_key);
+	emit_changed(get_edited_property(), object->get_dict(), p_name, p_changing || new_item_or_key);
 	if (new_item_or_key) {
 		update_property();
 	}
@@ -1136,7 +1131,7 @@ void EditorPropertyDictionary::_create_new_property_slot(int p_idx) {
 	if (is_untyped_dict) {
 		edit_btn = memnew(Button);
 		edit_btn->set_accessibility_name(TTRC("Edit"));
-		edit_btn->set_button_icon(EditorIconManager::get_icon(SNAME("Edit")));
+		edit_btn->set_button_icon(get_editor_theme_icon(SNAME("Edit")));
 		edit_btn->set_disabled(is_read_only());
 		edit_btn->set_theme_type_variation(SNAME("EditorInspectorFlatButton"));
 		edit_btn->connect(SceneStringName(pressed), callable_mp(this, &EditorPropertyDictionary::_change_type).bind(edit_btn, slots.size()));
@@ -1144,7 +1139,7 @@ void EditorPropertyDictionary::_create_new_property_slot(int p_idx) {
 	} else if (p_idx >= 0) {
 		remove_btn = memnew(Button);
 		remove_btn->set_accessibility_name(TTRC("Remove"));
-		remove_btn->set_button_icon(EditorIconManager::get_icon(SNAME("Remove")));
+		remove_btn->set_button_icon(get_editor_theme_icon(SNAME("Remove")));
 		remove_btn->set_disabled(is_read_only());
 		remove_btn->set_theme_type_variation(SNAME("EditorInspectorFlatButton"));
 		remove_btn->connect(SceneStringName(pressed), callable_mp(this, &EditorPropertyDictionary::_remove_pressed).bind(slots.size()));
@@ -1268,10 +1263,6 @@ void EditorPropertyDictionary::set_preview_value(bool p_preview_value) {
 	preview_value = p_preview_value;
 }
 
-void EditorPropertyDictionary::make_passthrough(bool p_passthrough) {
-	edit->set_mouse_filter(p_passthrough ? Control::MOUSE_FILTER_PASS : Control::MOUSE_FILTER_STOP);
-}
-
 void EditorPropertyDictionary::update_property() {
 	Variant updated_val = get_edited_property_value();
 
@@ -1300,7 +1291,7 @@ void EditorPropertyDictionary::update_property() {
 	if (updated_val.get_type() != Variant::DICTIONARY) {
 		if (preview_value) {
 			edit->set_text_alignment(HORIZONTAL_ALIGNMENT_LEFT);
-			edit->set_button_icon(EditorIconManager::get_icon(SNAME("Nil")));
+			edit->set_button_icon(get_editor_theme_icon(SNAME("Nil")));
 			edit->set_text(dict_type_name);
 		} else {
 			edit->set_text_alignment(HORIZONTAL_ALIGNMENT_CENTER);
@@ -1333,7 +1324,7 @@ void EditorPropertyDictionary::update_property() {
 
 		edit->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
 		edit->set_text_alignment(HORIZONTAL_ALIGNMENT_LEFT);
-		edit->set_button_icon(EditorIconManager::get_icon(dict_type_name));
+		edit->set_button_icon(get_editor_theme_icon(dict_type_name));
 		edit->set_text(vformat("%s%s", dict_sub_type_name, ctr_str));
 		edit->set_tooltip_text(vformat(TTR("%s%s (size %d)"), dict_type_name, dict_sub_type_name, dict.size()));
 	} else {
@@ -1434,8 +1425,9 @@ void EditorPropertyDictionary::update_property() {
 					new_prop->set_draw_background(false);
 					new_prop->set_use_folding(is_using_folding());
 					new_prop->set_h_size_flags(SIZE_EXPAND_FILL);
-					new_prop->make_passthrough(true);
 					new_prop->set_draw_label(false);
+					new_prop->set_mouse_filter(MOUSE_FILTER_PASS);
+					new_prop->set_mouse_behavior_recursive(MOUSE_BEHAVIOR_DISABLED);
 					EditorPropertyArray *arr_prop = Object::cast_to<EditorPropertyArray>(new_prop);
 					if (arr_prop) {
 						arr_prop->set_preview_value(true);
@@ -1500,10 +1492,6 @@ void EditorPropertyDictionary::update_property() {
 					new_prop->add_inline_control(slot.prop_key, INLINE_CONTROL_LEFT);
 				}
 
-				// Move the right container to be the last child, so that focusing on the next Control behaves in the expected order.
-				Control *right_cont = new_prop->get_inline_container(INLINE_CONTROL_RIGHT);
-				right_cont->get_parent()->move_child(right_cont, new_prop->get_child_count() - 1);
-
 				slot.set_prop(new_prop);
 
 			} else if (slot.index != EditorPropertyDictionaryObject::NEW_KEY_INDEX && slot.index != EditorPropertyDictionaryObject::NEW_VALUE_INDEX) {
@@ -1538,17 +1526,6 @@ void EditorPropertyDictionary::update_property() {
 	}
 }
 
-void EditorPropertyDictionary::update_properties_recursive() {
-	for (const Slot &slot : slots) {
-		if (slot.prop) {
-			slot.prop->update_properties_recursive();
-		}
-		if (slot.prop_key) {
-			slot.prop_key->update_properties_recursive();
-		}
-	}
-}
-
 void EditorPropertyDictionary::_remove_pressed(int p_slot_index) {
 	Dictionary dict = object->get_dict().duplicate();
 	int index = slots[p_slot_index].index;
@@ -1568,6 +1545,15 @@ void EditorPropertyDictionary::_resource_selected(const String &p_path, Ref<Reso
 void EditorPropertyDictionary::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_THEME_CHANGED: {
+			for (Slot &slot : slots) {
+				if (slot.edit_button) {
+					slot.edit_button->set_button_icon(get_editor_theme_icon(SNAME("Edit")));
+				}
+				if (slot.remove_button) {
+					slot.remove_button->set_button_icon(get_editor_theme_icon(SNAME("Remove")));
+				}
+			}
+
 			if (button_add_item) {
 				add_panel->add_theme_style_override(SceneStringName(panel), get_theme_stylebox(SNAME("DictionaryAddItem")));
 			}
@@ -1744,9 +1730,11 @@ void EditorPropertyLocalizableString::update_property() {
 		for (int i = 0; i < amount; i++) {
 			String prop_name;
 			Variant key;
+			Variant value;
 
 			prop_name = "indices/" + itos(i + offset);
 			key = dict.get_key_at_index(i + offset);
+			value = dict.get_value_at_index(i + offset);
 
 			EditorProperty *prop = memnew(EditorPropertyText);
 
@@ -1768,7 +1756,7 @@ void EditorPropertyLocalizableString::update_property() {
 			prop->set_h_size_flags(SIZE_EXPAND_FILL);
 			Button *edit_btn = memnew(Button);
 			edit_btn->set_accessibility_name(TTRC("Remove Translation"));
-			edit_btn->set_button_icon(EditorIconManager::get_icon(SNAME("Remove")));
+			edit_btn->set_button_icon(get_editor_theme_icon(SNAME("Remove")));
 			hbox->add_child(edit_btn);
 			edit_btn->connect(SceneStringName(pressed), callable_mp(this, &EditorPropertyLocalizableString::_remove_item).bind(edit_btn, remove_index));
 

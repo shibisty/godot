@@ -20,7 +20,7 @@
  * SOFTWARE.
  */
 
-#include "tvgLoader.h"
+#include "tvgFrameModule.h"
 #include "tvgAnimation.h"
 
 
@@ -40,10 +40,10 @@ Result Animation::frame(float no) noexcept
     auto loader = to<PictureImpl>(pImpl->picture)->loader;
 
     if (!loader) return Result::InsufficientCondition;
-    if (!loader->playable) return Result::NonSupport;
+    if (!loader->animatable()) return Result::NonSupport;
 
-    if (static_cast<AnimLoader*>(loader)->frame(no)) {
-        PAINT(pImpl->picture)->mark(RenderUpdateFlag::Children);
+    if (static_cast<FrameModule*>(loader)->frame(no)) {
+        PAINT(pImpl->picture)->mark(RenderUpdateFlag::All);
         return Result::Success;
     }
     return Result::InsufficientCondition;
@@ -59,24 +59,33 @@ Picture* Animation::picture() const noexcept
 float Animation::curFrame() const noexcept
 {
     auto loader = to<PictureImpl>(pImpl->picture)->loader;
-    if (!loader || !loader->playable) return 0;
-    return static_cast<AnimLoader*>(loader)->curFrame();
+
+    if (!loader) return 0;
+    if (!loader->animatable()) return 0;
+
+    return static_cast<FrameModule*>(loader)->curFrame();
 }
 
 
 float Animation::totalFrame() const noexcept
 {
     auto loader = to<PictureImpl>(pImpl->picture)->loader;
-    if (!loader || !loader->playable) return 0;
-    return static_cast<AnimLoader*>(loader)->totalFrame();
+
+    if (!loader) return 0;
+    if (!loader->animatable()) return 0;
+
+    return static_cast<FrameModule*>(loader)->totalFrame();
 }
 
 
 float Animation::duration() const noexcept
 {
     auto loader = to<PictureImpl>(pImpl->picture)->loader;
-    if (!loader || !loader->playable) return 0;
-    return static_cast<AnimLoader*>(loader)->duration();
+
+    if (!loader) return 0;
+    if (!loader->animatable()) return 0;
+
+    return static_cast<FrameModule*>(loader)->duration();
 }
 
 
@@ -84,9 +93,9 @@ Result Animation::segment(float begin, float end) noexcept
 {
     auto loader = to<PictureImpl>(pImpl->picture)->loader;
     if (!loader) return Result::InsufficientCondition;
-    if (!loader->playable) return Result::NonSupport;
+    if (!loader->animatable()) return Result::NonSupport;
 
-    return static_cast<AnimLoader*>(loader)->segment(begin, end);
+    return static_cast<FrameModule*>(loader)->segment(begin, end);
 }
 
 
@@ -94,10 +103,10 @@ Result Animation::segment(float *begin, float *end) noexcept
 {
     auto loader = to<PictureImpl>(pImpl->picture)->loader;
     if (!loader) return Result::InsufficientCondition;
-    if (!loader->playable) return Result::NonSupport;
+    if (!loader->animatable()) return Result::NonSupport;
     if (!begin && !end) return Result::InvalidArguments;
 
-    static_cast<AnimLoader*>(loader)->segment(begin, end);
+    static_cast<FrameModule*>(loader)->segment(begin, end);
 
     return Result::Success;
 }

@@ -46,7 +46,6 @@
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "servers/navigation_3d/navigation_server_3d.h"
-#include "servers/navigation_3d/navigation_server_3d_manager.h"
 
 #ifndef DISABLE_DEPRECATED
 NavigationMeshGenerator *_nav_mesh_generator = nullptr;
@@ -83,6 +82,8 @@ void uninitialize_navigation_3d_module(ModuleInitializationLevel p_level) {
 	}
 
 #ifndef DISABLE_DEPRECATED
-	memdelete(_nav_mesh_generator);
+	if (_nav_mesh_generator) {
+		memdelete(_nav_mesh_generator);
+	}
 #endif // DISABLE_DEPRECATED
 }

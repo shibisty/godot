@@ -31,12 +31,10 @@
 #include "ray_cast_3d.h"
 
 #include "core/config/engine.h"
-#include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "scene/3d/physics/collision_object_3d.h"
 #include "scene/main/scene_tree.h"
 #include "scene/resources/mesh.h"
-#include "servers/physics_3d/physics_server_3d.h"
 #include "servers/rendering/rendering_server.h"
 
 void RayCast3D::set_target_position(const Vector3 &p_point) {
@@ -125,7 +123,7 @@ void RayCast3D::set_enabled(bool p_enabled) {
 		collided = false;
 	}
 
-	if (is_inside_tree() && PhysicsServer3D::get_singleton()->debug_is_enabled()) {
+	if (is_inside_tree() && get_tree()->is_debugging_collisions_hint()) {
 		if (p_enabled) {
 			_update_debug_shape();
 		} else {
@@ -174,7 +172,7 @@ void RayCast3D::_notification(int p_what) {
 				set_physics_process_internal(false);
 			}
 
-			if (PhysicsServer3D::get_singleton()->debug_is_enabled()) {
+			if (get_tree()->is_debugging_collisions_hint()) {
 				_update_debug_shape();
 			}
 
@@ -210,7 +208,7 @@ void RayCast3D::_notification(int p_what) {
 
 			bool prev_collision_state = collided;
 			_update_raycast_state();
-			if (PhysicsServer3D::get_singleton()->debug_is_enabled()) {
+			if (get_tree()->is_debugging_collisions_hint()) {
 				if (prev_collision_state != collided) {
 					_update_debug_shape_material(true);
 				}
@@ -236,7 +234,7 @@ void RayCast3D::_update_raycast_state() {
 		to = Vector3(0, 0.01, 0);
 	}
 
-	PS3DT::RayParameters ray_params;
+	PhysicsDirectSpaceState3D::RayParameters ray_params;
 	ray_params.from = gt.get_origin();
 	ray_params.to = gt.xform(to);
 	ray_params.exclude = exclude;
@@ -246,7 +244,7 @@ void RayCast3D::_update_raycast_state() {
 	ray_params.hit_from_inside = hit_from_inside;
 	ray_params.hit_back_faces = hit_back_faces;
 
-	PS3DT::RayResult rr;
+	PhysicsDirectSpaceState3D::RayResult rr;
 	if (dss->intersect_ray(ray_params, rr)) {
 		collided = true;
 		against = rr.collider_id;
@@ -271,18 +269,18 @@ void RayCast3D::add_exception_rid(const RID &p_rid) {
 	exclude.insert(p_rid);
 }
 
-void RayCast3D::add_exception(RequiredParam<const CollisionObject3D> p_node) {
-	EXTRACT_PARAM_OR_FAIL_MSG(node, p_node, "The passed Node must be an instance of CollisionObject3D.");
-	add_exception_rid(node->get_rid());
+void RayCast3D::add_exception(RequiredParam<const CollisionObject3D> rp_node) {
+	EXTRACT_PARAM_OR_FAIL_MSG(p_node, rp_node, "The passed Node must be an instance of CollisionObject3D.");
+	add_exception_rid(p_node->get_rid());
 }
 
 void RayCast3D::remove_exception_rid(const RID &p_rid) {
 	exclude.erase(p_rid);
 }
 
-void RayCast3D::remove_exception(RequiredParam<const CollisionObject3D> p_node) {
-	EXTRACT_PARAM_OR_FAIL_MSG(node, p_node, "The passed Node must be an instance of CollisionObject3D.");
-	remove_exception_rid(node->get_rid());
+void RayCast3D::remove_exception(RequiredParam<const CollisionObject3D> rp_node) {
+	EXTRACT_PARAM_OR_FAIL_MSG(p_node, rp_node, "The passed Node must be an instance of CollisionObject3D.");
+	remove_exception_rid(p_node->get_rid());
 }
 
 void RayCast3D::clear_exceptions() {
@@ -563,16 +561,5 @@ void RayCast3D::_clear_debug_shape() {
 	}
 }
 
-void RayCast3D::_physics_debug_changed() {
-	if (PhysicsServer3D::get_singleton()->debug_is_enabled()) {
-		_update_debug_shape();
-	} else {
-		_clear_debug_shape();
-	}
-}
-
 RayCast3D::RayCast3D() {
-#ifdef DEBUG_ENABLED
-	PhysicsServer3D::get_singleton()->connect("_debug_changed", callable_mp(this, &RayCast3D::_physics_debug_changed));
-#endif
 }

@@ -200,28 +200,17 @@ if (jit_stack != NULL)
 
 
 /*************************************************
-*          Checks function compilation           *
+*               Get target CPU type              *
 *************************************************/
 
-BOOL
-PRIV(jit_check_exec)(void *executable_jit, uint32_t options)
+const char*
+PRIV(jit_get_target)(void)
 {
 #ifndef SUPPORT_JIT
-(void)executable_jit;
-(void)options;
-return FALSE;
+return "JIT is not supported";
 #else  /* SUPPORT_JIT */
-/* The same check is performed at the beginning of pcre2_jit_match(). */
-executable_functions *functions = (executable_functions *)executable_jit;
-int index = 0;
-
-if ((options & PCRE2_PARTIAL_HARD) != 0)
-  index = 2;
-else if ((options & PCRE2_PARTIAL_SOFT) != 0)
-  index = 1;
-
-return functions->executable_funcs[index] != NULL;
-#endif
+return sljit_get_platform_name();
+#endif  /* SUPPORT_JIT */
 }
 
 
@@ -241,20 +230,5 @@ SLJIT_COMPILE_ASSERT(JIT_NUMBER_OF_COMPILE_MODES == 3, number_of_compile_modes_c
 return executable_sizes[0] + executable_sizes[1] + executable_sizes[2];
 #endif
 }
-
-/*************************************************
-*               Get target CPU type              *
-*************************************************/
-
-const char*
-PRIV(jit_get_target)(void)
-{
-#ifndef SUPPORT_JIT
-return "JIT is not supported";
-#else  /* SUPPORT_JIT */
-return sljit_get_platform_name();
-#endif  /* SUPPORT_JIT */
-}
-
 
 /* End of pcre2_jit_misc_inc.h */

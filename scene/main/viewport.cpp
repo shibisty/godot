@@ -41,7 +41,6 @@ STATIC_ASSERT_INCOMPLETE_TYPE(class, RenderingServer);
 #include "core/object/class_db.h"
 #include "core/templates/pair.h"
 #include "core/templates/sort_array.h"
-#include "scene/audio/audio_stream_player.h"
 #include "scene/gui/control.h"
 #include "scene/gui/label.h"
 #include "scene/gui/popup.h"
@@ -52,17 +51,16 @@ STATIC_ASSERT_INCOMPLETE_TYPE(class, RenderingServer);
 #include "scene/resources/dpi_texture.h"
 #include "scene/resources/mesh.h"
 #include "scene/resources/text_line.h"
-#include "scene/resources/world_2d.h"
 #include "servers/audio/audio_server.h"
 #include "servers/display/display_server.h"
 #include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/rendering_server_globals.h"
 
-#ifndef _2D_DISABLED
+// 2D.
 #include "scene/2d/audio_listener_2d.h"
 #include "scene/2d/camera_2d.h"
-#endif // _2D_DISABLED
+#include "scene/resources/world_2d.h"
 
 #ifndef _3D_DISABLED
 #include "scene/3d/audio_listener_3d.h"
@@ -73,13 +71,10 @@ STATIC_ASSERT_INCOMPLETE_TYPE(class, RenderingServer);
 
 #ifndef PHYSICS_2D_DISABLED
 #include "scene/2d/physics/collision_object_2d.h"
-#include "servers/physics_2d/direct_states/physics_direct_space_state_2d.h"
-#include "servers/physics_2d/physics_server_2d.h"
 #endif // PHYSICS_2D_DISABLED
 
 #ifndef PHYSICS_3D_DISABLED
 #include "scene/3d/physics/collision_object_3d.h"
-#include "servers/physics_3d/physics_server_3d.h"
 #endif // PHYSICS_3D_DISABLED
 
 #ifndef XR_DISABLED
@@ -614,16 +609,14 @@ void Viewport::_notification(int p_what) {
 #endif // _3D_DISABLED
 
 			add_to_group("_viewports");
+#if !defined(PHYSICS_2D_DISABLED) || !defined(PHYSICS_3D_DISABLED)
+			if (get_tree()->is_debugging_collisions_hint()) {
 #ifndef PHYSICS_2D_DISABLED
-			if (PhysicsServer2D::get_singleton()->debug_is_enabled()) {
 				PhysicsServer2D::get_singleton()->space_set_debug_contacts(find_world_2d()->get_space(), get_tree()->get_collision_debug_contact_count());
 				contact_2d_debug = RenderingServer::get_singleton()->canvas_item_create();
 				RenderingServer::get_singleton()->canvas_item_set_parent(contact_2d_debug, current_canvas);
-				set_physics_process_internal(true);
-			}
 #endif // PHYSICS_2D_DISABLED
 #ifndef PHYSICS_3D_DISABLED
-			if (PhysicsServer3D::get_singleton()->debug_is_enabled()) {
 				PhysicsServer3D::get_singleton()->space_set_debug_contacts(find_world_3d()->get_space(), get_tree()->get_collision_debug_contact_count());
 				contact_3d_debug_multimesh = RenderingServer::get_singleton()->multimesh_create();
 				RenderingServer::get_singleton()->multimesh_allocate_data(contact_3d_debug_multimesh, get_tree()->get_collision_debug_contact_count(), RSE::MULTIMESH_TRANSFORM_3D, false);
@@ -633,9 +626,10 @@ void Viewport::_notification(int p_what) {
 				RenderingServer::get_singleton()->instance_set_base(contact_3d_debug_instance, contact_3d_debug_multimesh);
 				RenderingServer::get_singleton()->instance_set_scenario(contact_3d_debug_instance, find_world_3d()->get_scenario());
 				RenderingServer::get_singleton()->instance_geometry_set_flag(contact_3d_debug_instance, RSE::INSTANCE_FLAG_DRAW_NEXT_FRAME_IF_VISIBLE, true);
+#endif // PHYSICS_3D_DISABLED
 				set_physics_process_internal(true);
 			}
-#endif // PHYSICS_3D_DISABLED
+#endif // !defined(PHYSICS_2D_DISABLED) || !defined(PHYSICS_3D_DISABLED)
 			_update_texture_filter_changed(false);
 			_update_texture_repeat_changed(false);
 		} break;
@@ -721,7 +715,7 @@ void Viewport::_notification(int p_what) {
 			}
 
 #ifndef PHYSICS_2D_DISABLED
-			if (PhysicsServer2D::get_singleton()->debug_is_enabled() && contact_2d_debug.is_valid()) {
+			if (get_tree()->is_debugging_collisions_hint() && contact_2d_debug.is_valid()) {
 				RenderingServer::get_singleton()->canvas_item_clear(contact_2d_debug);
 				RenderingServer::get_singleton()->canvas_item_set_draw_index(contact_2d_debug, 0xFFFFF); //very high index
 
@@ -735,7 +729,7 @@ void Viewport::_notification(int p_what) {
 			}
 #endif // PHYSICS_2D_DISABLED
 #ifndef PHYSICS_3D_DISABLED
-			if (PhysicsServer3D::get_singleton()->debug_is_enabled() && contact_3d_debug_multimesh.is_valid()) {
+			if (get_tree()->is_debugging_collisions_hint() && contact_3d_debug_multimesh.is_valid()) {
 				Vector<Vector3> points = PhysicsServer3D::get_singleton()->space_get_contacts(find_world_3d()->get_space());
 				int point_count = PhysicsServer3D::get_singleton()->space_get_contact_count(find_world_3d()->get_space());
 
@@ -818,7 +812,7 @@ void Viewport::_process_picking() {
 	Vector2 last_pos(1e20, 1e20);
 	CollisionObject3D *last_object = nullptr;
 	ObjectID last_id;
-	PS3DT::RayResult result;
+	PhysicsDirectSpaceState3D::RayResult result;
 #endif // PHYSICS_3D_DISABLED
 
 #ifndef PHYSICS_2D_DISABLED
@@ -903,15 +897,13 @@ void Viewport::_process_picking() {
 			pos = st->get_position();
 		}
 
-		// Avoid unused variable warning if 2D and 3D are both disabled.
-		(void)is_mouse;
 #ifndef PHYSICS_2D_DISABLED
 		if (ss2d) {
 			// Send to 2D.
 
 			uint64_t frame = get_tree()->get_frame();
 
-			PS2DT::ShapeResult res[64];
+			PhysicsDirectSpaceState2D::ShapeResult res[64];
 			for (const CanvasLayer *E : canvas_layers) {
 				Transform2D canvas_layer_transform;
 				ObjectID canvas_layer_id;
@@ -927,7 +919,7 @@ void Viewport::_process_picking() {
 
 				Vector2 point = canvas_layer_transform.affine_inverse().xform(pos);
 
-				PS2DT::PointParameters point_params;
+				PhysicsDirectSpaceState2D::PointParameters point_params;
 				point_params.position = point;
 				point_params.canvas_instance_id = canvas_layer_id;
 				point_params.collide_with_areas = true;
@@ -936,12 +928,9 @@ void Viewport::_process_picking() {
 				int rc = ss2d->intersect_point(point_params, res, 64);
 				if (physics_object_picking_sort) {
 					struct ComparatorCollisionObjects {
-						bool operator()(const PS2DT::ShapeResult &p_a, const PS2DT::ShapeResult &p_b) const {
-							if (!p_a.collider_id.is_valid() || !p_b.collider_id.is_valid()) {
-								return false;
-							}
-							CollisionObject2D *a = ObjectDB::get_instance<CollisionObject2D>(p_a.collider_id);
-							CollisionObject2D *b = ObjectDB::get_instance<CollisionObject2D>(p_b.collider_id);
+						bool operator()(const PhysicsDirectSpaceState2D::ShapeResult &p_a, const PhysicsDirectSpaceState2D::ShapeResult &p_b) const {
+							CollisionObject2D *a = Object::cast_to<CollisionObject2D>(p_a.collider);
+							CollisionObject2D *b = Object::cast_to<CollisionObject2D>(p_b.collider);
 							if (!a || !b) {
 								return false;
 							}
@@ -953,15 +942,15 @@ void Viewport::_process_picking() {
 							return a->is_greater_than(b);
 						}
 					};
-					SortArray<PS2DT::ShapeResult, ComparatorCollisionObjects> sorter;
+					SortArray<PhysicsDirectSpaceState2D::ShapeResult, ComparatorCollisionObjects> sorter;
 					sorter.sort(res, rc);
 				}
 				for (int i = 0; i < rc; i++) {
 					if (is_input_handled()) {
 						break;
 					}
-					if (res[i].collider_id.is_valid()) {
-						CollisionObject2D *co = ObjectDB::get_instance<CollisionObject2D>(res[i].collider_id);
+					if (res[i].collider_id.is_valid() && res[i].collider) {
+						CollisionObject2D *co = Object::cast_to<CollisionObject2D>(res[i].collider);
 						if (co && co->can_process()) {
 							bool send_event = true;
 							if (is_mouse) {
@@ -1040,7 +1029,7 @@ void Viewport::_process_picking() {
 
 				PhysicsDirectSpaceState3D *space = PhysicsServer3D::get_singleton()->space_get_direct_state(find_world_3d()->get_space());
 				if (space) {
-					PS3DT::RayParameters ray_params;
+					PhysicsDirectSpaceState3D::RayParameters ray_params;
 					ray_params.from = from;
 					ray_params.to = from + dir * depth_far;
 					ray_params.collide_with_areas = true;
@@ -1048,7 +1037,7 @@ void Viewport::_process_picking() {
 
 					bool col = space->intersect_ray(ray_params, result);
 					ObjectID new_collider;
-					CollisionObject3D *co = col && result.collider_id.is_valid() ? ObjectDB::get_instance<CollisionObject3D>(result.collider_id) : nullptr;
+					CollisionObject3D *co = col ? Object::cast_to<CollisionObject3D>(result.collider) : nullptr;
 					if (co && co->can_process()) {
 						new_collider = result.collider_id;
 						if (!capture_object) {
@@ -1201,14 +1190,6 @@ bool Viewport::_set_size(const Size2i &p_size, const int p_view_count, const Siz
 	Rect2i limit = get_visible_rect();
 	for (int i = 0; i < gui.sub_windows.size(); ++i) {
 		Window *sw = gui.sub_windows[i].window;
-#ifdef TOOLS_ENABLED
-		if (!is_part_of_edited_scene() && sw->is_part_of_edited_scene()) {
-			continue;
-		}
-#endif
-		if (!sw->is_clamped_to_embedder()) {
-			continue;
-		}
 		Rect2i rect = Rect2i(sw->position, sw->size);
 		Rect2i new_rect = sw->fit_rect_in_parent(rect, limit);
 		if (new_rect != rect) {
@@ -1505,7 +1486,7 @@ Vector2 Viewport::get_mouse_position() const {
 		// Rely on the most recent mouse coordinate from an InputEventMouse in push_input.
 		// In this case get_screen_transform is not applicable, because it is ambiguous.
 		return gui.last_mouse_pos;
-	} else if (DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_MOUSE) && !DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_EMBEDDED)) {
+	} else if (DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_MOUSE)) {
 		Transform2D xform = get_screen_transform_internal(true);
 		if (xform.determinant() == 0) {
 			// Screen transform can be non-invertible when the Window is minimized.
@@ -1999,8 +1980,7 @@ void Viewport::_gui_input_event(Ref<InputEvent> p_event) {
 							// Grabbing unhovered focus can cause issues when mouse is dragged
 							// with another button held down.
 							if (gui.mouse_over_hierarchy.has(control->get_instance_id())) {
-								// Don't play a sound when the focus comes from a click.
-								// Also, hide the focus when it comes from a click.
+								// Hide the focus when it comes from a click.
 								control->grab_focus(true);
 							}
 							break;
@@ -2068,7 +2048,7 @@ void Viewport::_gui_input_event(Ref<InputEvent> p_event) {
 		Viewport *section_root = get_section_root_viewport();
 		if (!gui.drag_attempted && gui.mouse_focus && section_root && !section_root->gui.global_dragging && (mm->get_button_mask().has_flag(MouseButtonMask::LEFT))) {
 			gui.drag_accum += mm->get_relative();
-			real_t len = gui.drag_accum.length();
+			float len = gui.drag_accum.length();
 			if (len > gui.drag_threshold) {
 				{ // Attempt grab, try parent controls too.
 					CanvasItem *ci = gui.mouse_focus;
@@ -2316,13 +2296,8 @@ void Viewport::_gui_input_event(Ref<InputEvent> p_event) {
 
 		if (p_event->is_action_pressed(SNAME("ui_cancel"))) {
 			// Cancel tooltip timer or hide tooltip when pressing Escape (this is standard behavior in most applications).
-			Control *tooltip_control = gui.tooltip_control;
 			_gui_cancel_tooltip();
 			if (gui.tooltip_popup) {
-				// Some platforms send a mouse motion event when the tooltip is destroyed under the cursor.
-				// Remember the tooltip control, so that the tooltip timer is not immediately restarted
-				// by a mouse event triggered upon the tooltip closing.
-				gui.tooltip_control = tooltip_control;
 				// If a tooltip was hidden, prevent other actions associated with `ui_cancel` from occurring.
 				// For instance, this prevents the node from being deselected when pressing Escape
 				// to hide a documentation tooltip in the inspector.
@@ -2444,7 +2419,6 @@ void Viewport::_gui_input_event(Ref<InputEvent> p_event) {
 			}
 
 			if (next) {
-				play_theme_sound(next->get_theme_sound(SNAME("focus_sound")));
 				next->grab_focus();
 				set_input_as_handled();
 			} else if (show_focus && gui.hide_focus && gui.key_focus) {
@@ -2539,7 +2513,9 @@ void Viewport::_gui_set_drag_preview(Control *p_base, Control *p_control) {
 	ERR_FAIL_COND(p_control->get_parent() != nullptr);
 
 	Control *drag_preview = _gui_get_drag_preview();
-	memdelete(drag_preview);
+	if (drag_preview) {
+		memdelete(drag_preview);
+	}
 	p_control->set_as_top_level(true);
 	p_control->set_position(gui.last_mouse_pos);
 	p_base->get_root_parent_control()->add_child(p_control); // Add as child of viewport.
@@ -2609,15 +2585,6 @@ void Viewport::_gui_remove_control(Control *p_control) {
 	if (gui.tooltip_control == p_control) {
 		gui.tooltip_control = nullptr;
 	}
-}
-
-void Viewport::play_theme_sound(const Ref<AudioStream> &p_stream) {
-	ERR_MAIN_THREAD_GUARD;
-	if (p_stream.is_null() || !get_tree()) {
-		return;
-	}
-
-	get_tree()->play_theme_sound(p_stream);
 }
 
 void Viewport::canvas_item_top_level_changed() {
@@ -2719,7 +2686,7 @@ void Viewport::_gui_update_mouse_over() {
 	}
 
 	// Send Mouse Enter notifications.
-	for (int i = (int)needs_enter.size() - 1; i >= 0; i--) {
+	for (int i = needs_enter.size() - 1; i >= 0; i--) {
 		Control *ctrl = ObjectDB::get_instance<Control>(needs_enter[i]);
 		if (ctrl) {
 			ctrl->notification(Control::NOTIFICATION_MOUSE_ENTER);
@@ -2892,10 +2859,12 @@ void Viewport::_push_text_input(const String &p_text, bool p_emit_signal) {
 		gui.subwindow_focused->push_text_input(p_text);
 		return;
 	}
-	if (!gui.key_focus) {
+
+	StringName set_text_method = SNAME("_set_text");
+	if (!gui.key_focus || !gui.key_focus->has_method(set_text_method)) {
 		return;
 	}
-	gui.key_focus->call(SNAME("_set_text"), p_text, p_emit_signal);
+	gui.key_focus->call(set_text_method, p_text, p_emit_signal);
 }
 
 void Viewport::push_text_input(const String &p_text) {
@@ -3409,7 +3378,7 @@ void Viewport::_update_mouse_over(Vector2 p_pos) {
 			gui.sending_mouse_enter_exit_notifications = true;
 
 			// Send Mouse Enter notifications to parents first.
-			for (int i = (int)over_ancestors.size() - 1; i >= 0; i--) {
+			for (int i = over_ancestors.size() - 1; i >= 0; i--) {
 				Control *ctrl = ObjectDB::get_instance<Control>(over_ancestors[i]);
 				if (ctrl) {
 					gui.mouse_over_hierarchy.push_back(over_ancestors[i]);
@@ -3517,10 +3486,10 @@ void Viewport::_drop_mouse_over(Control *p_until_control) {
 	gui.sending_mouse_enter_exit_notifications = false;
 }
 
-void Viewport::push_input(RequiredParam<InputEvent> p_event, bool p_local_coords) {
+void Viewport::push_input(RequiredParam<InputEvent> rp_event, bool p_local_coords) {
 	ERR_MAIN_THREAD_GUARD;
 	ERR_FAIL_COND(!is_inside_tree());
-	EXTRACT_PARAM_OR_FAIL(event, p_event);
+	EXTRACT_PARAM_OR_FAIL(p_event, rp_event);
 
 	if (disable_input || disable_input_override) {
 		return;
@@ -3544,9 +3513,9 @@ void Viewport::push_input(RequiredParam<InputEvent> p_event, bool p_local_coords
 
 	Ref<InputEvent> ev;
 	if (!p_local_coords) {
-		ev = _make_input_local(event);
+		ev = _make_input_local(p_event);
 	} else {
-		ev = event;
+		ev = p_event;
 	}
 
 	Ref<InputEventMouse> me = ev;
@@ -3584,11 +3553,11 @@ void Viewport::push_input(RequiredParam<InputEvent> p_event, bool p_local_coords
 }
 
 #ifndef DISABLE_DEPRECATED
-void Viewport::push_unhandled_input(RequiredParam<InputEvent> p_event, bool p_local_coords) {
+void Viewport::push_unhandled_input(RequiredParam<InputEvent> rp_event, bool p_local_coords) {
 	ERR_MAIN_THREAD_GUARD;
 	WARN_DEPRECATED_MSG(R"*(The "push_unhandled_input()" method is deprecated, use "push_input()" instead.)*");
 	ERR_FAIL_COND(!is_inside_tree());
-	EXTRACT_PARAM_OR_FAIL(event, p_event);
+	EXTRACT_PARAM_OR_FAIL(p_event, rp_event);
 
 	local_input_handled = false;
 
@@ -3602,9 +3571,9 @@ void Viewport::push_unhandled_input(RequiredParam<InputEvent> p_event, bool p_lo
 
 	Ref<InputEvent> ev;
 	if (!p_local_coords) {
-		ev = _make_input_local(event);
+		ev = _make_input_local(p_event);
 	} else {
-		ev = event;
+		ev = p_event;
 	}
 
 	_push_unhandled_input_internal(ev);
@@ -3932,6 +3901,49 @@ void Viewport::set_use_occlusion_culling(bool p_use_occlusion_culling) {
 bool Viewport::is_using_occlusion_culling() const {
 	ERR_READ_THREAD_GUARD_V(false);
 	return use_occlusion_culling;
+}
+
+void Viewport::set_raytracing_scene(bool p_enable) {
+	ERR_MAIN_THREAD_GUARD;
+	raytracing_scene = p_enable;
+	RS::get_singleton()->viewport_set_raytracing_scene(viewport, raytracing_scene, raytracing_scene_cull_mask, raytracing_scene_distance);
+}
+
+bool Viewport::is_raytracing_scene_enabled() const {
+	ERR_READ_THREAD_GUARD_V(false);
+	return raytracing_scene;
+}
+
+void Viewport::set_raytracing_scene_cull_mask(uint32_t p_cull_mask) {
+	ERR_MAIN_THREAD_GUARD;
+	raytracing_scene_cull_mask = p_cull_mask;
+	RS::get_singleton()->viewport_set_raytracing_scene(viewport, raytracing_scene, raytracing_scene_cull_mask, raytracing_scene_distance);
+}
+
+uint32_t Viewport::get_raytracing_scene_cull_mask() const {
+	ERR_READ_THREAD_GUARD_V(0);
+	return raytracing_scene_cull_mask;
+}
+
+void Viewport::set_raytracing_scene_distance(float p_distance) {
+	ERR_MAIN_THREAD_GUARD;
+	raytracing_scene_distance = MAX(p_distance, 0.0f);
+	RS::get_singleton()->viewport_set_raytracing_scene(viewport, raytracing_scene, raytracing_scene_cull_mask, raytracing_scene_distance);
+}
+
+float Viewport::get_raytracing_scene_distance() const {
+	ERR_READ_THREAD_GUARD_V(0.0);
+	return raytracing_scene_distance;
+}
+
+int Viewport::get_pathtracing_sample_count() const {
+	ERR_READ_THREAD_GUARD_V(0);
+	return RS::get_singleton()->viewport_get_pathtracing_sample_count(viewport);
+}
+
+void Viewport::reset_pathtracing() {
+	ERR_MAIN_THREAD_GUARD;
+	RS::get_singleton()->viewport_reset_pathtracing(viewport);
 }
 
 void Viewport::set_debug_draw(DebugDraw p_debug_draw) {
@@ -4475,7 +4487,7 @@ bool Viewport::get_canvas_cull_mask_bit(uint32_t p_layer) const {
 	return (canvas_cull_mask & (1 << p_layer));
 }
 
-#ifdef DEBUG_ENABLED
+#ifdef TOOLS_ENABLED
 bool Viewport::is_visible_subviewport() const {
 	if (!is_sub_viewport()) {
 		return true;
@@ -4483,7 +4495,7 @@ bool Viewport::is_visible_subviewport() const {
 	SubViewportContainer *container = Object::cast_to<SubViewportContainer>(get_parent());
 	return container && container->is_visible_in_tree();
 }
-#endif // DEBUG_ENABLED
+#endif // TOOLS_ENABLED
 
 void Viewport::_update_audio_listener_2d() {
 	if (AudioServer::get_singleton()) {
@@ -4491,7 +4503,6 @@ void Viewport::_update_audio_listener_2d() {
 	}
 }
 
-#ifndef _2D_DISABLED
 void Viewport::_audio_listener_2d_set(AudioListener2D *p_audio_listener) {
 	if (audio_listener_2d == p_audio_listener) {
 		return;
@@ -4666,7 +4677,6 @@ Camera2D *Viewport::get_override_camera_2d() const {
 	return camera_2d_override.is_enabled() ? get_camera_2d() : nullptr;
 }
 #endif // DEBUG_ENABLED
-#endif // _2D_DISABLED
 
 #ifndef _3D_DISABLED
 AudioListener3D *Viewport::get_audio_listener_3d() const {
@@ -4928,12 +4938,7 @@ void Viewport::set_world_3d(const Ref<World3D> &p_world_3d) {
 	}
 
 	if (is_inside_tree()) {
-		const Ref<World3D> found_world_3d = find_world_3d();
-		if (found_world_3d.is_valid()) {
-			RenderingServer::get_singleton()->viewport_set_scenario(viewport, found_world_3d->get_scenario());
-		} else {
-			RenderingServer::get_singleton()->viewport_set_scenario(viewport, RID());
-		}
+		RenderingServer::get_singleton()->viewport_set_scenario(viewport, find_world_3d()->get_scenario());
 	}
 
 	_update_audio_listener_3d();
@@ -4954,12 +4959,7 @@ void Viewport::_own_world_3d_changed() {
 	}
 
 	if (is_inside_tree()) {
-		const Ref<World3D> found_world_3d = find_world_3d();
-		if (found_world_3d.is_valid()) {
-			RenderingServer::get_singleton()->viewport_set_scenario(viewport, found_world_3d->get_scenario());
-		} else {
-			RenderingServer::get_singleton()->viewport_set_scenario(viewport, RID());
-		}
+		RenderingServer::get_singleton()->viewport_set_scenario(viewport, find_world_3d()->get_scenario());
 	}
 
 	_update_audio_listener_3d();
@@ -4994,12 +4994,7 @@ void Viewport::set_use_own_world_3d(bool p_use_own_world_3d) {
 	}
 
 	if (is_inside_tree()) {
-		const Ref<World3D> found_world_3d = find_world_3d();
-		if (found_world_3d.is_valid()) {
-			RenderingServer::get_singleton()->viewport_set_scenario(viewport, found_world_3d->get_scenario());
-		} else {
-			RenderingServer::get_singleton()->viewport_set_scenario(viewport, RID());
-		}
+		RenderingServer::get_singleton()->viewport_set_scenario(viewport, find_world_3d()->get_scenario());
 	}
 
 	_update_audio_listener_3d();
@@ -5108,6 +5103,21 @@ void Viewport::set_scaling_3d_mode(Scaling3DMode p_scaling_3d_mode) {
 Viewport::Scaling3DMode Viewport::get_scaling_3d_mode() const {
 	ERR_READ_THREAD_GUARD_V(SCALING_3D_MODE_BILINEAR);
 	return scaling_3d_mode;
+}
+
+void Viewport::set_frame_generation(bool p_frame_generation) {
+	ERR_MAIN_THREAD_GUARD;
+	if (frame_generation == p_frame_generation) {
+		return;
+	}
+
+	frame_generation = p_frame_generation;
+	RS::get_singleton()->viewport_set_frame_generation(viewport, p_frame_generation);
+}
+
+bool Viewport::get_frame_generation() const {
+	ERR_READ_THREAD_GUARD_V(false);
+	return frame_generation;
 }
 
 void Viewport::set_scaling_3d_scale(float p_scaling_3d_scale) {
@@ -5232,6 +5242,14 @@ void Viewport::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_use_occlusion_culling", "enable"), &Viewport::set_use_occlusion_culling);
 	ClassDB::bind_method(D_METHOD("is_using_occlusion_culling"), &Viewport::is_using_occlusion_culling);
+	ClassDB::bind_method(D_METHOD("set_raytracing_scene", "enable"), &Viewport::set_raytracing_scene);
+	ClassDB::bind_method(D_METHOD("is_raytracing_scene_enabled"), &Viewport::is_raytracing_scene_enabled);
+	ClassDB::bind_method(D_METHOD("set_raytracing_scene_cull_mask", "cull_mask"), &Viewport::set_raytracing_scene_cull_mask);
+	ClassDB::bind_method(D_METHOD("get_raytracing_scene_cull_mask"), &Viewport::get_raytracing_scene_cull_mask);
+	ClassDB::bind_method(D_METHOD("set_raytracing_scene_distance", "distance"), &Viewport::set_raytracing_scene_distance);
+	ClassDB::bind_method(D_METHOD("get_raytracing_scene_distance"), &Viewport::get_raytracing_scene_distance);
+	ClassDB::bind_method(D_METHOD("get_pathtracing_sample_count"), &Viewport::get_pathtracing_sample_count);
+	ClassDB::bind_method(D_METHOD("reset_pathtracing"), &Viewport::reset_pathtracing);
 
 	ClassDB::bind_method(D_METHOD("set_debug_draw", "debug_draw"), &Viewport::set_debug_draw);
 	ClassDB::bind_method(D_METHOD("get_debug_draw"), &Viewport::get_debug_draw);
@@ -5342,12 +5360,10 @@ void Viewport::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_process_picking"), &Viewport::_process_picking);
 #endif // !defined(PHYSICS_2D_DISABLED) || !defined(PHYSICS_3D_DISABLED)
 
-#ifndef _2D_DISABLED
 	ClassDB::bind_method(D_METHOD("set_as_audio_listener_2d", "enable"), &Viewport::set_as_audio_listener_2d);
 	ClassDB::bind_method(D_METHOD("is_audio_listener_2d"), &Viewport::is_audio_listener_2d);
 	ClassDB::bind_method(D_METHOD("get_audio_listener_2d"), &Viewport::get_audio_listener_2d);
 	ClassDB::bind_method(D_METHOD("get_camera_2d"), &Viewport::get_camera_2d);
-#endif // _2D_DISABLED
 
 #ifndef _3D_DISABLED
 	ClassDB::bind_method(D_METHOD("set_world_3d", "world_3d"), &Viewport::set_world_3d);
@@ -5372,6 +5388,9 @@ void Viewport::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_scaling_3d_mode", "scaling_3d_mode"), &Viewport::set_scaling_3d_mode);
 	ClassDB::bind_method(D_METHOD("get_scaling_3d_mode"), &Viewport::get_scaling_3d_mode);
+
+	ClassDB::bind_method(D_METHOD("set_frame_generation", "frame_generation"), &Viewport::set_frame_generation);
+	ClassDB::bind_method(D_METHOD("get_frame_generation"), &Viewport::get_frame_generation);
 
 	ClassDB::bind_method(D_METHOD("set_scaling_3d_scale", "scale"), &Viewport::set_scaling_3d_scale);
 	ClassDB::bind_method(D_METHOD("get_scaling_3d_scale"), &Viewport::get_scaling_3d_scale);
@@ -5419,11 +5438,16 @@ void Viewport::_bind_methods() {
 
 #ifndef _3D_DISABLED
 	ADD_GROUP("Scaling 3D", "");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "scaling_3d_mode", PROPERTY_HINT_ENUM, "Nearest (Fastest):5,Bilinear (Fastest):0,FSR 1.0 (Fast):1,FSR 2.2 (Slow):2,MetalFX (Spatial - Fast):3,MetalFX (Temporal - Slow):4"), "set_scaling_3d_mode", "get_scaling_3d_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "scaling_3d_mode", PROPERTY_HINT_ENUM, "Nearest (Fastest):5,Bilinear (Fastest):0,FSR 1.0 (Fast):1,FSR 2.2 (Slow):2,MetalFX (Spatial - Fast):3,MetalFX (Temporal - Slow):4,NVIDIA DLSS (Temporal):6"), "set_scaling_3d_mode", "get_scaling_3d_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scaling_3d_scale", PROPERTY_HINT_RANGE, "0.1,2.0,0.0001"), "set_scaling_3d_scale", "get_scaling_3d_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "texture_mipmap_bias", PROPERTY_HINT_RANGE, "-2,2,0.001"), "set_texture_mipmap_bias", "get_texture_mipmap_bias");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "anisotropic_filtering_level", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2× (Faster),4× (Fast),8× (Average),16x (Slow)")), "set_anisotropic_filtering_level", "get_anisotropic_filtering_level");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fsr_sharpness", PROPERTY_HINT_RANGE, "0,2,0.01"), "set_fsr_sharpness", "get_fsr_sharpness");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "frame_generation"), "set_frame_generation", "get_frame_generation");
+	ADD_GROUP("Raytracing Scene", "raytracing_scene_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "raytracing_scene_enabled"), "set_raytracing_scene", "is_raytracing_scene_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "raytracing_scene_cull_mask", PROPERTY_HINT_LAYERS_3D_RENDER), "set_raytracing_scene_cull_mask", "get_raytracing_scene_cull_mask");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "raytracing_scene_distance", PROPERTY_HINT_RANGE, "0,100000,1,or_greater,suffix:m"), "set_raytracing_scene_distance", "get_raytracing_scene_distance");
 	ADD_GROUP("Variable Rate Shading", "vrs_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "vrs_mode", PROPERTY_HINT_ENUM, "Disabled,Texture,XR"), "set_vrs_mode", "get_vrs_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "vrs_update_mode", PROPERTY_HINT_ENUM, "Disabled,Once,Always"), "set_vrs_update_mode", "get_vrs_update_mode");
@@ -5433,9 +5457,7 @@ void Viewport::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "canvas_item_default_texture_filter", PROPERTY_HINT_ENUM, "Nearest,Linear,Linear Mipmap,Nearest Mipmap,Inherit"), "set_default_canvas_item_texture_filter", "get_default_canvas_item_texture_filter");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "canvas_item_default_texture_repeat", PROPERTY_HINT_ENUM, "Disabled,Enabled,Mirror,Inherit"), "set_default_canvas_item_texture_repeat", "get_default_canvas_item_texture_repeat");
 	ADD_GROUP("Audio Listener", "audio_listener_");
-#ifndef _2D_DISABLED
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "audio_listener_enable_2d"), "set_as_audio_listener_2d", "is_audio_listener_2d");
-#endif // _2D_DISABLED
 #ifndef _3D_DISABLED
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "audio_listener_enable_3d"), "set_as_audio_listener_3d", "is_audio_listener_3d");
 #endif // _3D_DISABLED
@@ -5485,6 +5507,7 @@ void Viewport::_bind_methods() {
 	BIND_ENUM_CONSTANT(SCALING_3D_MODE_METALFX_SPATIAL);
 	BIND_ENUM_CONSTANT(SCALING_3D_MODE_METALFX_TEMPORAL);
 	BIND_ENUM_CONSTANT(SCALING_3D_MODE_NEAREST);
+	BIND_ENUM_CONSTANT(SCALING_3D_MODE_DLSS);
 	BIND_ENUM_CONSTANT(SCALING_3D_MODE_MAX);
 
 	BIND_ENUM_CONSTANT(MSAA_DISABLED);
@@ -5942,9 +5965,7 @@ T *Viewport::CameraOverride<T>::get_overridden_camera() const {
 
 // Explicit template instantiation to allow template definitions inside cpp file
 // and prevent instantiation using other than the desired camera types.
-#ifndef _2D_DISABLED
 template class Viewport::CameraOverride<Camera2D>;
-#endif // _2D_DISABLED
 #ifndef _3D_DISABLED
 template class Viewport::CameraOverride<Camera3D>;
 #endif // _3D_DISABLED

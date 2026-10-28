@@ -470,9 +470,6 @@ bool EditorExportPlatformWeb::has_valid_project_configuration(const Ref<EditorEx
 
 	if (p_preset->get("vram_texture_compression/for_mobile")) {
 		if (!ResourceImporterTextureSettings::should_import_etc2_astc()) {
-			if (EditorNode::is_cmdline_mode()) {
-				err += TTR("ETC2/ASTC texture compression is required for Web export. In the Project Settings, search for 'ETC2' in the search field, or enable 'Advanced Settings', and go to Rendering > Textures > VRAM Compression to enable 'Import ETC2 ASTC'.") + "\n";
-			}
 			valid = false;
 		}
 	}
@@ -794,14 +791,23 @@ Error EditorExportPlatformWeb::run(const Ref<EditorExportPreset> &p_preset, int 
 			switch (p_option) {
 				// Run in Browser.
 				case 0: {
-					RETURN_IF_ERROR(_export_project(p_preset, p_debug_flags));
-					RETURN_IF_ERROR(_start_server(bind_host, bind_port, use_tls));
+					Error err = _export_project(p_preset, p_debug_flags);
+					if (err != OK) {
+						return err;
+					}
+					err = _start_server(bind_host, bind_port, use_tls);
+					if (err != OK) {
+						return err;
+					}
 					return _launch_browser(bind_host, bind_port, use_tls);
 				} break;
 
 				// Start HTTP Server.
 				case 1: {
-					RETURN_IF_ERROR(_export_project(p_preset, p_debug_flags));
+					Error err = _export_project(p_preset, p_debug_flags);
+					if (err != OK) {
+						return err;
+					}
 					return _start_server(bind_host, bind_port, use_tls);
 				} break;
 
@@ -815,7 +821,10 @@ Error EditorExportPlatformWeb::run(const Ref<EditorExportPreset> &p_preset, int 
 			switch (p_option) {
 				// Run in Browser.
 				case 0: {
-					RETURN_IF_ERROR(_export_project(p_preset, p_debug_flags));
+					Error err = _export_project(p_preset, p_debug_flags);
+					if (err != OK) {
+						return err;
+					}
 					return _launch_browser(bind_host, bind_port, use_tls);
 				} break;
 
@@ -907,14 +916,6 @@ Ref<Texture2D> EditorExportPlatformWeb::get_run_icon() const {
 	return run_icon;
 }
 
-String EditorExportPlatformWeb::get_debug_protocol() const {
-#ifdef WEB_ENABLED
-	return "messageport://";
-#else
-	return "ws://";
-#endif
-}
-
 void EditorExportPlatformWeb::initialize() {
 	if (EditorNode::get_singleton()) {
 		server.instantiate();
@@ -922,10 +923,10 @@ void EditorExportPlatformWeb::initialize() {
 		Ref<Image> img = memnew(Image);
 		const bool upsample = !Math::is_equal_approx(Math::round(EDSCALE), EDSCALE);
 
-		ImageLoaderSVG::create_image_from_string(img, _web_logo_svg, EDSCALE, upsample, HashMap<Color, Color>());
+		ImageLoaderSVG::create_image_from_string(img, _web_logo_svg, EDSCALE, upsample, false);
 		logo = ImageTexture::create_from_image(img);
 
-		ImageLoaderSVG::create_image_from_string(img, _web_run_icon_svg, EDSCALE, upsample, HashMap<Color, Color>());
+		ImageLoaderSVG::create_image_from_string(img, _web_run_icon_svg, EDSCALE, upsample, false);
 		run_icon = ImageTexture::create_from_image(img);
 
 		Ref<Theme> theme = EditorNode::get_singleton()->get_editor_theme();

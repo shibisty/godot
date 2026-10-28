@@ -63,21 +63,13 @@ using namespace tvg;
     #define TVG_FALLTHROUGH
 #endif
 
-namespace tvg
-{
-    enum class FileType
-    {
-        Svg = 0,
-        Lot,
-        Sfnt,
-        Png,
-        Jpg,
-        Webp,
-        Media,
-        Raw,
-        Gif,
-        Unknown
-    };
+#if defined(_MSC_VER) && defined(__clang__)
+    #define strncpy strncpy_s
+#endif
+
+namespace tvg {
+
+    enum class FileType { Png = 0, Jpg, Webp, Svg, Lot, Ttf, Raw, Gif, Unknown };
 
     #ifdef THORVG_LOG_ENABLED
         constexpr auto ErrorColor = "\033[31m";  //red

@@ -41,9 +41,6 @@
 #include <cstdlib>
 
 class ArrayMesh;
-class AudioStream;
-class AudioStreamPlayback;
-class AudioStreamPlayer;
 class InputEvent;
 class Material;
 class MultiplayerAPI;
@@ -141,6 +138,7 @@ private:
 	bool quit_on_go_back = true;
 
 #ifdef DEBUG_ENABLED
+	bool debug_collisions_hint = false;
 	bool debug_paths_hint = false;
 	bool debug_navigation_hint = false;
 #endif
@@ -193,7 +191,6 @@ private:
 	bool accessibility_force_update = true;
 	HashSet<ObjectID> accessibility_change_queue;
 	uint64_t accessibility_last_update = 0;
-	StringName gui_theme_bus;
 
 	HashMap<UGCall, Vector<Variant>, UGCall> unique_group_calls;
 	bool ugc_locked = false;
@@ -285,8 +282,6 @@ private:
 
 	//used by viewport
 	void _call_input_pause(const StringName &p_group, CallInputType p_call_type, const Ref<InputEvent> &p_input, Viewport *p_viewport);
-
-	void _project_settings_changed();
 
 protected:
 	void _notification(int p_notification);
@@ -414,7 +409,7 @@ public:
 
 	int get_node_count() const;
 
-	void queue_delete(RequiredParam<Object> p_object);
+	void queue_delete(RequiredParam<Object> rp_object);
 
 	Vector<Node *> get_nodes_in_group(const StringName &p_group);
 	Node *get_first_node_in_group(const StringName &p_group);
@@ -430,8 +425,8 @@ public:
 	void set_current_scene(Node *p_scene);
 	Node *get_current_scene() const;
 	Error change_scene_to_file(const String &p_path);
-	Error change_scene_to_packed(RequiredParam<PackedScene> p_scene);
-	Error change_scene_to_node(RequiredParam<Node> p_node);
+	Error change_scene_to_packed(RequiredParam<PackedScene> rp_scene);
+	Error change_scene_to_node(RequiredParam<Node> rp_node);
 	Error reload_current_scene();
 	void unload_current_scene();
 
@@ -439,8 +434,6 @@ public:
 	RequiredResult<Tween> create_tween();
 	void remove_tween(const Ref<Tween> &p_tween);
 	TypedArray<Tween> get_processed_tweens();
-
-	void play_theme_sound(const Ref<AudioStream> &p_stream);
 
 	//used by Main::start, don't use otherwise
 	void add_current_scene(Node *p_current);

@@ -125,14 +125,6 @@ public:
     char name[MaxTokenLength + 1];
 };
 
-inline void SetPpTokenName(TPpToken& ppToken, const char* src, size_t len)
-{
-    if (len >= sizeof(ppToken.name))
-        len = sizeof(ppToken.name) - 1;
-    memcpy(ppToken.name, src, len);
-    ppToken.name[len] = '\0';
-}
-
 class TStringAtomMap {
 //
 // Implementation is in PpAtom.cpp
@@ -164,7 +156,6 @@ public:
 
     // Map atom -> string.
     const char* getString(int atom) const { return stringMap[atom]->c_str(); }
-    const TString* getTString(int atom) const { return stringMap[atom]; }
 
 protected:
     TStringAtomMap(TStringAtomMap&);
@@ -270,7 +261,7 @@ public:
                 ppToken.clear();
                 ppToken.space = space;
                 ppToken.i64val = i64val;
-                SetPpTokenName(ppToken, name.c_str(), name.size());
+                snprintf(ppToken.name, sizeof(ppToken.name), "%s", name.c_str());
                 return atom;
             }
             bool isAtom(int a) const { return atom == a; }

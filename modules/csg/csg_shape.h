@@ -39,6 +39,8 @@
 #include "scene/resources/3d/concave_polygon_shape_3d.h"
 #endif // PHYSICS_3D_DISABLED
 
+#include <thirdparty/misc/mikktspace.h>
+
 class Mesh;
 class NavigationMesh;
 class NavigationMeshSourceGeometryData3D;
@@ -75,7 +77,7 @@ private:
 	uint32_t collision_mask = 1;
 	real_t collision_priority = 1.0;
 	Ref<ConcavePolygonShape3D> root_collision_shape;
-	RID root_collision_body;
+	RID root_collision_instance;
 	RID root_collision_debug_instance;
 	Transform3D debug_shape_old_transform;
 #endif // PHYSICS_3D_DISABLED
@@ -88,15 +90,24 @@ private:
 		Vector<Vector3> vertices;
 		Vector<Vector3> normals;
 		Vector<Vector2> uvs;
-		Vector<float> tans;
+		Vector<real_t> tans;
 		Ref<Material> material;
 		int last_added = 0;
 
 		Vector3 *verticesw = nullptr;
 		Vector3 *normalsw = nullptr;
 		Vector2 *uvsw = nullptr;
-		float *tansw = nullptr;
+		real_t *tansw = nullptr;
 	};
+
+	//mikktspace callbacks
+	static int mikktGetNumFaces(const SMikkTSpaceContext *pContext);
+	static int mikktGetNumVerticesOfFace(const SMikkTSpaceContext *pContext, const int iFace);
+	static void mikktGetPosition(const SMikkTSpaceContext *pContext, float fvPosOut[], const int iFace, const int iVert);
+	static void mikktGetNormal(const SMikkTSpaceContext *pContext, float fvNormOut[], const int iFace, const int iVert);
+	static void mikktGetTexCoord(const SMikkTSpaceContext *pContext, float fvTexcOut[], const int iFace, const int iVert);
+	static void mikktSetTSpaceDefault(const SMikkTSpaceContext *pContext, const float fvTangent[], const float fvBiTangent[], const float fMagS, const float fMagT,
+			const tbool bIsOrientationPreserving, const int iFace, const int iVert);
 
 #ifndef PHYSICS_3D_DISABLED
 	void _update_collision_faces();
@@ -109,7 +120,6 @@ private:
 
 	void _build_surfaces_smoothed(CSGBrush *p_brush, Vector<ShapeUpdateSurface> &r_surfaces, Vector<int> &r_face_count);
 	void _build_surfaces_default(CSGBrush *p_brush, Vector<ShapeUpdateSurface> &r_surfaces, Vector<int> &r_face_count);
-	void _physics_debug_changed();
 
 protected:
 	void _notification(int p_what);
@@ -135,7 +145,6 @@ public:
 
 	virtual AABB get_aabb() const override;
 
-#ifndef PHYSICS_3D_DISABLED
 	void set_use_collision(bool p_enable);
 	bool is_using_collision() const;
 
@@ -155,7 +164,6 @@ public:
 
 	void set_collision_priority(real_t p_priority);
 	real_t get_collision_priority() const;
-#endif // PHYSICS_3D_DISABLED
 
 	void set_autosmooth(bool p_smooth);
 	bool is_autosmooth() const;

@@ -1,29 +1,11 @@
-"""
-This is not a comment.
-"""
-
-@tool
-
-"This also isn't a comment."
-
-extends RefCounted
-
-'''
-This one neither.
-'''
-
 func test():
 	# The following statements should all be reported as standalone expressions:
 	1234
 	0.0 + 0.0
-	Color(1, 1, 1) # TODO
+	Color(1, 1, 1)
 	Vector3.ZERO
 	[true, false]
-	float(125) # TODO
-	"""
-	Python-like "comment".
-	"""
-	'single line string'
+	float(125)
 	# The following statements should not produce `STANDALONE_EXPRESSION`:
 	var _a = 1
 	_a = 2 # Assignment is a local (or global) side effect.
@@ -32,7 +14,8 @@ func test():
 	absi(4) # A call (in general) can have side effects.
 	@warning_ignore("return_value_discarded")
 	preload("../../utils.notest.gd") # A static initializer may have side effects.
+	"""
+	Python-like "comment".
+	"""
 	@warning_ignore("standalone_ternary")
 	1 if 2 else 3 # Produces `STANDALONE_TERNARY` instead.
-
-'Still no comment...'

@@ -12,16 +12,16 @@ func test():
 
 	print(Side.NOT_EXIST) # Global.
 	print(Vector3.Axis.NOT_EXIST) # Built-in.
-	print(Mesh.ArrayType.NOT_EXIST) # Native.
+	print(TileSet.TileShape.NOT_EXIST) # Native.
 	print(CustomEnum.NOT_EXIST) # Custom.
 
 	print(Side.size()) # Global.
 	print(Vector3.Axis.size()) # Built-in.
-	print(Mesh.ArrayType.size()) # Native.
+	print(TileSet.TileShape.size()) # Native.
 
 	Side.clear() # Global.
 	Vector3.Axis.clear() # Built-in.
-	Mesh.ArrayType.clear() # Native.
+	TileSet.TileShape.clear() # Native.
 	CustomEnum.clear() # Custom.
 
 	var enum_type = CustomEnum

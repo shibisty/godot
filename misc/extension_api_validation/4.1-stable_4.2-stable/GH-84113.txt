@@ -1,3 +1,5 @@
+GH-84113
+--------
 Validate extension JSON: Error: Field 'classes/Decal/properties/texture_albedo': type changed value in new API, from "Texture" to "Texture2D".
 Validate extension JSON: Error: Field 'classes/Decal/properties/texture_emission': type changed value in new API, from "Texture" to "Texture2D".
 Validate extension JSON: Error: Field 'classes/Decal/properties/texture_normal': type changed value in new API, from "Texture" to "Texture2D".

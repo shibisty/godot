@@ -427,7 +427,11 @@ public:
 		// and it works fine on mobile, then go ahead.
 		TEXTURE_USAGE_TRANSIENT_BIT = (1 << 11),
 		TEXTURE_USAGE_DEPTH_RESOLVE_ATTACHMENT_BIT = (1 << 12),
-		TEXTURE_USAGE_MAX_BIT = TEXTURE_USAGE_DEPTH_RESOLVE_ATTACHMENT_BIT,
+		// Mariner E6: the texture may be used by the asynchronous compute queue as well as the main queue
+		// (Vulkan: VK_SHARING_MODE_CONCURRENT across the queue families; D3D12: back to COMMON at the end of
+		// every command list when legacy barriers are used). Not allowed together with attachments or MSAA.
+		TEXTURE_USAGE_ASYNC_COMPUTE_BIT = (1 << 13),
+		TEXTURE_USAGE_MAX_BIT = TEXTURE_USAGE_ASYNC_COMPUTE_BIT,
 	};
 
 	struct TextureFormat {
@@ -597,6 +601,9 @@ public:
 		SHADER_STAGE_CLOSEST_HIT,
 		SHADER_STAGE_MISS,
 		SHADER_STAGE_INTERSECTION,
+		// Mariner E7: mesh shading (VK_EXT_mesh_shader). The task stage is optional and runs before the mesh stage.
+		SHADER_STAGE_TASK,
+		SHADER_STAGE_MESH,
 		SHADER_STAGE_MAX,
 		SHADER_STAGE_VERTEX_BIT = (1 << SHADER_STAGE_VERTEX),
 		SHADER_STAGE_FRAGMENT_BIT = (1 << SHADER_STAGE_FRAGMENT),
@@ -608,6 +615,8 @@ public:
 		SHADER_STAGE_CLOSEST_HIT_BIT = (1 << SHADER_STAGE_CLOSEST_HIT),
 		SHADER_STAGE_MISS_BIT = (1 << SHADER_STAGE_MISS),
 		SHADER_STAGE_INTERSECTION_BIT = (1 << SHADER_STAGE_INTERSECTION),
+		SHADER_STAGE_TASK_BIT = (1 << SHADER_STAGE_TASK),
+		SHADER_STAGE_MESH_BIT = (1 << SHADER_STAGE_MESH),
 	};
 
 	enum ShaderLanguage {
@@ -955,6 +964,8 @@ public:
 		DRIVER_RESOURCE_BUFFER,
 		DRIVER_RESOURCE_COMPUTE_PIPELINE,
 		DRIVER_RESOURCE_RENDER_PIPELINE,
+		DRIVER_RESOURCE_TEXTURE_DEVICE_MEMORY,
+		DRIVER_RESOURCE_TEXTURE_USAGE_FLAGS,
 #ifndef DISABLE_DEPRECATED
 		DRIVER_RESOURCE_VULKAN_DEVICE = DRIVER_RESOURCE_LOGICAL_DEVICE,
 		DRIVER_RESOURCE_VULKAN_PHYSICAL_DEVICE = DRIVER_RESOURCE_PHYSICAL_DEVICE,
@@ -1018,6 +1029,29 @@ public:
 		LIMIT_METALFX_TEMPORAL_SCALER_MIN_SCALE = 46,
 		LIMIT_METALFX_TEMPORAL_SCALER_MAX_SCALE,
 		LIMIT_MAX_SHADER_VARYINGS,
+		// Mariner E7: mesh shading limits (0 when SUPPORTS_MESH_SHADER is false).
+		LIMIT_MAX_TASK_WORKGROUP_COUNT_X,
+		LIMIT_MAX_TASK_WORKGROUP_COUNT_Y,
+		LIMIT_MAX_TASK_WORKGROUP_COUNT_Z,
+		LIMIT_MAX_TASK_WORKGROUP_TOTAL_COUNT,
+		LIMIT_MAX_TASK_WORKGROUP_INVOCATIONS,
+		LIMIT_MAX_TASK_WORKGROUP_SIZE_X,
+		LIMIT_MAX_TASK_WORKGROUP_SIZE_Y,
+		LIMIT_MAX_TASK_WORKGROUP_SIZE_Z,
+		LIMIT_MAX_TASK_PAYLOAD_SIZE,
+		LIMIT_MAX_MESH_WORKGROUP_COUNT_X,
+		LIMIT_MAX_MESH_WORKGROUP_COUNT_Y,
+		LIMIT_MAX_MESH_WORKGROUP_COUNT_Z,
+		LIMIT_MAX_MESH_WORKGROUP_TOTAL_COUNT,
+		LIMIT_MAX_MESH_WORKGROUP_INVOCATIONS,
+		LIMIT_MAX_MESH_WORKGROUP_SIZE_X,
+		LIMIT_MAX_MESH_WORKGROUP_SIZE_Y,
+		LIMIT_MAX_MESH_WORKGROUP_SIZE_Z,
+		LIMIT_MAX_MESH_OUTPUT_VERTICES,
+		LIMIT_MAX_MESH_OUTPUT_PRIMITIVES,
+		LIMIT_MAX_MESH_SHARED_MEMORY_SIZE,
+		LIMIT_MAX_MESH_PREFERRED_TASK_WORKGROUP_INVOCATIONS,
+		LIMIT_MAX_MESH_PREFERRED_MESH_WORKGROUP_INVOCATIONS,
 	};
 
 	enum Features {
@@ -1036,8 +1070,10 @@ public:
 		SUPPORTS_RAY_QUERY,
 		SUPPORTS_RAYTRACING_PIPELINE,
 		SUPPORTS_HDR_OUTPUT,
-		SUPPORTS_RASTERIZATION_RATE_MAP,
-		SUPPORTS_GPU_MAPPABLE_BUFFER,
+		// Mariner E7: task + mesh shaders (draw_list_draw_mesh_tasks*). Vulkan only (VK_EXT_mesh_shader).
+		SUPPORTS_MESH_SHADER,
+		// Mariner E7: GPU-side draw count (draw_list_draw_mesh_tasks_indirect_count).
+		SUPPORTS_MESH_SHADER_INDIRECT_COUNT,
 	};
 
 	enum SubgroupOperations {
@@ -1056,7 +1092,6 @@ public:
 		bool avoid_compute_after_draw = false;
 		bool dont_print_on_render_pipeline_creation_failure = false;
 		bool disable_ubershaders = false;
-		bool avoid_store_op_dont_care_in_draw_list_with_no_bound_pipeline = false;
 	};
 
 	////////////////////////////////////////////
@@ -1075,15 +1110,13 @@ protected:
 	/**** TEXTURE ****/
 	/*****************/
 
-	static const char *const TEXTURE_TYPE_NAMES[TEXTURE_TYPE_MAX];
-
 	static const uint32_t MAX_IMAGE_FORMAT_PLANES = 2;
 
 	static const uint32_t TEXTURE_SAMPLES_COUNT[TEXTURE_SAMPLES_MAX];
 
 	static void get_compressed_image_format_block_dimensions(DataFormat p_format, uint32_t &r_w, uint32_t &r_h);
 	uint32_t get_compressed_image_format_block_byte_size(DataFormat p_format) const;
-	static uint32_t get_compressed_image_format_pixels_shifted(DataFormat p_format, uint32_t p_pixels);
+	static uint32_t get_compressed_image_format_pixel_rshift(DataFormat p_format);
 	static uint32_t get_image_format_required_size(DataFormat p_format, uint32_t p_width, uint32_t p_height, uint32_t p_depth, uint32_t p_mipmaps, uint32_t *r_blockw = nullptr, uint32_t *r_blockh = nullptr, uint32_t *r_depth = nullptr);
 	static uint32_t get_image_required_mipmaps(uint32_t p_width, uint32_t p_height, uint32_t p_depth);
 	static bool format_has_depth(DataFormat p_format);
@@ -1115,17 +1148,23 @@ public:
 
 	static const char *SHADER_STAGE_NAMES[SHADER_STAGE_MAX];
 
+	// Mariner E7: checks the stage combination of a shader using mesh shading (a task stage needs a mesh stage, a mesh
+	// stage can't be combined with vertex, tessellation or non-rasterization stages). Empty when valid, including for
+	// shaders without task/mesh stages.
+	static String validate_mesh_shader_stages(BitField<ShaderStage> p_stages);
+
 	struct ShaderUniform {
 		UniformType type = UniformType::UNIFORM_TYPE_MAX;
 		bool writable = false;
+		// Runtime-sized array (e.g. `texture2D textures[]`), bound with a variable descriptor count.
+		// Serialized in shader containers as length == 0 on an array-capable uniform type.
+		bool unbounded = false;
 		uint32_t binding = 0;
 		BitField<ShaderStage> stages = {};
-		uint32_t length = 0; // Size of arrays (in total elements), or ubos (in bytes * total elements).
-		TextureType texture_type = TEXTURE_TYPE_MAX;
-		DataFormat texture_format = DATA_FORMAT_MAX;
+		uint32_t length = 0; // Size of arrays (in total elements), or ubos (in bytes * total elements). 0 if unbounded.
 
 		bool operator!=(const ShaderUniform &p_other) const {
-			return binding != p_other.binding || type != p_other.type || writable != p_other.writable || stages != p_other.stages || length != p_other.length || texture_type != p_other.texture_type || texture_format != p_other.texture_format;
+			return binding != p_other.binding || type != p_other.type || writable != p_other.writable || unbounded != p_other.unbounded || stages != p_other.stages || length != p_other.length;
 		}
 
 		bool operator<(const ShaderUniform &p_other) const {
@@ -1138,19 +1177,21 @@ public:
 			if (writable != p_other.writable) {
 				return writable < p_other.writable;
 			}
+			if (unbounded != p_other.unbounded) {
+				return unbounded < p_other.unbounded;
+			}
 			if (stages != p_other.stages) {
 				return stages < p_other.stages;
 			}
 			if (length != p_other.length) {
 				return length < p_other.length;
 			}
-			if (texture_type != p_other.texture_type) {
-				return texture_type < p_other.texture_type;
-			}
-			if (texture_format != p_other.texture_format) {
-				return texture_format < p_other.texture_format;
-			}
 			return false;
+		}
+
+		// Uniform types that can be declared as runtime-sized (unbounded) arrays.
+		static bool type_can_be_unbounded(UniformType p_type) {
+			return p_type == UNIFORM_TYPE_SAMPLER || p_type == UNIFORM_TYPE_SAMPLER_WITH_TEXTURE || p_type == UNIFORM_TYPE_TEXTURE || p_type == UNIFORM_TYPE_IMAGE;
 		}
 	};
 
@@ -1165,7 +1206,6 @@ public:
 		uint32_t fragment_output_mask = 0;
 		PipelineType pipeline_type = PIPELINE_TYPE_RASTERIZATION;
 		bool has_multiview = false;
-		bool has_physical_storage_buffer_addresses = false;
 		bool has_dynamic_buffers = false;
 		uint32_t compute_local_size[3] = {};
 		uint32_t push_constant_size = 0;

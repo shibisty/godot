@@ -179,6 +179,16 @@ private:
 		float adjustments_saturation = 1.0f;
 		bool use_1d_color_correction = false;
 		RID color_correction;
+
+		// Path tracing (Mariner E5c).
+		bool pathtracing_enabled = false;
+		int pathtracing_debug_mode = 0;
+		int pathtracing_samples_per_pixel = 1;
+		int pathtracing_max_bounces = 3;
+		RSE::PathtracingDenoiser pathtracing_denoiser = RSE::PT_DENOISER_NONE;
+		bool pathtracing_accumulate = true;
+		int pathtracing_max_samples = 0;
+		float pathtracing_firefly_clamp = 0.0;
 	};
 
 	mutable RID_Owner<Environment, true> environment_owner;
@@ -332,4 +342,16 @@ public:
 	float environment_get_adjustments_saturation(RID p_env) const;
 	bool environment_get_use_1d_color_correction(RID p_env) const;
 	RID environment_get_color_correction(RID p_env) const;
+
+	// Path tracing (Mariner E5c)
+	void environment_set_pathtracing(RID p_env, bool p_enable, int p_debug_mode, int p_samples_per_pixel, int p_max_bounces, RSE::PathtracingDenoiser p_denoiser);
+	void environment_set_pathtracing_accumulation(RID p_env, bool p_accumulate, int p_max_samples, float p_firefly_clamp);
+	bool environment_get_pathtracing_enabled(RID p_env) const;
+	int environment_get_pathtracing_debug_mode(RID p_env) const;
+	int environment_get_pathtracing_samples_per_pixel(RID p_env) const;
+	int environment_get_pathtracing_max_bounces(RID p_env) const;
+	RSE::PathtracingDenoiser environment_get_pathtracing_denoiser(RID p_env) const;
+	bool environment_get_pathtracing_accumulate(RID p_env) const;
+	int environment_get_pathtracing_max_samples(RID p_env) const;
+	float environment_get_pathtracing_firefly_clamp(RID p_env) const;
 };

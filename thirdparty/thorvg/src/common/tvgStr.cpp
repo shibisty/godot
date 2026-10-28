@@ -139,8 +139,9 @@ float toFloat(const char *str, char **end)
     if (*iter == 'e' || *iter == 'E') {
         ++iter;
 
-        // Exception: svg 'em' unit. The caller resolves the multiplier.
+        //Exception: svg may have 'em' unit for fonts. ex) 5em, 10.5em
         if ((*iter == 'm') || (*iter == 'M')) {
+            //TODO: We don't support font em unit now, but has to multiply val * font size later...
             a = iter + 1;
             goto success;
         }

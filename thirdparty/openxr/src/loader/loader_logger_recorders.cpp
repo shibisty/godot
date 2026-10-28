@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2026 The Khronos Group Inc.
+// Copyright (c) 2017-2025 The Khronos Group Inc.
 // Copyright (c) 2017-2019 Valve Corporation
 // Copyright (c) 2017-2019 LunarG, Inc.
 //
@@ -260,24 +260,32 @@ bool DebuggerLoaderLogRecorder::LogMessage(XrLoaderLogMessageSeverityFlagBits me
 }  // namespace
 
 std::unique_ptr<LoaderLogRecorder> MakeStdOutLoaderLogRecorder(void* user_data, XrLoaderLogMessageSeverityFlags flags) {
-    return std::make_unique<OstreamLoaderLogRecorder>(std::cout, user_data, flags);
+    std::unique_ptr<LoaderLogRecorder> recorder(new OstreamLoaderLogRecorder(std::cout, user_data, flags));
+    return recorder;
 }
 
 std::unique_ptr<LoaderLogRecorder> MakeStdErrLoaderLogRecorder(void* user_data) {
-    return std::make_unique<OstreamLoaderLogRecorder>(std::cerr, user_data, XR_LOADER_LOG_MESSAGE_SEVERITY_ERROR_BIT);
+    std::unique_ptr<LoaderLogRecorder> recorder(
+        new OstreamLoaderLogRecorder(std::cerr, user_data, XR_LOADER_LOG_MESSAGE_SEVERITY_ERROR_BIT));
+    return recorder;
 }
 
 std::unique_ptr<LoaderLogRecorder> MakeDebugUtilsLoaderLogRecorder(const XrDebugUtilsMessengerCreateInfoEXT* create_info,
                                                                    XrDebugUtilsMessengerEXT debug_messenger) {
-    return std::make_unique<DebugUtilsLogRecorder>(create_info, debug_messenger);
+    std::unique_ptr<LoaderLogRecorder> recorder(new DebugUtilsLogRecorder(create_info, debug_messenger));
+    return recorder;
 }
 
 #ifdef __ANDROID__
-std::unique_ptr<LoaderLogRecorder> MakeLogcatLoaderLogRecorder() { return std::make_unique<LogcatLoaderLogRecorder>(); }
+std::unique_ptr<LoaderLogRecorder> MakeLogcatLoaderLogRecorder() {
+    std::unique_ptr<LoaderLogRecorder> recorder(new LogcatLoaderLogRecorder());
+    return recorder;
+}
 #endif
 
 #ifdef _WIN32
 std::unique_ptr<LoaderLogRecorder> MakeDebuggerLoaderLogRecorder(void* user_data) {
-    return std::make_unique<DebuggerLoaderLogRecorder>(user_data, XR_LOADER_LOG_MESSAGE_SEVERITY_ERROR_BIT);
+    std::unique_ptr<LoaderLogRecorder> recorder(new DebuggerLoaderLogRecorder(user_data, XR_LOADER_LOG_MESSAGE_SEVERITY_ERROR_BIT));
+    return recorder;
 }
 #endif

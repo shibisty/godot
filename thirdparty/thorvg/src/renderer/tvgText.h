@@ -27,7 +27,7 @@
 #include "tvgMath.h"
 #include "tvgShape.h"
 #include "tvgFill.h"
-#include "tvgLoaderMgr.h"
+#include "tvgLoader.h"
 
 namespace tvg
 {
@@ -133,16 +133,17 @@ struct TextImpl : Text
         return Result::Success;
     }
 
-    Result metrics(const char* ch, GlyphMetrics& metrics, const char** next)
+    Result metrics(const char* ch, GlyphMetrics& metrics)
     {
         if (!loader || fm.fontSize <= 0.0f) return Result::InsufficientCondition;
-        if (ch && loader->metrics(fm, ch, metrics, next)) return Result::Success;
+        if (ch && loader->metrics(fm, ch, metrics)) return Result::Success;
         return Result::InvalidArguments;
     }
 
     bool skip(RenderUpdateFlag flag)
     {
-        return (flag == RenderUpdateFlag::None);
+        if (flag == RenderUpdateFlag::None) return true;
+        return false;
     }
 
     void wrapping(TextWrap mode)
@@ -187,13 +188,11 @@ struct TextImpl : Text
             if (fill->type() == Type::LinearGradient) {
                 LINEAR(fill)->p1 *= scale;
                 LINEAR(fill)->p2 *= scale;
-            } else if (fill->type() == Type::RadialGradient) {
+            } else {
                 RADIAL(fill)->center *= scale;
                 RADIAL(fill)->r *= scale;
                 RADIAL(fill)->focal *= scale;
                 RADIAL(fill)->fr *= scale;
-            } else if (fill->type() == Type::ConicGradient) {
-                CONIC(fill)->center *= scale;
             }
         }
 
@@ -203,10 +202,10 @@ struct TextImpl : Text
         return true;
     }
 
-    bool intersects(const RenderRegion& region, TVG_UNUSED bool visibleOnly)
+    bool intersects(const RenderRegion& region)
     {
         if (!load()) return false;
-        return to<ShapeImpl>(shape)->intersects(region, false);
+        return to<ShapeImpl>(shape)->intersects(region);
     }
 
     bool bounds(Point* pt4, const Matrix& m, bool obb)
@@ -241,24 +240,9 @@ struct TextImpl : Text
         return text;
     }
 
-    AccessorIterator* iterator()
+    Iterator* iterator()
     {
         return nullptr;
-    }
-
-    static Result load(const char* name, const char* data, uint32_t size, const char* mimeType, Ownership owner) noexcept
-    {
-        if (!name || (size == 0 && data)) return Result::InvalidArguments;
-
-        // unload font
-        if (!data) {
-            if (LoaderMgr::retrieve(LoaderMgr::font(name))) return Result::Success;
-            return Result::InsufficientCondition;
-        }
-
-        LoaderOps ops = {Type::Text, owner};
-        if (!LoaderMgr::loader(name, data, size, mimeType, ops)) return Result::NonSupport;
-        return Result::Success;
     }
 };
 

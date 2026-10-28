@@ -39,5 +39,3 @@ public:
 };
 
 #define EDSCALE (EditorScale::get_scale())
-
-#define EDSCALE_RND(m_value) (Math::round((m_value) * EDSCALE))

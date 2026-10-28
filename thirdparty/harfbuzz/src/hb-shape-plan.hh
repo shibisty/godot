@@ -31,6 +31,7 @@
 #include "hb-shaper.hh"
 #include "hb-ot-shape.hh"
 
+
 struct hb_shape_plan_key_t
 {
   hb_segment_properties_t  props;
@@ -63,15 +64,12 @@ struct hb_shape_plan_key_t
 
 struct hb_shape_plan_t
 {
-  HB_INTERNAL ~hb_shape_plan_t ();
+  ~hb_shape_plan_t () { key.fini (); }
   hb_object_header_t header;
   hb_face_t *face_unsafe; /* We don't carry a reference to face. */
   hb_shape_plan_key_t key;
 #ifndef HB_NO_OT_SHAPE
   hb_ot_shape_plan_t ot;
-#endif
-#ifdef HAVE_HARFRUST
-  hb_atomic_t<void *> harfrust_data;
 #endif
 };
 

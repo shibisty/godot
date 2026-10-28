@@ -78,12 +78,6 @@ object GameMenuUtils {
 	external fun setSelectionVisible(visible: Boolean)
 
 	@JvmStatic
-	external fun setSelectionAvoidLocked(enabled: Boolean)
-
-	@JvmStatic
-	external fun setSelectionPreferGroup(enabled: Boolean)
-
-	@JvmStatic
 	external fun setCameraOverride(enabled: Boolean)
 
 	@JvmStatic

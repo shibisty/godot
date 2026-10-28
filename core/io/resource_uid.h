@@ -47,6 +47,7 @@ public:
 	static String get_cache_file();
 
 private:
+	void *crypto = nullptr; // CryptoCore::RandomGenerator (avoid including crypto_core.h)
 	Mutex mutex;
 	struct Cache {
 		CharString cs;
@@ -54,9 +55,6 @@ private:
 	};
 
 	HashMap<ID, Cache> unique_ids; // Unique IDs and utf8 paths (less memory used).
-#ifdef TOOLS_ENABLED
-	HashMap<ID, Cache> unique_ids_copy; // Copy of the cache during filesystem scan.
-#endif
 	bool use_reverse_cache = false;
 	HashMap<CharString, ID> reverse_cache; // Used at runtime.
 	static ResourceUID *singleton;
@@ -86,8 +84,6 @@ public:
 	static String uid_to_path(const String &p_uid);
 	static String path_to_uid(const String &p_path);
 	static String ensure_path(const String &p_uid_or_path);
-	// Doesn't print errors, returns empty path on invalid UID.
-	static String ensure_path_nocheck(const String &p_uid_or_path);
 
 	Error load_from_cache(bool p_reset);
 	Error save_to_cache();
@@ -97,12 +93,9 @@ public:
 
 	void enable_reverse_cache() { use_reverse_cache = true; }
 	void clear();
-#ifdef TOOLS_ENABLED
-	void copy_and_clear_cache();
-	void clear_copy();
-#endif
 
 	static ResourceUID *get_singleton() { return singleton; }
 
 	ResourceUID();
+	~ResourceUID();
 };

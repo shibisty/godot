@@ -108,6 +108,18 @@ protected:
 
 	HashMap<RID, RID> render_target_descriptors;
 
+	// Mariner E3: DLSS Frame Generation HUD-less colour, per screen (same size and format as its swap chain).
+	struct FrameGenerationHudless {
+		RID texture;
+		RID framebuffer;
+		Size2i size;
+		RD::DataFormat format = RD::DATA_FORMAT_MAX;
+	};
+	HashMap<DisplayServerEnums::WindowID, FrameGenerationHudless> frame_generation_hudless;
+
+	RID _get_render_target_blit_uniform_set(RID p_rd_texture);
+	BlitMode _set_blit_push_constant(const RenderingServerTypes::BlitToScreen &p_blit, Size2 p_screen_size, int p_screen_rotation_degrees, RD::ColorSpace p_color_space, float p_reference_multiplier, float p_output_max_value);
+
 	double time = 0.0;
 	double delta = 0.0;
 
@@ -137,6 +149,7 @@ public:
 	virtual void initialize() override;
 	virtual void begin_frame(double frame_step) override;
 	virtual void blit_render_targets_to_screen(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen *p_render_targets, int p_amount) override;
+	virtual void frame_generation_capture_hudless(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen &p_blit) override;
 
 	virtual bool is_opengl() override { return false; }
 	virtual void gl_end_frame(bool p_swap_buffers) override {}

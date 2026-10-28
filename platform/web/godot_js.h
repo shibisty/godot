@@ -42,7 +42,6 @@ extern "C" {
 extern char *godot_js_emscripten_get_version();
 
 // Config
-extern int godot_js_config_pid_get();
 extern void godot_js_config_locale_get(char *p_ptr, int p_ptr_max);
 extern void godot_js_config_canvas_id_get(char *p_ptr, int p_ptr_max);
 
@@ -51,8 +50,7 @@ extern void godot_js_os_finish_async(void (*p_callback)());
 extern void godot_js_os_request_quit_cb(void (*p_callback)());
 extern int godot_js_os_fs_is_persistent();
 extern void godot_js_os_fs_sync(void (*p_callback)());
-extern int godot_js_os_execute(const char *p_path, const char *p_json_args);
-extern int godot_js_os_kill(int p_pid);
+extern int godot_js_os_execute(const char *p_json);
 extern void godot_js_os_shell_open(const char *p_uri);
 extern int godot_js_os_hw_concurrency_get();
 extern int godot_js_os_thread_pool_size_get();

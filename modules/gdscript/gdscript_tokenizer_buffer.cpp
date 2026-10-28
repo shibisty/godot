@@ -190,7 +190,10 @@ Error GDScriptTokenizerBuffer::set_code_buffer(const Vector<uint8_t> &p_buffer) 
 	for (uint32_t i = 0; i < constant_count; i++) {
 		Variant v;
 		int len;
-		RETURN_IF_ERROR(decode_variant(v, b, total_len, &len, false));
+		Error err = decode_variant(v, b, total_len, &len, false);
+		if (err) {
+			return err;
+		}
 		b += len;
 		total_len -= len;
 		constants.write[i] = v;
@@ -297,7 +300,7 @@ Vector<uint8_t> GDScriptTokenizerBuffer::parse_code_string(const String &p_code,
 
 	// Save identifiers.
 	for (const StringName &id : rev_identifier_map) {
-		String s = id.string();
+		String s = id.operator String();
 		int len = s.length();
 
 		contents.resize(buf_pos + (len + 1) * 4);

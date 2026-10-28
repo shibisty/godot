@@ -15,11 +15,11 @@ UOBJECT_DEFINE_ABSTRACT_RTTI_IMPLEMENTATION(UnicodeFunctor)
 
 UnicodeFunctor::~UnicodeFunctor() {}
 
-UnicodeMatcher* UnicodeFunctor::toMatcher() const U_LIFETIME_BOUND {
+UnicodeMatcher* UnicodeFunctor::toMatcher() const {
     return nullptr;
 }
 
-UnicodeReplacer* UnicodeFunctor::toReplacer() const U_LIFETIME_BOUND {
+UnicodeReplacer* UnicodeFunctor::toReplacer() const {
     return nullptr;
 }
 

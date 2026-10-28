@@ -36,16 +36,9 @@
 #include "drivers/metal/metal_objects_shared.h"
 #include "drivers/metal/rendering_device_driver_metal3.h"
 
-#include "modules/modules_enabled.gen.h"
-
 #include <objc/message.h>
 #include <os/log.h>
 #include <os/signpost.h>
-
-#if defined(VISIONOS_ENABLED) && defined(MODULE_VISIONOS_XR_ENABLED)
-#include "modules/visionos_xr/visionos_xr_interface.h"
-#include "platform/visionos/render_mode_visionos.h"
-#endif
 
 #pragma mark - Logging
 
@@ -69,18 +62,7 @@ Error RenderingContextDriverMetal::initialize() {
 		capture_available = true;
 	}
 
-#if TARGET_OS_VISION && defined(MODULE_VISIONOS_XR_ENABLED)
-	// If visionOS XR module is not enabled, only windowed mode available
-	RenderModeVisionOS::Mode render_mode = RenderModeVisionOS::get_mode();
-	if (render_mode == RenderModeVisionOS::COMPOSITOR_SERVICES) {
-		metal_device = (MTL::Device *)RenderModeVisionOS::get_compositor_services_device();
-	} else if (render_mode == RenderModeVisionOS::WINDOWED) {
-		metal_device = MTL::CreateSystemDefaultDevice();
-	}
-#else
 	metal_device = MTL::CreateSystemDefaultDevice();
-#endif
-
 #if TARGET_OS_OSX
 	if (__builtin_available(macOS 13.3, *)) {
 		metal_device->setShouldMaximizeConcurrentCompilation(true);
@@ -113,42 +95,10 @@ void RenderingContextDriverMetal::driver_free(RenderingDeviceDriver *p_driver) {
 	memdelete(p_driver);
 }
 
-/// A framebuffer that defers drawable acquisition from a CAMetalLayer
-/// until the texture is actually needed (via get_texture).
-class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) MDFrameBufferLayer final : public MDFrameBuffer {
+class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) SurfaceLayer : public RenderingContextDriverMetal::Surface {
 	CA::MetalLayer *layer = nullptr;
-	mutable CA::MetalDrawable *drawable = nullptr;
-
-public:
-	MDFrameBufferLayer() {}
-	MDFrameBufferLayer(CA::MetalLayer *p_layer) :
-			layer(p_layer) {}
-
-	MTL::Texture *get_texture(uint32_t p_idx) const override {
-		DEV_ASSERT(p_idx == 0);
-		return get_drawable()->texture();
-	}
-
-	bool has_texture(uint32_t p_idx) const override {
-		DEV_ASSERT(p_idx == 0);
-		return drawable != nullptr;
-	}
-
-	CA::MetalDrawable *get_drawable() const {
-		if (drawable == nullptr) {
-			drawable = layer->nextDrawable();
-		}
-		return drawable;
-	}
-
-	void reset() {
-		drawable = nullptr;
-	}
-};
-
-class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) SurfaceLayer final : public RenderingContextDriverMetal::Surface {
-	CA::MetalLayer *layer = nullptr;
-	LocalVector<MDFrameBufferLayer> frame_buffers;
+	LocalVector<MDFrameBuffer> frame_buffers;
+	LocalVector<MTL::Drawable *> drawables;
 	uint32_t rear = -1;
 	uint32_t front = 0;
 	uint32_t count = 0;
@@ -196,9 +146,11 @@ public:
 				break;
 		}
 #endif
+		drawables.resize(p_desired_framebuffer_count);
 		frame_buffers.resize(p_desired_framebuffer_count);
 		for (uint32_t i = 0; i < p_desired_framebuffer_count; i++) {
-			frame_buffers[i] = MDFrameBufferLayer(layer);
+			// Reserve space for the drawable texture.
+			frame_buffers[i].set_texture_count(1);
 		}
 
 		if (hdr_output) {
@@ -226,7 +178,7 @@ public:
 		return OK;
 	}
 
-	RDD::FramebufferID acquire_next_frame_buffer() override {
+	RDD::FramebufferID acquire_next_frame_buffer() override final {
 		if (count == frame_buffers.size()) {
 			return RDD::FramebufferID();
 		}
@@ -234,42 +186,46 @@ public:
 		rear = (rear + 1) % frame_buffers.size();
 		count++;
 
-		MDFrameBufferLayer &frame_buffer = frame_buffers[rear];
+		MDFrameBuffer &frame_buffer = frame_buffers[rear];
 		frame_buffer.size = Size2i(width, height);
-		frame_buffer.reset();
+
+		CA::MetalDrawable *drawable = layer->nextDrawable();
+		ERR_FAIL_NULL_V_MSG(drawable, RDD::FramebufferID(), "no drawable available");
+		drawables[rear] = drawable;
+		frame_buffer.set_texture(0, drawable->texture());
 
 		return RDD::FramebufferID(&frame_buffer);
 	}
 
-	void present(MTL3::MDCommandBuffer *p_cmd_buffer) override {
+	void present(MTL3::MDCommandBuffer *p_cmd_buffer) override final {
 		if (count == 0) {
 			return;
 		}
 
-		MDFrameBufferLayer &frame_buffer = frame_buffers[front];
-		CA::MetalDrawable *drawable = frame_buffer.get_drawable();
-		frame_buffer.reset();
+		// Release texture and drawable.
+		frame_buffers[front].unset_texture(0);
+		MTL::Drawable *drawable = drawables[front];
+		drawables[front] = nullptr;
 
 		count--;
 		front = (front + 1) % frame_buffers.size();
 
-		if (drawable != nullptr) {
-			if (vsync_mode != DisplayServerEnums::VSYNC_DISABLED) {
-				p_cmd_buffer->get_command_buffer()->presentDrawableAfterMinimumDuration(drawable, present_minimum_duration);
-			} else {
-				p_cmd_buffer->get_command_buffer()->presentDrawable(drawable);
-			}
+		if (vsync_mode != DisplayServerEnums::VSYNC_DISABLED) {
+			p_cmd_buffer->get_command_buffer()->presentDrawableAfterMinimumDuration(drawable, present_minimum_duration);
+		} else {
+			p_cmd_buffer->get_command_buffer()->presentDrawable(drawable);
 		}
 	}
 
-	MTL::Drawable *next_drawable() override {
+	MTL::Drawable *next_drawable() override final {
 		if (count == 0) {
 			return nullptr;
 		}
 
-		MDFrameBufferLayer &frame_buffer = frame_buffers[front];
-		CA::MetalDrawable *drawable = frame_buffer.get_drawable();
-		frame_buffer.reset();
+		// Release texture and drawable.
+		frame_buffers[front].unset_texture(0);
+		MTL::Drawable *drawable = drawables[front];
+		drawables[front] = nullptr;
 
 		count--;
 		front = (front + 1) % frame_buffers.size();
@@ -278,14 +234,14 @@ public:
 	}
 
 	API_AVAILABLE(macos(26.0), ios(26.0))
-	MTL::ResidencySet *get_residency_set() const override {
+	MTL::ResidencySet *get_residency_set() const override final {
 		return layer->residencySet();
 	}
 };
 
-class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) SurfaceOffscreen final : public RenderingContextDriverMetal::Surface {
-	static constexpr int frame_buffer_size = 3;
-	MDFrameBufferTexture frame_buffers[frame_buffer_size];
+class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) SurfaceOffscreen : public RenderingContextDriverMetal::Surface {
+	int frame_buffer_size = 3;
+	MDFrameBuffer *frame_buffers;
 	LocalVector<MTL::Texture *> textures;
 	LocalVector<MTL::Drawable *> drawables;
 
@@ -310,12 +266,14 @@ public:
 		textures.resize(frame_buffer_size);
 		drawables.resize(frame_buffer_size);
 
+		frame_buffers = memnew_arr(MDFrameBuffer, frame_buffer_size);
 		for (int i = 0; i < frame_buffer_size; i++) {
 			frame_buffers[i].set_texture_count(1);
 		}
 	}
 
 	~SurfaceOffscreen() override {
+		memdelete_arr(frame_buffers);
 		for (MTL::Texture *texture : textures) {
 			if (texture) {
 				texture->release();
@@ -323,7 +281,7 @@ public:
 		}
 	}
 
-	Error resize(uint32_t p_desired_framebuffer_count, RDD::DataFormat &r_format, RDD::ColorSpace &r_color_space) override {
+	Error resize(uint32_t p_desired_framebuffer_count, RDD::DataFormat &r_format, RDD::ColorSpace &r_color_space) override final {
 		if (width == 0 || height == 0) {
 			// Very likely the window is minimized, don't create a swap chain.
 			return ERR_SKIP;
@@ -360,7 +318,7 @@ public:
 		return OK;
 	}
 
-	RDD::FramebufferID acquire_next_frame_buffer() override {
+	RDD::FramebufferID acquire_next_frame_buffer() override final {
 		if (count.load(std::memory_order_relaxed) == 3) {
 			// Wait for a frame to be presented.
 			return RDD::FramebufferID();
@@ -369,7 +327,7 @@ public:
 		rear = (rear + 1) % 3;
 		count.fetch_add(1, std::memory_order_relaxed);
 
-		MDFrameBufferTexture &frame_buffer = frame_buffers[rear];
+		MDFrameBuffer &frame_buffer = frame_buffers[rear];
 
 		MTL::Texture *texture = textures[rear];
 		if (texture == nullptr || texture->width() != width || texture->height() != height || texture->pixelFormat() != pixel_format) {
@@ -399,8 +357,8 @@ public:
 		return RDD::FramebufferID(&frame_buffers[rear]);
 	}
 
-	void present(MTL3::MDCommandBuffer *p_cmd_buffer) override {
-		MDFrameBufferTexture *frame_buffer = &frame_buffers[rear];
+	void present(MTL3::MDCommandBuffer *p_cmd_buffer) override final {
+		MDFrameBuffer *frame_buffer = &frame_buffers[rear];
 
 		if (drawables[rear] != nullptr) {
 			p_cmd_buffer->get_command_buffer()->presentDrawable(drawables[rear]);
@@ -413,12 +371,12 @@ public:
 		});
 	}
 
-	MTL::Drawable *next_drawable() override {
+	MTL::Drawable *next_drawable() override final {
 		if (count == 0) {
 			return nullptr;
 		}
 
-		MDFrameBufferTexture *frame_buffer = &frame_buffers[rear];
+		MDFrameBuffer *frame_buffer = &frame_buffers[rear];
 
 		MTL::Drawable *next = drawables[rear];
 		drawables[rear] = nullptr;
@@ -430,83 +388,19 @@ public:
 	}
 
 	API_AVAILABLE(macos(26.0), ios(26.0))
-	MTL::ResidencySet *get_residency_set() const override {
+	MTL::ResidencySet *get_residency_set() const override final {
 		return layer->residencySet();
 	}
 };
 
-#if TARGET_OS_VISION && defined(MODULE_VISIONOS_XR_ENABLED)
-class SurfaceCompositorServices : public RenderingContextDriverMetal::Surface {
-	// Return a dummy framebuffer so present() is called on it, which relays the call to VisionOSXRInterface
-	MDFrameBufferTexture dummy_framebuffer;
-
-public:
-	SurfaceCompositorServices(MTL::Device *p_device) :
-			Surface(p_device) {
-		dummy_framebuffer.set_texture_count(1);
-		// Force the first screen_prepare_for_drawing to call resize() so the swap-chain format gets reported.
-		needs_resize = true;
-	}
-
-	~SurfaceCompositorServices() override {
-	}
-
-	MTL::PixelFormat get_pixel_format() const override final {
-		// Hardcoded because it's configured in platform/visionos/app_visionos.swift
-		return MTL::PixelFormatRGBA16Float;
-	}
-
-	Error resize(uint32_t p_desired_framebuffer_count, RDD::DataFormat &r_format, RDD::ColorSpace &r_color_space) override final {
-		// Compositor Services owns the swap chain; just report the format so the engine can initialize.
-		r_format = RDD::DATA_FORMAT_R16G16B16A16_SFLOAT;
-		r_color_space = RDD::COLOR_SPACE_REC709_LINEAR;
-		return OK;
-	}
-
-	RDD::FramebufferID acquire_next_frame_buffer() override final {
-		return RDD::FramebufferID(&dummy_framebuffer);
-	}
-
-	void present(MTL3::MDCommandBuffer *p_cmd_buffer) override final {
-		Ref<VisionOSXRInterface> visionos_xr_interface = VisionOSXRInterface::find_interface();
-		ERR_FAIL_COND_MSG(!visionos_xr_interface.is_valid(), "visionOS VR interface not found or invalid");
-		visionos_xr_interface->encode_present(p_cmd_buffer);
-	}
-
-	MTL::Drawable *next_drawable() override final {
-		return nullptr;
-	}
-
-	API_AVAILABLE(macos(26.0), ios(26.0))
-	MTL::ResidencySet *get_residency_set() const override final {
-		return nullptr;
-	}
-};
-#endif
-
 RenderingContextDriver::SurfaceID RenderingContextDriverMetal::surface_create(const void *p_platform_data) {
 	const WindowPlatformData *wpd = (const WindowPlatformData *)(p_platform_data);
-
-	Surface *surface = nullptr;
-#if TARGET_OS_VISION
-#if defined(MODULE_VISIONOS_XR_ENABLED)
-	RenderModeVisionOS::Mode render_mode = RenderModeVisionOS::get_mode();
-	if (render_mode == RenderModeVisionOS::COMPOSITOR_SERVICES) {
-		surface = memnew(SurfaceCompositorServices(metal_device));
-	} else if (render_mode == RenderModeVisionOS::WINDOWED) {
-		surface = memnew(SurfaceLayer(wpd->layer, metal_device));
-	}
-#else
-	// If visionOS XR module is not enabled, only windowed mode available
-	surface = memnew(SurfaceLayer(wpd->layer, metal_device));
-#endif
-#else
+	Surface *surface;
 	if (String v = OS::get_singleton()->get_environment("GODOT_MTL_OFF_SCREEN"); v == U"1") {
 		surface = memnew(SurfaceOffscreen(wpd->layer, metal_device));
 	} else {
 		surface = memnew(SurfaceLayer(wpd->layer, metal_device));
 	}
-#endif
 
 	return SurfaceID(surface);
 }

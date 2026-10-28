@@ -30,12 +30,11 @@
 
 #include "wayland_thread.h"
 
-#ifdef WAYLAND_ENABLED
-
 #include "core/config/engine.h"
 #include "core/io/image.h"
-#include "core/math/geometry_2d.h"
 #include "core/os/os.h"
+
+#ifdef WAYLAND_ENABLED
 
 #ifdef __FreeBSD__
 #include <dev/evdev/input-event-codes.h>
@@ -1170,7 +1169,9 @@ void WaylandThread::_wl_registry_on_global_remove(void *data, struct wl_registry
 
 			for (struct zwp_tablet_tool_v2 *tool : ss->tablet_tools) {
 				TabletToolState *state = wp_tablet_tool_get_state(tool);
-				memdelete(state);
+				if (state) {
+					memdelete(state);
+				}
 
 				zwp_tablet_tool_v2_destroy(tool);
 			}
@@ -1235,7 +1236,9 @@ void WaylandThread::_wl_registry_on_global_remove(void *data, struct wl_registry
 
 					for (struct zwp_tablet_tool_v2 *tool : ss->tablet_tools) {
 						TabletToolState *state = wp_tablet_tool_get_state(tool);
-						memdelete(state);
+						if (state) {
+							memdelete(state);
+						}
 
 						zwp_tablet_tool_v2_destroy(tool);
 					}
@@ -3259,7 +3262,9 @@ void WaylandThread::_wp_tablet_tool_on_removed(void *data, struct zwp_tablet_too
 	if (E && E->get()) {
 		struct zwp_tablet_tool_v2 *tool = E->get();
 		TabletToolState *state = wp_tablet_tool_get_state(tool);
-		memdelete(state);
+		if (state) {
+			memdelete(state);
+		}
 
 		zwp_tablet_tool_v2_destroy(tool);
 		ss->tablet_tools.erase(E);
@@ -3709,8 +3714,6 @@ void WaylandThread::_xdg_activation_token_on_done(void *data, struct xdg_activat
 
 	xdg_activation_v1_activate(ws->wayland_thread->registry.xdg_activation, token, ws->wl_surface);
 	xdg_activation_token_v1_destroy(xdg_activation_token);
-
-	ws->pending_xdg_activation_token = nullptr;
 
 	DEBUG_LOG_WAYLAND_THREAD(vformat("Received activation token and requested window activation."));
 }
@@ -4448,9 +4451,6 @@ void WaylandThread::window_create_popup(DisplayServerEnums::WindowID p_window_id
 
 	p_rect.position = scale_vector2i(p_rect.position, 1.0 / parent_scale);
 	p_rect.size = scale_vector2i(p_rect.size, 1.0 / parent_scale);
-
-	p_rect.size = p_rect.size.maxi(1);
-
 	// We manually scaled based on the parent. If we don't set the relevant fields,
 	// the resizing routines will get confused and scale once more.
 	ws.preferred_fractional_scale = parent.preferred_fractional_scale;
@@ -4563,10 +4563,6 @@ void WaylandThread::window_destroy(DisplayServerEnums::WindowID p_window_id) {
 
 	if (ws.frame_callback) {
 		wl_callback_destroy(ws.frame_callback);
-	}
-
-	if (ws.pending_xdg_activation_token) {
-		xdg_activation_token_v1_destroy(ws.pending_xdg_activation_token);
 	}
 
 	if (ws.xdg_surface) {
@@ -5008,37 +5004,6 @@ void WaylandThread::window_try_set_mode(DisplayServerEnums::WindowID p_window_id
 	}
 }
 
-void WaylandThread::window_set_input_region(DisplayServerEnums::WindowID p_window_id, bool p_empty_region, const Vector<Vector2> &p_region) {
-	ERR_FAIL_COND(!windows.has(p_window_id));
-	WindowState &ws = windows[p_window_id];
-
-	wl_region *region = nullptr;
-	if (p_empty_region) {
-		region = wl_compositor_create_region(registry.wl_compositor);
-	} else if (!p_region.is_empty()) {
-		region = wl_compositor_create_region(registry.wl_compositor);
-
-		double win_scale = window_state_get_scale_factor(&ws);
-		Size2i scaled_size = scale_vector2i(ws.rect.size, win_scale);
-		for (int x = 0; x < scaled_size.x; x++) {
-			for (int y = 0; y < scaled_size.y; y++) {
-				Vector2 point = Vector2(x, y);
-				if (Geometry2D::is_point_in_polygon(point, p_region)) {
-					// Convert region points to window logical scale.
-					point = scale_vector2i(point, 1.0 / win_scale);
-					wl_region_add(region, point.x, point.y, 1, 1);
-				}
-			}
-		}
-	}
-
-	wl_surface_set_input_region(ws.wl_surface, region);
-
-	if (region) {
-		wl_region_destroy(region);
-	}
-}
-
 void WaylandThread::window_set_borderless(DisplayServerEnums::WindowID p_window_id, bool p_borderless) {
 	ERR_FAIL_COND(!windows.has(p_window_id));
 	WindowState &ws = windows[p_window_id];
@@ -5265,52 +5230,15 @@ DisplayServerEnums::WindowMode WaylandThread::window_get_mode(DisplayServerEnums
 	return ws.mode;
 }
 
-/**
- * Request attention for the given window from wayland.
- * Since wayland does not offer an explicit way to specify whether or not the window should be pinged or brought
- * to the top we can only hint it to. Wayland compositors generally make the decision based on the completeness and
- * validity of the activation token that was passed. So when we want weak focus we pass a token with minimal information
- * and when we want strong focus we pass a token with additional information
- */
-void WaylandThread::window_request_attention(DisplayServerEnums::WindowID p_window_id, bool p_hint_strong_focus) {
+void WaylandThread::window_request_attention(DisplayServerEnums::WindowID p_window_id) {
 	ERR_FAIL_COND(!windows.has(p_window_id));
 	WindowState &ws = windows[p_window_id];
-	SeatState *ss = wl_seat_get_seat_state(wl_seat_current);
-
-	uint32_t last_serial = MAX(MAX(ss->pointer_data.button_serial, ss->last_key_pressed_serial), ss->pointer_enter_serial);
-
-	// Try to find a reasonable requesting surface
-	WindowState *focused_window = nullptr;
-	if (ss) {
-		if (ss->focused_id != DisplayServerEnums::INVALID_WINDOW_ID) {
-			focused_window = window_get_state(ss->focused_id);
-		}
-		DisplayServerEnums::WindowID pointed_window_id = pointer_get_pointed_window_id();
-		if (!focused_window && pointed_window_id != DisplayServerEnums::INVALID_WINDOW_ID) {
-			focused_window = window_get_state(pointed_window_id);
-		}
-		if (!focused_window && ss->dnd_id != DisplayServerEnums::INVALID_WINDOW_ID) {
-			focused_window = window_get_state(ss->dnd_id);
-		}
-	}
 
 	if (registry.xdg_activation) {
-		if (ws.pending_xdg_activation_token) {
-			xdg_activation_token_v1_destroy(ws.pending_xdg_activation_token);
-			ws.pending_xdg_activation_token = nullptr;
-		}
-
 		// Window attention requests are done through the XDG activation protocol.
-		ws.pending_xdg_activation_token = xdg_activation_v1_get_activation_token(registry.xdg_activation);
-		// Set additional data on activation token when we want strong attention
-		if (p_hint_strong_focus) {
-			xdg_activation_token_v1_set_serial(ws.pending_xdg_activation_token, last_serial, wl_seat_current);
-			if (focused_window) {
-				xdg_activation_token_v1_set_surface(ws.pending_xdg_activation_token, focused_window->wl_surface);
-			}
-		}
-		xdg_activation_token_v1_add_listener(ws.pending_xdg_activation_token, &xdg_activation_token_listener, &ws);
-		xdg_activation_token_v1_commit(ws.pending_xdg_activation_token);
+		xdg_activation_token_v1 *xdg_activation_token = xdg_activation_v1_get_activation_token(registry.xdg_activation);
+		xdg_activation_token_v1_add_listener(xdg_activation_token, &xdg_activation_token_listener, &ws);
+		xdg_activation_token_v1_commit(xdg_activation_token);
 	}
 }
 
@@ -5513,7 +5441,7 @@ void WaylandThread::pointer_set_hint(const Point2i &p_hint) {
 
 	// NOTE: It looks like it's not really recommended to convert from
 	// "godot-space" to "wayland-space" and in general I received mixed feelings
-	// discussing about this. I'm not really sure about the math behind this but,
+	// discussing about this. I'm not really sure about the maths behind this but,
 	// oh well, we're setting a cursor hint. ¯\_(ツ)_/¯
 	// See: https://oftc.irclog.whitequark.org/wayland/2023-08-23#1692756914-1692816818
 	int hint_x = Math::round(p_hint.x / window_state_get_scale_factor(ws));
@@ -5566,7 +5494,7 @@ void WaylandThread::pointer_warp(const Point2i &p_to) {
 
 	// NOTE: It looks like it's not really recommended to convert from
 	// "godot-space" to "wayland-space" and in general I received mixed feelings
-	// discussing about this. I'm not really sure about the math behind this but,
+	// discussing about this. I'm not really sure about the maths behind this but,
 	// oh well. ¯\_(ツ)_/¯
 	// See: https://oftc.irclog.whitequark.org/wayland/2023-08-23#1692756914-1692816818
 	int wl_pos_x = Math::round(p_to.x / window_state_get_scale_factor(ws));
@@ -5629,8 +5557,7 @@ Error WaylandThread::init() {
 
 	if (embedder_enabled && Engine::get_singleton()->is_editor_hint() && !Engine::get_singleton()->is_project_manager_hint()) {
 		print_verbose("Initializing Wayland embedder.");
-		bool embedder_debug = OS::get_singleton()->get_environment("GODOT_WAYLAND_EMBEDDER_DEBUG") == "1";
-		Error embedder_status = embedder.init(embedder_debug);
+		Error embedder_status = embedder.init();
 		ERR_FAIL_COND_V_MSG(embedder_status != OK, ERR_CANT_CREATE, "Can't initialize Wayland embedder.");
 
 		embedder_socket_path = embedder.get_socket_path();

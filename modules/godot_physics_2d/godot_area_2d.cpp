@@ -112,9 +112,9 @@ void GodotArea2D::set_area_monitor_callback(const Callable &p_callback) {
 	}
 }
 
-void GodotArea2D::_set_space_override_mode(PS2DE::AreaSpaceOverrideMode &r_mode, PS2DE::AreaSpaceOverrideMode p_new_mode) {
-	bool do_override = p_new_mode != PS2DE::AREA_SPACE_OVERRIDE_DISABLED;
-	if (do_override == (r_mode != PS2DE::AREA_SPACE_OVERRIDE_DISABLED)) {
+void GodotArea2D::_set_space_override_mode(PhysicsServer2D::AreaSpaceOverrideMode &r_mode, PhysicsServer2D::AreaSpaceOverrideMode p_new_mode) {
+	bool do_override = p_new_mode != PhysicsServer2D::AREA_SPACE_OVERRIDE_DISABLED;
+	if (do_override == (r_mode != PhysicsServer2D::AREA_SPACE_OVERRIDE_DISABLED)) {
 		return;
 	}
 	_unregister_shapes();
@@ -122,62 +122,62 @@ void GodotArea2D::_set_space_override_mode(PS2DE::AreaSpaceOverrideMode &r_mode,
 	_shape_changed();
 }
 
-void GodotArea2D::set_param(PS2DE::AreaParameter p_param, const Variant &p_value) {
+void GodotArea2D::set_param(PhysicsServer2D::AreaParameter p_param, const Variant &p_value) {
 	switch (p_param) {
-		case PS2DE::AREA_PARAM_GRAVITY_OVERRIDE_MODE:
-			_set_space_override_mode(gravity_override_mode, (PS2DE::AreaSpaceOverrideMode)(int)p_value);
+		case PhysicsServer2D::AREA_PARAM_GRAVITY_OVERRIDE_MODE:
+			_set_space_override_mode(gravity_override_mode, (PhysicsServer2D::AreaSpaceOverrideMode)(int)p_value);
 			break;
-		case PS2DE::AREA_PARAM_GRAVITY:
+		case PhysicsServer2D::AREA_PARAM_GRAVITY:
 			gravity = p_value;
 			break;
-		case PS2DE::AREA_PARAM_GRAVITY_VECTOR:
+		case PhysicsServer2D::AREA_PARAM_GRAVITY_VECTOR:
 			gravity_vector = p_value;
 			break;
-		case PS2DE::AREA_PARAM_GRAVITY_IS_POINT:
+		case PhysicsServer2D::AREA_PARAM_GRAVITY_IS_POINT:
 			gravity_is_point = p_value;
 			break;
-		case PS2DE::AREA_PARAM_GRAVITY_POINT_UNIT_DISTANCE:
+		case PhysicsServer2D::AREA_PARAM_GRAVITY_POINT_UNIT_DISTANCE:
 			gravity_point_unit_distance = p_value;
 			break;
-		case PS2DE::AREA_PARAM_LINEAR_DAMP_OVERRIDE_MODE:
-			_set_space_override_mode(linear_damping_override_mode, (PS2DE::AreaSpaceOverrideMode)(int)p_value);
+		case PhysicsServer2D::AREA_PARAM_LINEAR_DAMP_OVERRIDE_MODE:
+			_set_space_override_mode(linear_damping_override_mode, (PhysicsServer2D::AreaSpaceOverrideMode)(int)p_value);
 			break;
-		case PS2DE::AREA_PARAM_LINEAR_DAMP:
+		case PhysicsServer2D::AREA_PARAM_LINEAR_DAMP:
 			linear_damp = p_value;
 			break;
-		case PS2DE::AREA_PARAM_ANGULAR_DAMP_OVERRIDE_MODE:
-			_set_space_override_mode(angular_damping_override_mode, (PS2DE::AreaSpaceOverrideMode)(int)p_value);
+		case PhysicsServer2D::AREA_PARAM_ANGULAR_DAMP_OVERRIDE_MODE:
+			_set_space_override_mode(angular_damping_override_mode, (PhysicsServer2D::AreaSpaceOverrideMode)(int)p_value);
 			break;
-		case PS2DE::AREA_PARAM_ANGULAR_DAMP:
+		case PhysicsServer2D::AREA_PARAM_ANGULAR_DAMP:
 			angular_damp = p_value;
 			break;
-		case PS2DE::AREA_PARAM_PRIORITY:
+		case PhysicsServer2D::AREA_PARAM_PRIORITY:
 			priority = p_value;
 			break;
 	}
 }
 
-Variant GodotArea2D::get_param(PS2DE::AreaParameter p_param) const {
+Variant GodotArea2D::get_param(PhysicsServer2D::AreaParameter p_param) const {
 	switch (p_param) {
-		case PS2DE::AREA_PARAM_GRAVITY_OVERRIDE_MODE:
+		case PhysicsServer2D::AREA_PARAM_GRAVITY_OVERRIDE_MODE:
 			return gravity_override_mode;
-		case PS2DE::AREA_PARAM_GRAVITY:
+		case PhysicsServer2D::AREA_PARAM_GRAVITY:
 			return gravity;
-		case PS2DE::AREA_PARAM_GRAVITY_VECTOR:
+		case PhysicsServer2D::AREA_PARAM_GRAVITY_VECTOR:
 			return gravity_vector;
-		case PS2DE::AREA_PARAM_GRAVITY_IS_POINT:
+		case PhysicsServer2D::AREA_PARAM_GRAVITY_IS_POINT:
 			return gravity_is_point;
-		case PS2DE::AREA_PARAM_GRAVITY_POINT_UNIT_DISTANCE:
+		case PhysicsServer2D::AREA_PARAM_GRAVITY_POINT_UNIT_DISTANCE:
 			return gravity_point_unit_distance;
-		case PS2DE::AREA_PARAM_LINEAR_DAMP_OVERRIDE_MODE:
+		case PhysicsServer2D::AREA_PARAM_LINEAR_DAMP_OVERRIDE_MODE:
 			return linear_damping_override_mode;
-		case PS2DE::AREA_PARAM_LINEAR_DAMP:
+		case PhysicsServer2D::AREA_PARAM_LINEAR_DAMP:
 			return linear_damp;
-		case PS2DE::AREA_PARAM_ANGULAR_DAMP_OVERRIDE_MODE:
+		case PhysicsServer2D::AREA_PARAM_ANGULAR_DAMP_OVERRIDE_MODE:
 			return angular_damping_override_mode;
-		case PS2DE::AREA_PARAM_ANGULAR_DAMP:
+		case PhysicsServer2D::AREA_PARAM_ANGULAR_DAMP:
 			return angular_damp;
-		case PS2DE::AREA_PARAM_PRIORITY:
+		case PhysicsServer2D::AREA_PARAM_PRIORITY:
 			return priority;
 	}
 
@@ -220,7 +220,7 @@ void GodotArea2D::call_queries() {
 					continue;
 				}
 
-				res[0] = E->value.state > 0 ? PS2DE::AREA_BODY_ADDED : PS2DE::AREA_BODY_REMOVED;
+				res[0] = E->value.state > 0 ? PhysicsServer2D::AREA_BODY_ADDED : PhysicsServer2D::AREA_BODY_REMOVED;
 				res[1] = E->key.rid;
 				res[2] = E->key.instance_id;
 				res[3] = E->key.body_shape;
@@ -262,7 +262,7 @@ void GodotArea2D::call_queries() {
 					continue;
 				}
 
-				res[0] = E->value.state > 0 ? PS2DE::AREA_BODY_ADDED : PS2DE::AREA_BODY_REMOVED;
+				res[0] = E->value.state > 0 ? PhysicsServer2D::AREA_BODY_ADDED : PhysicsServer2D::AREA_BODY_REMOVED;
 				res[1] = E->key.rid;
 				res[2] = E->key.instance_id;
 				res[3] = E->key.body_shape;

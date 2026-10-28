@@ -38,9 +38,9 @@ class Sprite2D : public Node2D {
 
 	Ref<Texture2D> texture;
 
-#ifdef DEBUG_ENABLED
+#ifdef TOOLS_ENABLED
 	bool dragging_to_resize_rect = false;
-#endif // DEBUG_ENABLED
+#endif // TOOLS_ENABLED
 
 	bool centered = true;
 	Point2 offset;
@@ -70,7 +70,7 @@ protected:
 	void _validate_property(PropertyInfo &p_property) const;
 
 public:
-#ifdef DEBUG_ENABLED
+#ifdef TOOLS_ENABLED
 	virtual Dictionary _edit_get_state() const override;
 	virtual void _edit_set_state(const Dictionary &p_state) override;
 
@@ -79,7 +79,9 @@ public:
 	virtual bool _edit_use_pivot() const override;
 
 	virtual void _edit_set_rect(const Rect2 &p_rect) override;
+#endif // TOOLS_ENABLED
 
+#ifdef DEBUG_ENABLED
 	virtual bool _edit_is_selected_on_click(const Point2 &p_point, double p_tolerance) const override;
 
 	virtual Rect2 _edit_get_rect() const override;

@@ -35,6 +35,7 @@
 #include "core/config/engine.h"
 #include "core/config/project_settings.h"
 #include "core/version.h"
+#include "drivers/streamline/streamline.h"
 #include "drivers/vulkan/rendering_device_driver_vulkan.h"
 #include "drivers/vulkan/vulkan_hooks.h"
 
@@ -43,6 +44,251 @@
 #endif
 
 #include <vk_enum_string_helper.h>
+
+#include <atomic>
+
+/*************************************************/
+// Mariner E8: local devices bypass a Vulkan interposer
+/*************************************************/
+
+// See RenderingContextDriverVulkan::InterposerBypass. Dispatchable handles (VkDevice, VkQueue, VkCommandBuffer)
+// start with the loader's dispatch table pointer, shared by everything created from one VkDevice: that is the
+// key (the same thing Vulkan layers use).
+
+namespace {
+
+struct InterposerFunctions {
+	PFN_vkGetDeviceProcAddr GetDeviceProcAddr = nullptr;
+	PFN_vkCreateDevice CreateDevice = nullptr;
+	PFN_vkDestroyDevice DestroyDevice = nullptr;
+	PFN_vkDeviceWaitIdle DeviceWaitIdle = nullptr;
+	PFN_vkCreateImage CreateImage = nullptr;
+	PFN_vkBeginCommandBuffer BeginCommandBuffer = nullptr;
+	PFN_vkCmdPipelineBarrier CmdPipelineBarrier = nullptr;
+	PFN_vkCmdBindPipeline CmdBindPipeline = nullptr;
+	PFN_vkCmdBindDescriptorSets CmdBindDescriptorSets = nullptr;
+	PFN_vkQueuePresentKHR QueuePresentKHR = nullptr;
+	PFN_vkCreateSwapchainKHR CreateSwapchainKHR = nullptr;
+	PFN_vkDestroySwapchainKHR DestroySwapchainKHR = nullptr;
+	PFN_vkGetSwapchainImagesKHR GetSwapchainImagesKHR = nullptr;
+	PFN_vkAcquireNextImageKHR AcquireNextImageKHR = nullptr;
+};
+
+struct InterposerBypassState {
+	static constexpr uint32_t MAX_DEVICES = 16;
+	std::atomic<void *> keys[MAX_DEVICES] = {};
+	std::atomic<uint32_t> count = { 0 };
+	bool installed = false;
+	uint32_t shimmed = 0;
+	InterposerFunctions interposer; // What the interposer handed to volk.
+	InterposerFunctions loader; // The Vulkan loader's own trampolines.
+};
+
+InterposerBypassState interposer_bypass;
+thread_local bool interposer_bypass_next_device = false;
+
+PFN_vkGetInstanceProcAddr interposer_for_testing = nullptr;
+
+_FORCE_INLINE_ void *_dispatch_key(const void *p_handle) {
+	return p_handle != nullptr ? *(void *const *)p_handle : nullptr;
+}
+
+bool _is_bypassed_key(void *p_key) {
+	if (p_key == nullptr || interposer_bypass.count.load(std::memory_order_acquire) == 0) {
+		return false;
+	}
+	for (uint32_t i = 0; i < InterposerBypassState::MAX_DEVICES; i++) {
+		if (interposer_bypass.keys[i].load(std::memory_order_acquire) == p_key) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool _add_bypassed_key(void *p_key) {
+	for (uint32_t i = 0; i < InterposerBypassState::MAX_DEVICES; i++) {
+		void *expected = nullptr;
+		if (interposer_bypass.keys[i].compare_exchange_strong(expected, p_key, std::memory_order_acq_rel)) {
+			interposer_bypass.count.fetch_add(1, std::memory_order_acq_rel);
+			return true;
+		}
+	}
+	return false;
+}
+
+void _remove_bypassed_key(void *p_key) {
+	for (uint32_t i = 0; i < InterposerBypassState::MAX_DEVICES; i++) {
+		void *expected = p_key;
+		if (p_key != nullptr && interposer_bypass.keys[i].compare_exchange_strong(expected, nullptr, std::memory_order_acq_rel)) {
+			interposer_bypass.count.fetch_sub(1, std::memory_order_acq_rel);
+			return;
+		}
+	}
+}
+
+#ifdef USE_VOLK
+#define BYPASS_ROUTE(m_handle, m_function) (_is_bypassed_key(_dispatch_key((const void *)(m_handle))) ? interposer_bypass.loader.m_function : interposer_bypass.interposer.m_function)
+
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL _bypass_GetDeviceProcAddr(VkDevice p_device, const char *p_name) {
+	return BYPASS_ROUTE(p_device, GetDeviceProcAddr)(p_device, p_name);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL _bypass_CreateDevice(VkPhysicalDevice p_physical_device, const VkDeviceCreateInfo *p_create_info, const VkAllocationCallbacks *p_allocator, VkDevice *r_device) {
+	if (!interposer_bypass_next_device) {
+		return interposer_bypass.interposer.CreateDevice(p_physical_device, p_create_info, p_allocator, r_device);
+	}
+	const VkResult result = interposer_bypass.loader.CreateDevice(p_physical_device, p_create_info, p_allocator, r_device);
+	if (result == VK_SUCCESS && !_add_bypassed_key(_dispatch_key(*r_device))) {
+		// Too many local devices at once: this one can't be told apart from the main device.
+		interposer_bypass.loader.DestroyDevice(*r_device, p_allocator);
+		*r_device = VK_NULL_HANDLE;
+		ERR_FAIL_V_MSG(VK_ERROR_TOO_MANY_OBJECTS, "Too many local Vulkan devices next to a Vulkan interposer (Streamline).");
+	}
+	return result;
+}
+
+VKAPI_ATTR void VKAPI_CALL _bypass_DestroyDevice(VkDevice p_device, const VkAllocationCallbacks *p_allocator) {
+	void *key = _dispatch_key(p_device);
+	if (_is_bypassed_key(key)) {
+		interposer_bypass.loader.DestroyDevice(p_device, p_allocator);
+		_remove_bypassed_key(key);
+	} else {
+		interposer_bypass.interposer.DestroyDevice(p_device, p_allocator);
+	}
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL _bypass_DeviceWaitIdle(VkDevice p_device) {
+	return BYPASS_ROUTE(p_device, DeviceWaitIdle)(p_device);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL _bypass_CreateImage(VkDevice p_device, const VkImageCreateInfo *p_create_info, const VkAllocationCallbacks *p_allocator, VkImage *r_image) {
+	return BYPASS_ROUTE(p_device, CreateImage)(p_device, p_create_info, p_allocator, r_image);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL _bypass_BeginCommandBuffer(VkCommandBuffer p_command_buffer, const VkCommandBufferBeginInfo *p_begin_info) {
+	return BYPASS_ROUTE(p_command_buffer, BeginCommandBuffer)(p_command_buffer, p_begin_info);
+}
+
+VKAPI_ATTR void VKAPI_CALL _bypass_CmdPipelineBarrier(VkCommandBuffer p_command_buffer, VkPipelineStageFlags p_src_stage_mask, VkPipelineStageFlags p_dst_stage_mask, VkDependencyFlags p_dependency_flags, uint32_t p_memory_barrier_count, const VkMemoryBarrier *p_memory_barriers, uint32_t p_buffer_memory_barrier_count, const VkBufferMemoryBarrier *p_buffer_memory_barriers, uint32_t p_image_memory_barrier_count, const VkImageMemoryBarrier *p_image_memory_barriers) {
+	const PFN_vkCmdPipelineBarrier fn = BYPASS_ROUTE(p_command_buffer, CmdPipelineBarrier);
+	fn(p_command_buffer, p_src_stage_mask, p_dst_stage_mask, p_dependency_flags, p_memory_barrier_count, p_memory_barriers, p_buffer_memory_barrier_count, p_buffer_memory_barriers, p_image_memory_barrier_count, p_image_memory_barriers);
+}
+
+VKAPI_ATTR void VKAPI_CALL _bypass_CmdBindPipeline(VkCommandBuffer p_command_buffer, VkPipelineBindPoint p_bind_point, VkPipeline p_pipeline) {
+	const PFN_vkCmdBindPipeline fn = BYPASS_ROUTE(p_command_buffer, CmdBindPipeline);
+	fn(p_command_buffer, p_bind_point, p_pipeline);
+}
+
+VKAPI_ATTR void VKAPI_CALL _bypass_CmdBindDescriptorSets(VkCommandBuffer p_command_buffer, VkPipelineBindPoint p_bind_point, VkPipelineLayout p_layout, uint32_t p_first_set, uint32_t p_set_count, const VkDescriptorSet *p_sets, uint32_t p_dynamic_offset_count, const uint32_t *p_dynamic_offsets) {
+	const PFN_vkCmdBindDescriptorSets fn = BYPASS_ROUTE(p_command_buffer, CmdBindDescriptorSets);
+	fn(p_command_buffer, p_bind_point, p_layout, p_first_set, p_set_count, p_sets, p_dynamic_offset_count, p_dynamic_offsets);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL _bypass_QueuePresentKHR(VkQueue p_queue, const VkPresentInfoKHR *p_present_info) {
+	return BYPASS_ROUTE(p_queue, QueuePresentKHR)(p_queue, p_present_info);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL _bypass_CreateSwapchainKHR(VkDevice p_device, const VkSwapchainCreateInfoKHR *p_create_info, const VkAllocationCallbacks *p_allocator, VkSwapchainKHR *r_swapchain) {
+	return BYPASS_ROUTE(p_device, CreateSwapchainKHR)(p_device, p_create_info, p_allocator, r_swapchain);
+}
+
+VKAPI_ATTR void VKAPI_CALL _bypass_DestroySwapchainKHR(VkDevice p_device, VkSwapchainKHR p_swapchain, const VkAllocationCallbacks *p_allocator) {
+	const PFN_vkDestroySwapchainKHR fn = BYPASS_ROUTE(p_device, DestroySwapchainKHR);
+	fn(p_device, p_swapchain, p_allocator);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL _bypass_GetSwapchainImagesKHR(VkDevice p_device, VkSwapchainKHR p_swapchain, uint32_t *r_count, VkImage *r_images) {
+	return BYPASS_ROUTE(p_device, GetSwapchainImagesKHR)(p_device, p_swapchain, r_count, r_images);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL _bypass_AcquireNextImageKHR(VkDevice p_device, VkSwapchainKHR p_swapchain, uint64_t p_timeout, VkSemaphore p_semaphore, VkFence p_fence, uint32_t *r_index) {
+	return BYPASS_ROUTE(p_device, AcquireNextImageKHR)(p_device, p_swapchain, p_timeout, p_semaphore, p_fence, r_index);
+}
+
+#undef BYPASS_ROUTE
+#endif // USE_VOLK
+
+void _interposer_bypass_reset() {
+	for (uint32_t i = 0; i < InterposerBypassState::MAX_DEVICES; i++) {
+		interposer_bypass.keys[i].store(nullptr, std::memory_order_release);
+	}
+	interposer_bypass.count.store(0, std::memory_order_release);
+	interposer_bypass.installed = false;
+	interposer_bypass.shimmed = 0;
+	interposer_bypass.interposer = InterposerFunctions();
+	interposer_bypass.loader = InterposerFunctions();
+}
+
+#ifdef USE_VOLK
+// Called right after volkLoadInstance() with the interposer: the volk pointers are the interposer's.
+void _interposer_bypass_install(VkInstance p_instance, PFN_vkGetInstanceProcAddr p_loader_get_instance_proc_addr) {
+	_interposer_bypass_reset();
+	ERR_FAIL_NULL_MSG(p_loader_get_instance_proc_addr, "Vulkan interposer in use but the Vulkan loader could not be loaded: local rendering devices would break it, they are not supported.");
+
+	bool complete = true;
+#define BYPASS_SHIM(m_function) \
+	interposer_bypass.interposer.m_function = vk##m_function; \
+	interposer_bypass.loader.m_function = (PFN_vk##m_function)p_loader_get_instance_proc_addr(p_instance, "vk" #m_function); \
+	if (interposer_bypass.interposer.m_function != nullptr && interposer_bypass.loader.m_function != nullptr) { \
+		if (interposer_bypass.interposer.m_function != interposer_bypass.loader.m_function) { \
+			interposer_bypass.shimmed++; \
+		} \
+		vk##m_function = _bypass_##m_function; \
+	} else if (interposer_bypass.interposer.m_function != nullptr) { \
+		complete = false; \
+	}
+
+	BYPASS_SHIM(GetDeviceProcAddr)
+	BYPASS_SHIM(CreateDevice)
+	BYPASS_SHIM(DestroyDevice)
+	BYPASS_SHIM(DeviceWaitIdle)
+	BYPASS_SHIM(CreateImage)
+	BYPASS_SHIM(BeginCommandBuffer)
+	BYPASS_SHIM(CmdPipelineBarrier)
+	BYPASS_SHIM(CmdBindPipeline)
+	BYPASS_SHIM(CmdBindDescriptorSets)
+	BYPASS_SHIM(QueuePresentKHR)
+	BYPASS_SHIM(CreateSwapchainKHR)
+	BYPASS_SHIM(DestroySwapchainKHR)
+	BYPASS_SHIM(GetSwapchainImagesKHR)
+	BYPASS_SHIM(AcquireNextImageKHR)
+#undef BYPASS_SHIM
+
+	// Device creation and destruction must be routable, or a local device would re-initialize the interposer.
+	interposer_bypass.installed = complete && vkCreateDevice == _bypass_CreateDevice && vkDestroyDevice == _bypass_DestroyDevice;
+	if (interposer_bypass.installed) {
+		print_verbose(vformat("Vulkan: interposer in use (%d device functions wrapped); local rendering devices go to the Vulkan loader directly.", interposer_bypass.shimmed));
+	} else {
+		WARN_PRINT("Vulkan: interposer in use and the loader's functions are incomplete; local rendering devices are not supported.");
+	}
+}
+#endif
+
+} // namespace
+
+bool RenderingContextDriverVulkan::InterposerBypass::is_installed() {
+	return interposer_bypass.installed;
+}
+
+void RenderingContextDriverVulkan::InterposerBypass::set_next_device_bypassed(bool p_bypassed) {
+	interposer_bypass_next_device = p_bypassed;
+}
+
+bool RenderingContextDriverVulkan::InterposerBypass::is_device_bypassed(VkDevice p_device) {
+	return _is_bypassed_key(_dispatch_key((const void *)p_device));
+}
+
+uint32_t RenderingContextDriverVulkan::InterposerBypass::get_bypassed_device_count() {
+	return interposer_bypass.count.load(std::memory_order_acquire);
+}
+
+uint32_t RenderingContextDriverVulkan::InterposerBypass::get_shimmed_function_count() {
+	return interposer_bypass.shimmed;
+}
+
+void RenderingContextDriverVulkan::set_interposer_for_testing(PFN_vkGetInstanceProcAddr p_get_instance_proc_addr) {
+	interposer_for_testing = p_get_instance_proc_addr;
+}
 
 #if defined(VK_TRACK_DRIVER_MEMORY)
 /*************************************************/
@@ -456,6 +702,9 @@ Error RenderingContextDriverVulkan::_initialize_instance_extensions() {
 #else
 	bool want_debug_utils = OS::get_singleton()->is_stdout_verbose();
 #endif
+	if (Engine::get_singleton() && Engine::get_singleton()->is_gpu_markers_enabled()) {
+		want_debug_utils = true;
+	}
 	if (want_debug_utils) {
 		_register_requested_instance_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, false);
 	}
@@ -603,9 +852,6 @@ VKAPI_ATTR VkBool32 VKAPI_CALL RenderingContextDriverVulkan::_debug_messenger_ca
 	if (p_callback_data->objectCount > 0) {
 		objects_string = "\n\tObjects - " + String::num_int64(p_callback_data->objectCount);
 		for (uint32_t object = 0; object < p_callback_data->objectCount; ++object) {
-			if (p_callback_data->pObjects[object].sType != VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT) {
-				continue;
-			}
 			objects_string +=
 					"\n\t\tObject[" + String::num_int64(object) + "]" +
 					" - " + string_VkObjectType(p_callback_data->pObjects[object].objectType) +
@@ -754,6 +1000,9 @@ Error RenderingContextDriverVulkan::_initialize_instance() {
 
 #ifdef USE_VOLK
 	volkLoadInstance(instance);
+	if (interposer_in_use) {
+		_interposer_bypass_install(instance, loader_get_instance_proc_addr);
+	}
 #endif
 
 	// Physical device.
@@ -773,6 +1022,12 @@ Error RenderingContextDriverVulkan::_initialize_instance() {
 
 	// Device.
 	functions.GetDeviceProcAddr = PFN_vkGetDeviceProcAddr(vkGetInstanceProcAddr(instance, "vkGetDeviceProcAddr"));
+#ifdef USE_VOLK
+	if (interposer_bypass.installed) {
+		// Mariner E8: device functions of local devices come from the loader, not from the interposer.
+		functions.GetDeviceProcAddr = _bypass_GetDeviceProcAddr;
+	}
+#endif
 
 	// Surfaces.
 	functions.GetPhysicalDeviceSurfaceSupportKHR = PFN_vkGetPhysicalDeviceSurfaceSupportKHR(vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceSupportKHR"));
@@ -837,6 +1092,7 @@ Error RenderingContextDriverVulkan::_initialize_devices() {
 
 		// When a hook is active, pretend the device returned by the hook is the only device available.
 		driver_devices.resize(1);
+		driver_device_infos.resize(1);
 		physical_devices.resize(1);
 		device_queue_families.resize(1);
 		physical_devices[0] = physical_device;
@@ -848,6 +1104,7 @@ Error RenderingContextDriverVulkan::_initialize_devices() {
 		ERR_FAIL_COND_V_MSG(physical_device_count == 0, ERR_CANT_CREATE, "vkEnumeratePhysicalDevices reported zero accessible devices.\n\nDo you have a compatible Vulkan installable client driver (ICD) installed?\nvkEnumeratePhysicalDevices Failure.");
 
 		driver_devices.resize(physical_device_count);
+		driver_device_infos.resize(physical_device_count);
 		physical_devices.resize(physical_device_count);
 		device_queue_families.resize(physical_device_count);
 		err = vkEnumeratePhysicalDevices(instance, &physical_device_count, physical_devices.ptr());
@@ -863,6 +1120,25 @@ Error RenderingContextDriverVulkan::_initialize_devices() {
 		driver_device.name = String::utf8(props.deviceName);
 		driver_device.vendor = props.vendorID;
 		driver_device.type = DeviceType(props.deviceType);
+
+		// Mariner E8: memory and version for RenderingServer.get_physical_devices().
+		DeviceInfo &info = driver_device_infos[i];
+		info.device_id = props.deviceID;
+		info.type = driver_device.type;
+		info.api_version = vformat("%d.%d.%d", VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion), VK_API_VERSION_PATCH(props.apiVersion));
+		VkPhysicalDeviceMemoryProperties memory_props = {};
+		vkGetPhysicalDeviceMemoryProperties(physical_devices[i], &memory_props);
+		bool all_heaps_device_local = memory_props.memoryHeapCount > 0;
+		for (uint32_t h = 0; h < memory_props.memoryHeapCount; h++) {
+			if (memory_props.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+				info.dedicated_memory += memory_props.memoryHeaps[h].size;
+			} else {
+				info.shared_memory += memory_props.memoryHeaps[h].size;
+				all_heaps_device_local = false;
+			}
+		}
+		// Integrated GPUs and software devices work from system memory; some report one device-local heap only.
+		info.uma = driver_device.type == DEVICE_TYPE_INTEGRATED_GPU || driver_device.type == DEVICE_TYPE_CPU || all_heaps_device_local;
 
 		uint32_t queue_family_properties_count = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(physical_devices[i], &queue_family_properties_count, nullptr);
@@ -905,8 +1181,24 @@ Error RenderingContextDriverVulkan::_create_vulkan_instance(const VkInstanceCrea
 Error RenderingContextDriverVulkan::initialize() {
 	Error err;
 
+	_interposer_bypass_reset(); // Mariner E8.
+
 #ifdef USE_VOLK
-	if (volkInitialize() != VK_SUCCESS) {
+	// With Streamline (NVIDIA DLSS) active, route all Vulkan calls through sl.interposer.dll so it can hook
+	// instance/device creation; otherwise load the system Vulkan loader as usual.
+	void *sl_get_instance_proc_addr = Streamline::get_singleton() ? Streamline::get_singleton()->get_internal_parameter(STREAMLINE_INTERNAL_PARAMETER_FUNC_vkGetInstanceProcAddr) : nullptr;
+	if (sl_get_instance_proc_addr == nullptr && interposer_for_testing != nullptr) {
+		sl_get_instance_proc_addr = (void *)interposer_for_testing;
+	}
+	if (sl_get_instance_proc_addr != nullptr) {
+		// Mariner E8: keep the loader's own vkGetInstanceProcAddr for local devices (see InterposerBypass).
+		if (volkInitialize() == VK_SUCCESS) {
+			loader_get_instance_proc_addr = vkGetInstanceProcAddr;
+		}
+		// Note: function pointer is cast through void function pointer to silence cast-function-type warning on gcc8.
+		volkInitializeCustom((PFN_vkGetInstanceProcAddr)(void (*)())sl_get_instance_proc_addr);
+		interposer_in_use = true;
+	} else if (volkInitialize() != VK_SUCCESS) {
 		return FAILED;
 	}
 #endif
@@ -933,6 +1225,12 @@ const RenderingContextDriver::Device &RenderingContextDriverVulkan::device_get(u
 
 uint32_t RenderingContextDriverVulkan::device_get_count() const {
 	return driver_devices.size();
+}
+
+bool RenderingContextDriverVulkan::device_get_info(uint32_t p_device_index, DeviceInfo &r_info) const {
+	ERR_FAIL_UNSIGNED_INDEX_V(p_device_index, driver_device_infos.size(), false);
+	r_info = driver_device_infos[p_device_index];
+	return true;
 }
 
 bool RenderingContextDriverVulkan::device_supports_present(uint32_t p_device_index, SurfaceID p_surface) const {

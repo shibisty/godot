@@ -16,7 +16,7 @@ public static class CSharpCodeFixVerifier<TCodeFix, TAnalyzer>
     {
         public Test()
         {
-            ReferenceAssemblies = Constants.Net100;
+            ReferenceAssemblies = Constants.Net80;
             SolutionTransforms.Add((Solution solution, ProjectId projectId) =>
             {
                 Project project = solution.GetProject(projectId)!

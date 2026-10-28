@@ -116,6 +116,8 @@ class EditorHelp : public VBoxContainer {
 
 	LineEdit *search = nullptr;
 	FindBar *find_bar = nullptr;
+	HBoxContainer *status_bar = nullptr;
+	Button *toggle_files_button = nullptr;
 
 	struct ThemeCache {
 		Ref<StyleBox> background_style;
@@ -146,12 +148,8 @@ class EditorHelp : public VBoxContainer {
 	} theme_cache;
 
 	int scroll_to = -1;
-	bool need_save_new_history = false;
 
 	void _help_callback(const String &p_topic);
-	void _class_desc_scroll_to_paragraph(int p_line, bool p_save_history);
-	bool _need_save_new_history() const;
-	void _emit_request_save_new_history(const Dictionary &p_state);
 
 	void _add_text(const String &p_bbcode);
 	bool scroll_locked = false;
@@ -173,10 +171,11 @@ class EditorHelp : public VBoxContainer {
 	void _class_desc_finished();
 	void _class_list_select(const String &p_select);
 	void _class_desc_select(const String &p_select);
+	void _class_desc_input(const Ref<InputEvent> &p_input);
 	void _class_desc_resized(bool p_force_update_theme);
 	int display_margin = 0;
 
-	Error _goto_desc(const String &p_class, bool p_can_trigger_save_history);
+	Error _goto_desc(const String &p_class);
 	//void _update_history_buttons();
 	void _update_method_list(MethodType p_method_type, const Vector<DocData::MethodDoc> &p_methods);
 	void _update_method_descriptions(const DocData::ClassDoc &p_classdoc, MethodType p_method_type, const Vector<DocData::MethodDoc> &p_methods);
@@ -184,6 +183,8 @@ class EditorHelp : public VBoxContainer {
 
 	void _request_help(const String &p_string);
 	void _search(bool p_search_previous = false);
+
+	void _toggle_files_pressed();
 
 	inline static int doc_generation_count = 0;
 	inline static String doc_version_hash;
@@ -248,8 +249,6 @@ public:
 	void go_to_help(const String &p_help);
 	void go_to_class(const String &p_class);
 	void update_doc();
-	void trigger_history_save_on_navigate();
-	Dictionary get_state();
 
 	Vector<Pair<String, int>> get_sections();
 	void scroll_to_section(int p_section_index);
@@ -263,6 +262,8 @@ public:
 
 	int get_scroll() const;
 	void set_scroll(int p_scroll);
+
+	void update_toggle_files_button();
 
 	static void init_gdext_pointers();
 
@@ -317,9 +318,6 @@ class EditorHelpBit : public VBoxContainer {
 
 	bool use_class_prefix = false;
 
-	String current_symbol;
-	String current_prologue;
-
 	String symbol_doc_link;
 	String symbol_class_name;
 	String symbol_type;
@@ -351,7 +349,6 @@ protected:
 	void _notification(int p_what);
 
 public:
-	static void clear_cache();
 	static String get_as_plain_text(const String &p_symbol, const String &p_prologue = String());
 
 	void parse_symbol(const String &p_symbol, const String &p_prologue = String());
@@ -360,14 +357,7 @@ public:
 	void set_content_height_limits(float p_min, float p_max);
 	void update_content_height();
 
-	void override_custom_minimum_width(float p_min_width);
-
-	EditorHelpBit(
-			const String &p_symbol = String(),
-			const String &p_prologue = String(),
-			bool p_use_class_prefix = false,
-			bool p_allow_selection = true,
-			bool p_in_tooltip = false);
+	EditorHelpBit(const String &p_symbol = String(), const String &p_prologue = String(), bool p_use_class_prefix = false, bool p_allow_selection = true, bool p_in_tooltip = false);
 };
 
 // Standard tooltips do not allow you to hover over them.
@@ -376,9 +366,6 @@ class EditorHelpBitTooltip : public PopupPanel {
 	GDCLASS(EditorHelpBitTooltip, PopupPanel);
 
 	static bool _is_tooltip_visible;
-
-	RichTextLabel *diagnostics_label;
-	VBoxContainer *vbox;
 
 	Timer *timer = nullptr;
 	uint64_t _enter_tree_time = 0;
@@ -396,13 +383,7 @@ protected:
 
 public:
 	// The returned control is an orphan node, which is to make the standard tooltip invisible.
-	[[nodiscard]] static Control *make_tooltip(
-			Control *p_target,
-			const String &p_symbol,
-			const String &p_prologue = String(),
-			bool p_use_class_prefix = false,
-			bool p_shortcut = false,
-			const String &p_diagnostics = String());
+	[[nodiscard]] static Control *make_tooltip(Control *p_target, const String &p_symbol, const String &p_prologue = String(), bool p_use_class_prefix = false, bool p_shortcut = false);
 
 	void popup_under_position(const Point2 &p_point);
 
@@ -440,7 +421,7 @@ public:
 	static EditorHelpHighlighter *get_singleton();
 
 	void highlight(RichTextLabel *p_rich_text_label, Language p_language, const String &p_source, bool p_use_cache);
-	void clear_cache();
+	void reset_cache();
 
 	EditorHelpHighlighter();
 	virtual ~EditorHelpHighlighter();

@@ -132,7 +132,10 @@ Error HTTPRequest::request_raw(const String &p_url, const Vector<String> &p_cust
 
 	method = p_method;
 
-	RETURN_IF_ERROR(_parse_url(p_url));
+	Error err = _parse_url(p_url);
+	if (err) {
+		return err;
+	}
 
 	headers = p_custom_headers;
 
@@ -154,7 +157,7 @@ Error HTTPRequest::request_raw(const String &p_url, const Vector<String> &p_cust
 		thread.start(_thread_func, this);
 	} else {
 		client->set_blocking_mode(false);
-		Error err = _request();
+		err = _request();
 		if (err != OK) {
 			_defer_done(RESULT_CANT_CONNECT, 0, PackedStringArray(), PackedByteArray());
 			return ERR_CANT_CONNECT;
@@ -204,7 +207,7 @@ void HTTPRequest::cancel_request() {
 
 	if (file.is_valid()) {
 		file.unref();
-		if (!download_complete && !keep_partial_download) {
+		if (!download_complete) {
 			DirAccess::remove_absolute(download_to_file);
 		}
 	}
@@ -216,7 +219,6 @@ void HTTPRequest::cancel_request() {
 	response_code = -1;
 	request_sent = false;
 	download_complete = false;
-	append_to_download_file = false;
 	requesting = false;
 }
 
@@ -439,14 +441,7 @@ bool HTTPRequest::_update_connection() {
 				}
 
 				if (!download_to_file.is_empty()) {
-					if (append_to_download_file && response_code == HTTPClient::RESPONSE_PARTIAL_CONTENT) {
-						file = FileAccess::open(download_to_file, FileAccess::READ_WRITE);
-						if (file.is_valid()) {
-							file->seek_end();
-						}
-					} else {
-						file = FileAccess::open(download_to_file, FileAccess::WRITE);
-					}
+					file = FileAccess::open(download_to_file, FileAccess::WRITE);
 					if (file.is_null()) {
 						_defer_done(RESULT_DOWNLOAD_FILE_CANT_OPEN, response_code, response_headers, PackedByteArray());
 						return true;
@@ -521,7 +516,6 @@ bool HTTPRequest::_update_connection() {
 				}
 			} else if (client->get_status() == HTTPClient::STATUS_DISCONNECTED) {
 				// We read till EOF, with no errors. Request is done.
-				download_complete = true;
 				_defer_done(RESULT_SUCCESS, response_code, response_headers, body);
 				return true;
 			}
@@ -611,22 +605,6 @@ String HTTPRequest::get_download_file() const {
 	return download_to_file;
 }
 
-void HTTPRequest::set_keep_partial_download(bool p_keep) {
-	keep_partial_download = p_keep;
-}
-
-bool HTTPRequest::is_keeping_partial_download() const {
-	return keep_partial_download;
-}
-
-void HTTPRequest::set_append_to_download_file(bool p_append) {
-	append_to_download_file = p_append;
-}
-
-bool HTTPRequest::is_appending_to_download_file() const {
-	return append_to_download_file;
-}
-
 void HTTPRequest::set_download_chunk_size(int p_chunk_size) {
 	ERR_FAIL_COND(get_http_client_status() != HTTPClient::STATUS_DISCONNECTED);
 
@@ -707,12 +685,6 @@ void HTTPRequest::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_download_file", "path"), &HTTPRequest::set_download_file);
 	ClassDB::bind_method(D_METHOD("get_download_file"), &HTTPRequest::get_download_file);
 
-	ClassDB::bind_method(D_METHOD("set_keep_partial_download", "enabled"), &HTTPRequest::set_keep_partial_download);
-	ClassDB::bind_method(D_METHOD("is_keeping_partial_download"), &HTTPRequest::is_keeping_partial_download);
-
-	ClassDB::bind_method(D_METHOD("set_append_to_download_file", "enabled"), &HTTPRequest::set_append_to_download_file);
-	ClassDB::bind_method(D_METHOD("is_appending_to_download_file"), &HTTPRequest::is_appending_to_download_file);
-
 	ClassDB::bind_method(D_METHOD("get_downloaded_bytes"), &HTTPRequest::get_downloaded_bytes);
 	ClassDB::bind_method(D_METHOD("get_body_size"), &HTTPRequest::get_body_size);
 
@@ -727,8 +699,6 @@ void HTTPRequest::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "download_file", PROPERTY_HINT_FILE_PATH), "set_download_file", "get_download_file");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "download_chunk_size", PROPERTY_HINT_RANGE, "256,16777216,suffix:B"), "set_download_chunk_size", "get_download_chunk_size");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "keep_partial_download"), "set_keep_partial_download", "is_keeping_partial_download");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "append_to_download_file"), "set_append_to_download_file", "is_appending_to_download_file");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_threads"), "set_use_threads", "is_using_threads");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "accept_gzip"), "set_accept_gzip", "is_accepting_gzip");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "body_size_limit", PROPERTY_HINT_RANGE, "-1,2000000000,suffix:B"), "set_body_size_limit", "get_body_size_limit");

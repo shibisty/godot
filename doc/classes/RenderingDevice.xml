@@ -14,6 +14,51 @@
 		<link title="Using compute shaders">$DOCS_URL/tutorials/shaders/compute_shaders.html</link>
 	</tutorials>
 	<methods>
+		<method name="async_compute_begin">
+			<return type="bool" />
+			<description>
+				Starts an asynchronous compute scope (Mariner engine patch E6). Until [method async_compute_end], compute lists, [method buffer_update], [method buffer_clear], [method buffer_copy], [method texture_copy], [method texture_clear], [method buffer_get_data_async], [method texture_get_data_async] and labels ([method draw_command_begin_label]) are recorded for a second, compute-only GPU queue that runs in parallel with the main (graphics) queue. Returns [code]true[/code] if the work will be sent to the async compute queue, [code]false[/code] if it runs on the main queue as usual (see [method async_compute_is_active]); the API calls are the same either way.
+				Frame N's async work starts after the main queue finished frame N-1, and the main queue's frame N+1 waits for it, so its results are meant to be used in the [i]next[/i] frame. All textures and buffers it uses must be created with [constant TEXTURE_USAGE_ASYNC_COMPUTE_BIT] / [constant BUFFER_CREATION_ASYNC_COMPUTE_BIT]. Work that can't run there safely silently falls back to the main queue: resources without the flag (warned once), uniform sets created in the same frame, resources with pending uploads, or resources the main queue already used in this frame. If the main queue uses a resource after the async queue used it in the same frame, the main queue waits for that frame's async work (correct, but without overlap). Double-buffer results the main queue reads in the same frame as the async queue writes them. See [method async_compute_get_info].
+				[b]Note:[/b] Draw lists and raytracing lists always run on the main queue. Compute lists recorded inside the scope are validated when [method compute_list_end] is called.
+			</description>
+		</method>
+		<method name="async_compute_end">
+			<return type="void" />
+			<description>
+				Ends the scope started with [method async_compute_begin]. A scope left open is closed at the end of the frame (with a warning).
+			</description>
+		</method>
+		<method name="async_compute_get_info" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the state of the asynchronous compute queue: [code]supported[/code], [code]enabled[/code], [code]active[/code], [code]reason[/code] (why it is unsupported), [code]timestamps[/code]; for the last finished frame: [code]lists_async[/code], [code]lists_main[/code], [code]ops_async[/code], [code]ops_main[/code] (work recorded in scopes that went to each queue), [code]dispatches_async[/code], [code]submitted[/code], [code]serialized[/code] (the main queue had to wait for this frame's async work) and [code]gpu_time_usec[/code] (async queue GPU time of the last measured frame); since the start: [code]total_lists_async[/code], [code]total_lists_main[/code], [code]total_ops_async[/code], [code]total_ops_main[/code], [code]total_submissions[/code], [code]serialized_frames[/code], [code]last_fallback[/code] and [code]fallbacks[/code] (count per fallback reason).
+			</description>
+		</method>
+		<method name="async_compute_is_active" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if work in [method async_compute_begin] scopes is sent to the async compute queue: [method async_compute_is_supported] and [method async_compute_is_enabled].
+			</description>
+		</method>
+		<method name="async_compute_is_enabled" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] unless async compute was disabled with [method async_compute_set_enabled].
+			</description>
+		</method>
+		<method name="async_compute_is_supported" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if this device created an asynchronous compute queue: a compute queue family separate from the graphics one, timeline semaphores (Vulkan 1.2 or Direct3D 12), [member ProjectSettings.rendering/rendering_device/async_compute] enabled and not a local device.
+			</description>
+		</method>
+		<method name="async_compute_set_enabled">
+			<return type="void" />
+			<param index="0" name="enabled" type="bool" />
+			<description>
+				Enables or disables sending work to the async compute queue at runtime (enabled by default). When disabled, [method async_compute_begin] scopes run on the main queue. Can be called from any thread; it applies to work recorded afterwards.
+			</description>
+		</method>
 		<method name="barrier" deprecated="Barriers are automatically inserted by RenderingDevice.">
 			<return type="void" />
 			<param index="0" name="from" type="int" enum="RenderingDevice.BarrierMask" is_bitfield="true" default="32767" />
@@ -36,6 +81,13 @@
 			<description>
 				Creates a new Bottom-Level Acceleration Structure (BLAS). It can be accessed with the RID that is returned.
 				Once finished with your RID, you will want to free the RID using the RenderingDevice's [method free_rid] method.
+			</description>
+		</method>
+		<method name="blas_update" experimental="">
+			<return type="int" enum="Error" />
+			<param index="0" name="blas" type="RID" />
+			<description>
+				Refits the [param blas] after its vertex positions changed (same topology). The BLAS must have been created with [constant ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT] and built with [method blas_build].
 			</description>
 		</method>
 		<method name="buffer_clear">
@@ -391,6 +443,43 @@
 				Submits [param draw_list] for rendering on the GPU with the given parameters stored in the [param buffer] at [param offset]. Parameters being integers: vertex count, instance count, first vertex, first instance. And when using indices: index count, instance count, first index, vertex offset, first instance. Buffer must have been created with [constant STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT] flag.
 			</description>
 		</method>
+		<method name="draw_list_draw_mesh_tasks">
+			<return type="void" />
+			<param index="0" name="draw_list" type="int" />
+			<param index="1" name="group_count_x" type="int" />
+			<param index="2" name="group_count_y" type="int" default="1" />
+			<param index="3" name="group_count_z" type="int" default="1" />
+			<description>
+				Draws with the bound mesh shader pipeline: launches [param group_count_x] × [param group_count_y] × [param group_count_z] workgroups of the first stage of the pipeline (the task shader, or the mesh shader when the pipeline has no task stage). No vertex or index arrays are used. The pipeline must have been created from a shader with a [constant SHADER_STAGE_MESH] stage. Group counts must not exceed [constant LIMIT_MAX_TASK_WORKGROUP_COUNT_X] (or [constant LIMIT_MAX_MESH_WORKGROUP_COUNT_X] without a task stage) and the corresponding Y/Z and total limits.
+				[b]Note:[/b] Requires [constant SUPPORTS_MESH_SHADER] (Vulkan with [code]VK_EXT_mesh_shader[/code]). Check [method has_feature] first and fall back to a vertex pipeline.
+			</description>
+		</method>
+		<method name="draw_list_draw_mesh_tasks_indirect">
+			<return type="void" />
+			<param index="0" name="draw_list" type="int" />
+			<param index="1" name="buffer" type="RID" />
+			<param index="2" name="offset" type="int" default="0" />
+			<param index="3" name="draw_count" type="int" default="1" />
+			<param index="4" name="stride" type="int" default="0" />
+			<description>
+				Like [method draw_list_draw_mesh_tasks], but the group counts are read on the GPU from [param buffer] at [param offset]: [param draw_count] entries of three 32-bit unsigned integers (X, Y, Z group counts), [param stride] bytes apart ([code]0[/code] means 12 bytes, tightly packed). [param offset] and [param stride] must be multiples of 4. The buffer must have been created with the [constant STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT] flag; writes to it earlier in the frame (for example by a compute list) are synchronized automatically.
+				[b]Note:[/b] Requires [constant SUPPORTS_MESH_SHADER].
+			</description>
+		</method>
+		<method name="draw_list_draw_mesh_tasks_indirect_count">
+			<return type="void" />
+			<param index="0" name="draw_list" type="int" />
+			<param index="1" name="buffer" type="RID" />
+			<param index="2" name="offset" type="int" />
+			<param index="3" name="count_buffer" type="RID" />
+			<param index="4" name="count_buffer_offset" type="int" />
+			<param index="5" name="max_draw_count" type="int" />
+			<param index="6" name="stride" type="int" default="0" />
+			<description>
+				Like [method draw_list_draw_mesh_tasks_indirect], but the number of draws is read on the GPU as a 32-bit unsigned integer from [param count_buffer] at [param count_buffer_offset], clamped to [param max_draw_count]. Both buffers must have been created with the [constant STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT] flag.
+				[b]Note:[/b] Requires [constant SUPPORTS_MESH_SHADER_INDIRECT_COUNT].
+			</description>
+		</method>
 		<method name="draw_list_enable_scissor">
 			<return type="void" />
 			<param index="0" name="draw_list" type="int" />
@@ -540,7 +629,7 @@
 			<return type="int" />
 			<param index="0" name="index" type="int" />
 			<description>
-				Returns the timestamp in GPU time for the rendering step specified by [param index] (in nanoseconds since the engine started). See also [method get_captured_timestamp_cpu_time] and [method capture_timestamp].
+				Returns the timestamp in GPU time for the rendering step specified by [param index] (in microseconds since the engine started). See also [method get_captured_timestamp_cpu_time] and [method capture_timestamp].
 			</description>
 		</method>
 		<method name="get_captured_timestamp_name" qualifiers="const">
@@ -1170,10 +1259,10 @@
 			<param index="3" name="mipmap" type="int" />
 			<param index="4" name="mipmaps" type="int" default="1" />
 			<param index="5" name="slice_type" type="int" enum="RenderingDevice.TextureSliceType" default="0" />
-			<param index="6" name="layers" type="int" default="0" />
 			<description>
-				Creates a shared texture using the specified [param view] and the texture information from [param with_texture]'s [param layer] and [param mipmap]. The number of included mipmaps from the original texture can be controlled using the [param mipmaps] parameter. The [param layers] parameter controls the number of included layers from the original texture for 2D texture arrays, and must be [code]0[/code] for all other texture types. If [param layers] is [code]0[/code] for a 2D texture array, [param layer] must also be [code]0[/code], and all available layers will be included. Only relevant for textures with multiple layers, such as 3D textures, texture arrays and cubemaps. For single-layer textures, use [method texture_create_shared].
+				Creates a shared texture using the specified [param view] and the texture information from [param with_texture]'s [param layer] and [param mipmap]. The number of included mipmaps from the original texture can be controlled using the [param mipmaps] parameter. Only relevant for textures with multiple layers, such as 3D textures, texture arrays and cubemaps. For single-layer textures, use [method texture_create_shared].
 				For 2D textures (which only have one layer), [param layer] must be [code]0[/code].
+				[b]Note:[/b] Layer slicing is only supported for 2D texture arrays, not 3D textures or cubemaps.
 				This will be freed automatically when the [param with_texture] is freed.
 			</description>
 		</method>
@@ -1423,6 +1512,14 @@
 			The native id of the data format of the texture.
 			- Vulkan: [code]VkFormat[/code].
 			- D3D12: [code]DXGI_FORMAT[/code].
+		</constant>
+		<constant name="DRIVER_RESOURCE_TEXTURE_DEVICE_MEMORY" value="13" enum="DriverResource">
+			The native handle of the data memory of the texture.
+			- Vulkan: [code]VkDeviceMemory[/code].
+		</constant>
+		<constant name="DRIVER_RESOURCE_TEXTURE_USAGE_FLAGS" value="14" enum="DriverResource">
+			The native image usage flags of the texture.
+			- Vulkan: [code]VkImageUsageFlags[/code].
 		</constant>
 		<constant name="DRIVER_RESOURCE_SAMPLER" value="8" enum="DriverResource">
 			- Vulkan: [code]VkSampler[/code].
@@ -2257,6 +2354,9 @@
 		<constant name="TEXTURE_USAGE_INPUT_ATTACHMENT_BIT" value="512" enum="TextureUsageBits" is_bitfield="true">
 			Texture can be used as a [url=https://registry.khronos.org/vulkan/specs/1.3-extensions/html/vkspec.html#descriptorsets-inputattachment]input attachment[/url] in a framebuffer.
 		</constant>
+		<constant name="TEXTURE_USAGE_ASYNC_COMPUTE_BIT" value="8192" enum="TextureUsageBits" is_bitfield="true">
+			Texture can be used by the asynchronous compute queue as well as the main queue (see [method async_compute_begin]). On Vulkan it is created with concurrent sharing between the queue families. Can't be combined with attachment, transient or multisample usage (the flag is dropped with a warning). Ignored when async compute is not supported.
+		</constant>
 		<constant name="TEXTURE_SWIZZLE_IDENTITY" value="0" enum="TextureSwizzle">
 			Return the sampled value as-is.
 		</constant>
@@ -2289,9 +2389,6 @@
 		</constant>
 		<constant name="TEXTURE_SLICE_3D" value="2" enum="TextureSliceType">
 			3-dimensional texture slice.
-		</constant>
-		<constant name="TEXTURE_SLICE_2D_ARRAY" value="3" enum="TextureSliceType">
-			2-dimensional texture array slice.
 		</constant>
 		<constant name="SAMPLER_FILTER_NEAREST" value="0" enum="SamplerFilter">
 			Nearest-neighbor sampler filtering. Sampling at higher resolutions than the source will result in a pixelated look.
@@ -2374,9 +2471,12 @@
 			rd = RenderingServer.get_rendering_device()
 
 			if rd.has_feature(RenderingDevice.SUPPORTS_RAYTRACING_PIPELINE):
-				storage_buffer = rd.storage_buffer_create(bytes.size(), bytes, RenderingDevice.BUFFER_CREATION_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT)
+			    storage_buffer = rd.storage_buffer_create(bytes.size(), bytes, RenderingDevice.BUFFER_CREATION_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT)
 			[/gdscript]
 			[/codeblocks]
+		</constant>
+		<constant name="BUFFER_CREATION_ASYNC_COMPUTE_BIT" value="16" enum="BufferCreationBits" is_bitfield="true">
+			Buffer can be used by the asynchronous compute queue as well as the main queue (see [method async_compute_begin]). Supported by [method storage_buffer_create], [method uniform_buffer_create] and [method vertex_buffer_create]. Ignored when async compute is not supported.
 		</constant>
 		<constant name="ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT" value="1" enum="AccelerationStructureFlagBits" is_bitfield="true" experimental="">
 			Allows the acceleration structure to be updated after it has been built.
@@ -2777,7 +2877,13 @@
 		<constant name="SHADER_STAGE_INTERSECTION" value="9" enum="ShaderStage">
 			Intersection shader stage. The intersection shader for triangles is built-in. This can be used to compute ray intersections with primitives that are not triangles.
 		</constant>
-		<constant name="SHADER_STAGE_MAX" value="10" enum="ShaderStage">
+		<constant name="SHADER_STAGE_TASK" value="10" enum="ShaderStage">
+			Task shader stage (also known as amplification shader). Optional first stage of a mesh shader pipeline: decides how many mesh shader workgroups to launch (culling, level of detail) and passes them a payload. Written in a [code]#[task][/code] section of a shader file, using [code]GL_EXT_mesh_shader[/code].
+		</constant>
+		<constant name="SHADER_STAGE_MESH" value="11" enum="ShaderStage">
+			Mesh shader stage. Replaces the vertex (and tessellation) stages: each workgroup outputs a small mesh (vertices and primitives) that is rasterized. Written in a [code]#[mesh][/code] section of a shader file, using [code]GL_EXT_mesh_shader[/code]. Pipelines with this stage are drawn with [method draw_list_draw_mesh_tasks].
+		</constant>
+		<constant name="SHADER_STAGE_MAX" value="12" enum="ShaderStage">
 			Represents the size of the [enum ShaderStage] enum.
 		</constant>
 		<constant name="SHADER_STAGE_VERTEX_BIT" value="1" enum="ShaderStage">
@@ -2809,6 +2915,12 @@
 		</constant>
 		<constant name="SHADER_STAGE_INTERSECTION_BIT" value="512" enum="ShaderStage">
 			Intersection shader stage bit (see also [constant SHADER_STAGE_INTERSECTION]).
+		</constant>
+		<constant name="SHADER_STAGE_TASK_BIT" value="1024" enum="ShaderStage">
+			Task shader stage bit (see also [constant SHADER_STAGE_TASK]).
+		</constant>
+		<constant name="SHADER_STAGE_MESH_BIT" value="2048" enum="ShaderStage">
+			Mesh shader stage bit (see also [constant SHADER_STAGE_MESH]).
 		</constant>
 		<constant name="SHADER_LANGUAGE_GLSL" value="0" enum="ShaderLanguage">
 			Khronos' GLSL shading language (used natively by OpenGL and Vulkan). This is the language used for core Godot shaders.
@@ -2850,8 +2962,11 @@
 		<constant name="SUPPORTS_HDR_OUTPUT" value="13" enum="Features">
 			Support for high dynamic range (HDR) output.
 		</constant>
-		<constant name="SUPPORTS_RASTERIZATION_RATE_MAP" value="14" enum="Features">
-			Support for rasterization rate maps. The current implementation targets Metal on Apple platforms. This allows for foveated rendering, which is used by the visionOS XR module.
+		<constant name="SUPPORTS_MESH_SHADER" value="14" enum="Features">
+			Support for task and mesh shaders ([constant SHADER_STAGE_TASK], [constant SHADER_STAGE_MESH], [method draw_list_draw_mesh_tasks]). Available on Vulkan devices with [code]VK_EXT_mesh_shader[/code] (NVIDIA Turing and newer, AMD RDNA2 and newer, Intel Arc). Not supported on Direct3D 12 (the SPIR-V to DXIL translation has no mesh shader stages), Metal and OpenGL.
+		</constant>
+		<constant name="SUPPORTS_MESH_SHADER_INDIRECT_COUNT" value="15" enum="Features">
+			Support for [method draw_list_draw_mesh_tasks_indirect_count] (mesh shaders with a draw count read on the GPU).
 		</constant>
 		<constant name="LIMIT_MAX_BOUND_UNIFORM_SETS" value="0" enum="Limit">
 			Maximum number of uniform sets that can be bound at a given time.
@@ -2971,6 +3086,72 @@
 		<constant name="LIMIT_METALFX_TEMPORAL_SCALER_MAX_SCALE" value="47" enum="Limit">
 			Returns the largest value for [member ProjectSettings.rendering/scaling_3d/scale] when using the MetalFX temporal upscaler.
 			[b]Note:[/b] The returned value is multiplied by a factor of [code]1000000[/code] to preserve 6 digits of precision. It must be divided by [code]1000000.0[/code] to convert the value to a floating point number.
+		</constant>
+		<constant name="LIMIT_MAX_TASK_WORKGROUP_COUNT_X" value="49" enum="Limit">
+			Maximum number of task shader workgroups in the X dimension of a mesh tasks draw (the first stage receives the group counts). [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_TASK_WORKGROUP_COUNT_Y" value="50" enum="Limit">
+			Maximum number of task shader workgroups in the Y dimension of a mesh tasks draw. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_TASK_WORKGROUP_COUNT_Z" value="51" enum="Limit">
+			Maximum number of task shader workgroups in the Z dimension of a mesh tasks draw. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_TASK_WORKGROUP_TOTAL_COUNT" value="52" enum="Limit">
+			Maximum total number of task shader workgroups of a mesh tasks draw (X × Y × Z). [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_TASK_WORKGROUP_INVOCATIONS" value="53" enum="Limit">
+			Maximum number of invocations in a task shader workgroup. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_TASK_WORKGROUP_SIZE_X" value="54" enum="Limit">
+			Maximum size of a task shader workgroup in the X dimension. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_TASK_WORKGROUP_SIZE_Y" value="55" enum="Limit">
+			Maximum size of a task shader workgroup in the Y dimension. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_TASK_WORKGROUP_SIZE_Z" value="56" enum="Limit">
+			Maximum size of a task shader workgroup in the Z dimension. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_TASK_PAYLOAD_SIZE" value="57" enum="Limit">
+			Maximum size in bytes of the payload ([code]taskPayloadSharedEXT[/code]) a task shader passes to its mesh shader workgroups. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_WORKGROUP_COUNT_X" value="58" enum="Limit">
+			Maximum number of mesh shader workgroups in the X dimension (of a draw without a task stage, or launched by one task shader workgroup). [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_WORKGROUP_COUNT_Y" value="59" enum="Limit">
+			Maximum number of mesh shader workgroups in the Y dimension. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_WORKGROUP_COUNT_Z" value="60" enum="Limit">
+			Maximum number of mesh shader workgroups in the Z dimension. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_WORKGROUP_TOTAL_COUNT" value="61" enum="Limit">
+			Maximum total number of mesh shader workgroups (X × Y × Z). [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_WORKGROUP_INVOCATIONS" value="62" enum="Limit">
+			Maximum number of invocations in a mesh shader workgroup. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_WORKGROUP_SIZE_X" value="63" enum="Limit">
+			Maximum size of a mesh shader workgroup in the X dimension. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_WORKGROUP_SIZE_Y" value="64" enum="Limit">
+			Maximum size of a mesh shader workgroup in the Y dimension. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_WORKGROUP_SIZE_Z" value="65" enum="Limit">
+			Maximum size of a mesh shader workgroup in the Z dimension. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_OUTPUT_VERTICES" value="66" enum="Limit">
+			Maximum number of vertices a mesh shader workgroup can output ([code]max_vertices[/code]). [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_OUTPUT_PRIMITIVES" value="67" enum="Limit">
+			Maximum number of primitives a mesh shader workgroup can output ([code]max_primitives[/code]). [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_SHARED_MEMORY_SIZE" value="68" enum="Limit">
+			Maximum size in bytes of the shared memory of a mesh shader workgroup. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_PREFERRED_TASK_WORKGROUP_INVOCATIONS" value="69" enum="Limit">
+			Preferred maximum number of invocations in a task shader workgroup for best performance. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
+		</constant>
+		<constant name="LIMIT_MAX_MESH_PREFERRED_MESH_WORKGROUP_INVOCATIONS" value="70" enum="Limit">
+			Preferred maximum number of invocations in a mesh shader workgroup for best performance. [code]0[/code] when [constant SUPPORTS_MESH_SHADER] is not supported.
 		</constant>
 		<constant name="MEMORY_TEXTURES" value="0" enum="MemoryType">
 			Memory taken by textures.

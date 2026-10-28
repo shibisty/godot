@@ -945,3 +945,71 @@ RID RendererEnvironmentStorage::environment_get_color_correction(RID p_env) cons
 	ERR_FAIL_NULL_V(env, RID());
 	return env->color_correction;
 }
+
+// Path tracing (Mariner E5c)
+
+void RendererEnvironmentStorage::environment_set_pathtracing(RID p_env, bool p_enable, int p_debug_mode, int p_samples_per_pixel, int p_max_bounces, RSE::PathtracingDenoiser p_denoiser) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->pathtracing_enabled = p_enable;
+	env->pathtracing_debug_mode = CLAMP(p_debug_mode, 0, 22);
+	env->pathtracing_samples_per_pixel = CLAMP(p_samples_per_pixel, 1, 64);
+	env->pathtracing_max_bounces = CLAMP(p_max_bounces, 1, 8);
+	env->pathtracing_denoiser = p_denoiser;
+}
+
+void RendererEnvironmentStorage::environment_set_pathtracing_accumulation(RID p_env, bool p_accumulate, int p_max_samples, float p_firefly_clamp) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->pathtracing_accumulate = p_accumulate;
+	env->pathtracing_max_samples = MAX(p_max_samples, 0);
+	env->pathtracing_firefly_clamp = MAX(p_firefly_clamp, 0.0f);
+}
+
+bool RendererEnvironmentStorage::environment_get_pathtracing_enabled(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, false);
+	return env->pathtracing_enabled;
+}
+
+int RendererEnvironmentStorage::environment_get_pathtracing_debug_mode(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0);
+	return env->pathtracing_debug_mode;
+}
+
+int RendererEnvironmentStorage::environment_get_pathtracing_samples_per_pixel(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 1);
+	return env->pathtracing_samples_per_pixel;
+}
+
+int RendererEnvironmentStorage::environment_get_pathtracing_max_bounces(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 3);
+	return env->pathtracing_max_bounces;
+}
+
+RSE::PathtracingDenoiser RendererEnvironmentStorage::environment_get_pathtracing_denoiser(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, RSE::PT_DENOISER_NONE);
+	return env->pathtracing_denoiser;
+}
+
+bool RendererEnvironmentStorage::environment_get_pathtracing_accumulate(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, true);
+	return env->pathtracing_accumulate;
+}
+
+int RendererEnvironmentStorage::environment_get_pathtracing_max_samples(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0);
+	return env->pathtracing_max_samples;
+}
+
+float RendererEnvironmentStorage::environment_get_pathtracing_firefly_clamp(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0.0);
+	return env->pathtracing_firefly_clamp;
+}

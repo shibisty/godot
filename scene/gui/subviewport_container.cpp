@@ -38,7 +38,18 @@ Size2 SubViewportContainer::get_minimum_size() const {
 	if (stretch) {
 		return Size2();
 	}
-	return Container::_get_minimum_size();
+	Size2 ms;
+	for (int i = 0; i < get_child_count(); i++) {
+		SubViewport *c = Object::cast_to<SubViewport>(get_child(i));
+		if (!c) {
+			continue;
+		}
+
+		Size2 minsize = c->get_size();
+		ms = ms.max(minsize);
+	}
+
+	return ms;
 }
 
 void SubViewportContainer::set_stretch(bool p_enable) {
@@ -90,15 +101,11 @@ int SubViewportContainer::get_stretch_shrink() const {
 }
 
 Vector<int> SubViewportContainer::get_allowed_size_flags_horizontal() const {
-	Vector<int> flags;
-	flags.append(SIZE_MAXIMIZE);
-	return flags;
+	return Vector<int>();
 }
 
 Vector<int> SubViewportContainer::get_allowed_size_flags_vertical() const {
-	Vector<int> flags;
-	flags.append(SIZE_MAXIMIZE);
-	return flags;
+	return Vector<int>();
 }
 
 void SubViewportContainer::_notification(int p_what) {

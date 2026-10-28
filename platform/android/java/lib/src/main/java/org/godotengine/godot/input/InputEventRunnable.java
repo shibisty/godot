@@ -113,8 +113,7 @@ final class InputEventRunnable implements Runnable {
 		JOYSTICK_HAT,
 		JOYSTICK_CONNECTION_CHANGED,
 		KEY,
-		SENSOR,
-		DEVICE_ORIENTATION
+		SENSOR
 	}
 
 	private EventType currentEventType = null;
@@ -129,7 +128,6 @@ final class InputEventRunnable implements Runnable {
 	// common touch / mouse fields
 	private int eventAction;
 	private boolean doubleTap;
-	private boolean longPress;
 
 	// Mouse event fields and setter
 	private int buttonsMask;
@@ -137,8 +135,7 @@ final class InputEventRunnable implements Runnable {
 	private float pressure;
 	private float tiltX;
 	private float tiltY;
-	private boolean emulated;
-	void setMouseEvent(int eventAction, int buttonsMask, float x, float y, float deltaX, float deltaY, boolean doubleClick, boolean sourceMouseRelative, float pressure, float tiltX, float tiltY, boolean emulated) {
+	void setMouseEvent(int eventAction, int buttonsMask, float x, float y, float deltaX, float deltaY, boolean doubleClick, boolean sourceMouseRelative, float pressure, float tiltX, float tiltY) {
 		this.currentEventType = EventType.MOUSE;
 		this.eventAction = eventAction;
 		this.buttonsMask = buttonsMask;
@@ -151,18 +148,16 @@ final class InputEventRunnable implements Runnable {
 		this.pressure = pressure;
 		this.tiltX = tiltX;
 		this.tiltY = tiltY;
-		this.emulated = emulated;
 	}
 
 	// Touch event fields and setter
 	private int actionPointerId;
 	private int pointerCount;
 	private final float[] positions = new float[MAX_TOUCH_POINTER_COUNT * 6]; // pointerId1, x1, y1, pressure1, tiltX1, tiltY1, pointerId2, etc...
-	void setTouchEvent(MotionEvent event, int eventAction, boolean doubleTap, boolean longPress) {
+	void setTouchEvent(MotionEvent event, int eventAction, boolean doubleTap) {
 		this.currentEventType = EventType.TOUCH;
 		this.eventAction = eventAction;
 		this.doubleTap = doubleTap;
-		this.longPress = longPress;
 		this.actionPointerId = event.getPointerId(event.getActionIndex());
 		this.pointerCount = Math.min(event.getPointerCount(), MAX_TOUCH_POINTER_COUNT);
 		for (int i = 0; i < pointerCount; i++) {
@@ -262,19 +257,6 @@ final class InputEventRunnable implements Runnable {
 		this.rotatedValue2 = rotatedValue2;
 	}
 
-	// Device orientation event fields and setter
-	private float orientX;
-	private float orientY;
-	private float orientZ;
-	private float orientW;
-	void setOrientationEvent(float x, float y, float z, float w) {
-		this.currentEventType = EventType.DEVICE_ORIENTATION;
-		this.orientX = x;
-		this.orientY = y;
-		this.orientZ = z;
-		this.orientW = w;
-	}
-
 	@Override
 	public void run() {
 		try {
@@ -296,8 +278,7 @@ final class InputEventRunnable implements Runnable {
 							sourceMouseRelative,
 							pressure,
 							tiltX,
-							tiltY,
-							emulated);
+							tiltY);
 					break;
 
 				case TOUCH:
@@ -306,8 +287,7 @@ final class InputEventRunnable implements Runnable {
 							actionPointerId,
 							pointerCount,
 							positions,
-							doubleTap,
-							longPress);
+							doubleTap);
 					break;
 
 				case MAGNIFY:
@@ -356,10 +336,6 @@ final class InputEventRunnable implements Runnable {
 							GodotLib.gyroscope(rotatedValue0, rotatedValue1, rotatedValue2);
 							break;
 					}
-					break;
-
-				case DEVICE_ORIENTATION:
-					GodotLib.deviceOrientation(orientX, orientY, orientZ, orientW);
 					break;
 			}
 		} finally {

@@ -52,6 +52,7 @@ private:
 	float texture_mipmap_bias = 0.0;
 	bool use_taa = false;
 	bool use_debanding = false;
+	bool use_frame_generation = false; // Mariner E3: DLSS Frame Generation (Viewport.frame_generation).
 
 protected:
 	static void _bind_methods();
@@ -93,6 +94,9 @@ public:
 	bool get_use_debanding() const { return use_debanding; }
 	void set_use_debanding(bool p_use_debanding) { use_debanding = p_use_debanding; }
 
+	bool get_use_frame_generation() const { return use_frame_generation; }
+	void set_use_frame_generation(bool p_use_frame_generation) { use_frame_generation = p_use_frame_generation; }
+
 	RenderSceneBuffersConfiguration() {}
 	virtual ~RenderSceneBuffersConfiguration() {}
 };
@@ -114,4 +118,9 @@ public:
 	virtual void set_texture_mipmap_bias(float p_texture_mipmap_bias) = 0;
 	virtual void set_anisotropic_filtering_level(RSE::ViewportAnisotropicFiltering p_anisotropic_filtering_level) = 0;
 	virtual void set_use_debanding(bool p_use_debanding) = 0;
+
+	// Mariner E5c: path tracer accumulation (samples per pixel in the current image, 0 when the last frame of this
+	// viewport was not path traced) and its reset. Both may be called from any thread.
+	virtual uint32_t get_pathtracing_sample_count() const { return 0; }
+	virtual void reset_pathtracing() {}
 };

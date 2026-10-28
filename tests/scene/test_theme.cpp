@@ -51,7 +51,6 @@ public:
 		{ Theme::DATA_TYPE_FONT_SIZE, 42 },
 		{ Theme::DATA_TYPE_ICON, Ref<Texture>(memnew(ImageTexture)) },
 		{ Theme::DATA_TYPE_STYLEBOX, Ref<StyleBox>(memnew(StyleBoxFlat)) },
-		{ Theme::DATA_TYPE_SOUND, Ref<AudioStream>(memnew(AudioStream)) },
 	};
 
 	const StringName valid_item_name = "valid_item_name";

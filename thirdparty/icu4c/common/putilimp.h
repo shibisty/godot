@@ -107,8 +107,6 @@ typedef size_t uintptr_t;
    /* not defined */
 #elif U_PLATFORM == U_PF_HAIKU
    /* not defined */
-#elif defined(__wasi__)
-   /* not defined */
 #else
 #   define U_TZSET tzset
 #endif
@@ -134,8 +132,6 @@ typedef size_t uintptr_t;
    /* not defined */
 #elif U_PLATFORM == U_PF_IPHONE
    /* not defined */
-#elif defined(__wasi__)
-   /* not defined */
 #else
 #   define U_TIMEZONE timezone
 #endif
@@ -151,8 +147,6 @@ typedef size_t uintptr_t;
    /* not defined */
 #elif U_PLATFORM == U_PF_HAIKU
     /* not defined, (well it is but a loop back to icu) */
-#elif defined(__wasi__)
-   /* not defined */
 #else
 #   define U_TZNAME tzname
 #endif

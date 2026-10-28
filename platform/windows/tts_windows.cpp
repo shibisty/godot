@@ -30,8 +30,11 @@
 
 #include "tts_windows.h"
 
-#include "tts_driver_onecore.h"
 #include "tts_driver_sapi.h"
+
+#ifdef WINRT_ENABLED
+#include "tts_driver_onecore.h"
+#endif
 
 TTS_Windows *TTS_Windows::singleton = nullptr;
 
@@ -91,6 +94,7 @@ void TTS_Windows::process_events() {
 }
 
 TTS_Windows::TTS_Windows() {
+#ifdef WINRT_ENABLED
 	// Try OneCore driver.
 	if (!driver) {
 		driver = memnew(TTSDriverOneCore);
@@ -99,6 +103,7 @@ TTS_Windows::TTS_Windows() {
 			driver = nullptr;
 		}
 	}
+#endif
 	// Try SAPI driver.
 	if (!driver) {
 		driver = memnew(TTSDriverSAPI);
@@ -110,5 +115,7 @@ TTS_Windows::TTS_Windows() {
 }
 
 TTS_Windows::~TTS_Windows() {
-	memdelete(driver);
+	if (driver) {
+		memdelete(driver);
+	}
 }

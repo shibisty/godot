@@ -140,7 +140,7 @@ public:
      * U+000A, U+0020..U+007E.
      * @stable ICU 2.4
      */
-    virtual UnicodeString& toPattern(UnicodeString& result U_LIFETIME_BOUND,
+    virtual UnicodeString& toPattern(UnicodeString& result,
                                      UBool escapeUnprintable = false) const = 0;
 
     /**

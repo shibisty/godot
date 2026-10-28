@@ -40,7 +40,6 @@
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
 #include "scene/theme/theme_db.h"
-#include "servers/audio/audio_driver.h"
 #include "servers/audio/audio_server.h"
 #include "servers/display/accessibility_server.h"
 #include "servers/rendering/rendering_server.h"
@@ -57,22 +56,18 @@
 
 #ifndef NAVIGATION_2D_DISABLED
 #include "servers/navigation_2d/navigation_server_2d.h"
-#include "servers/navigation_2d/navigation_server_2d_manager.h"
 #endif // NAVIGATION_2D_DISABLED
 #ifndef NAVIGATION_3D_DISABLED
 #include "servers/navigation_3d/navigation_server_3d.h"
-#include "servers/navigation_3d/navigation_server_3d_manager.h"
 #endif // NAVIGATION_3D_DISABLED
 
 #ifndef PHYSICS_2D_DISABLED
 #include "servers/physics_2d/physics_server_2d.h"
 #include "servers/physics_2d/physics_server_2d_dummy.h"
-#include "servers/physics_2d/physics_server_2d_manager.h"
 #endif // PHYSICS_2D_DISABLED
 #ifndef PHYSICS_3D_DISABLED
 #include "servers/physics_3d/physics_server_3d.h"
 #include "servers/physics_3d/physics_server_3d_dummy.h"
-#include "servers/physics_3d/physics_server_3d_manager.h"
 #endif // PHYSICS_3D_DISABLED
 
 #include "modules/modules_tests.gen.h" // IWYU pragma: keep // TODO: Migrate module tests to compilation files.
@@ -102,18 +97,17 @@ int test_main(int argc, char *argv[]) {
 
 	// Run custom test tools.
 	if (test_commands) {
-		int res = 0;
 		for (const KeyValue<String, TestFunc> &E : (*test_commands)) {
 			if (args.find(E.key)) {
 				const TestFunc &test_func = E.value;
-				res = test_func();
+				test_func();
 				run_tests = false;
 				break;
 			}
 		}
 		if (!run_tests) {
 			delete test_commands;
-			return res;
+			return 0;
 		}
 	}
 	// Doctest runner.
@@ -177,7 +171,7 @@ struct GodotTestCaseListener : public doctest::IReporter {
 		reinitialize();
 
 		String name = String(p_in.m_name);
-		[[maybe_unused]] String suite_name = String(p_in.m_test_suite);
+		String suite_name = String(p_in.m_test_suite);
 
 		if (name.contains("[SceneTree]") || name.contains("[Editor]")) {
 			memnew(Input);
@@ -302,7 +296,9 @@ struct GodotTestCaseListener : public doctest::IReporter {
 			MessageQueue::get_singleton()->flush();
 		}
 
-		memdelete(SceneTree::get_singleton());
+		if (SceneTree::get_singleton()) {
+			memdelete(SceneTree::get_singleton());
+		}
 
 #ifndef NAVIGATION_3D_DISABLED
 		if (navigation_server_3d) {
@@ -334,15 +330,25 @@ struct GodotTestCaseListener : public doctest::IReporter {
 		}
 #endif // PHYSICS_2D_DISABLED
 
-		memdelete(Input::get_singleton());
+		if (Input::get_singleton()) {
+			memdelete(Input::get_singleton());
+		}
 
 		if (RenderingServer::get_singleton()) {
 			ThemeDB::get_singleton()->finalize_theme();
 		}
 
-		memdelete(AccessibilityServer::get_singleton());
-		memdelete(DisplayServer::get_singleton());
-		memdelete(InputMap::get_singleton());
+		if (AccessibilityServer::get_singleton()) {
+			memdelete(AccessibilityServer::get_singleton());
+		}
+
+		if (DisplayServer::get_singleton()) {
+			memdelete(DisplayServer::get_singleton());
+		}
+
+		if (InputMap::get_singleton()) {
+			memdelete(InputMap::get_singleton());
+		}
 
 		if (AudioServer::get_singleton()) {
 			AudioServer::get_singleton()->finish();

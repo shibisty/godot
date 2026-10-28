@@ -87,7 +87,7 @@ public:
      *
      * @stable ICU 64
      */
-    LocaleBuilder& setLocale(const Locale& locale) U_LIFETIME_BOUND;
+    LocaleBuilder& setLocale(const Locale& locale);
 
     /**
      * Resets the LocaleBuilder to match the provided IETF BCP 47 language tag.
@@ -104,7 +104,7 @@ public:
      * @return This builder.
      * @stable ICU 64
      */
-    LocaleBuilder& setLanguageTag(StringPiece tag) U_LIFETIME_BOUND;
+    LocaleBuilder& setLanguageTag(StringPiece tag);
 
     /**
      * Sets the language.  If <code>language</code> is the empty string, the
@@ -119,7 +119,7 @@ public:
      * @return This builder.
      * @stable ICU 64
      */
-    LocaleBuilder& setLanguage(StringPiece language) U_LIFETIME_BOUND;
+    LocaleBuilder& setLanguage(StringPiece language);
 
     /**
      * Sets the script. If <code>script</code> is the empty string, the script in
@@ -135,7 +135,7 @@ public:
      * @return This builder.
      * @stable ICU 64
      */
-    LocaleBuilder& setScript(StringPiece script) U_LIFETIME_BOUND;
+    LocaleBuilder& setScript(StringPiece script);
 
     /**
      * Sets the region.  If region is the empty string, the region in this
@@ -154,7 +154,7 @@ public:
      * @return This builder.
      * @stable ICU 64
      */
-    LocaleBuilder& setRegion(StringPiece region) U_LIFETIME_BOUND;
+    LocaleBuilder& setRegion(StringPiece region);
 
     /**
      * Sets the variant.  If variant is the empty string, the variant in this
@@ -175,7 +175,7 @@ public:
      * @return This builder.
      * @stable ICU 64
      */
-    LocaleBuilder& setVariant(StringPiece variant) U_LIFETIME_BOUND;
+    LocaleBuilder& setVariant(StringPiece variant);
 
     /**
      * Sets the extension for the given key. If the value is the empty string,
@@ -196,7 +196,7 @@ public:
      * @return This builder.
      * @stable ICU 64
      */
-    LocaleBuilder& setExtension(char key, StringPiece value) U_LIFETIME_BOUND;
+    LocaleBuilder& setExtension(char key, StringPiece value);
 
     /**
      * Sets the Unicode locale keyword type for the given key. If the type
@@ -216,7 +216,8 @@ public:
      * @return This builder.
      * @stable ICU 64
      */
-    LocaleBuilder& setUnicodeLocaleKeyword(StringPiece key, StringPiece type) U_LIFETIME_BOUND;
+    LocaleBuilder& setUnicodeLocaleKeyword(
+        StringPiece key, StringPiece type);
 
     /**
      * Adds a unicode locale attribute, if not already present, otherwise
@@ -228,7 +229,7 @@ public:
      * @return This builder.
      * @stable ICU 64
      */
-    LocaleBuilder& addUnicodeLocaleAttribute(StringPiece attribute) U_LIFETIME_BOUND;
+    LocaleBuilder& addUnicodeLocaleAttribute(StringPiece attribute);
 
     /**
      * Removes a unicode locale attribute, if present, otherwise has no
@@ -241,7 +242,7 @@ public:
      * @return This builder.
      * @stable ICU 64
      */
-    LocaleBuilder& removeUnicodeLocaleAttribute(StringPiece attribute) U_LIFETIME_BOUND;
+    LocaleBuilder& removeUnicodeLocaleAttribute(StringPiece attribute);
 
     /**
      * Resets the builder to its initial, empty state.
@@ -250,7 +251,7 @@ public:
      * @return this builder
      * @stable ICU 64
      */
-    LocaleBuilder& clear() U_LIFETIME_BOUND;
+    LocaleBuilder& clear();
 
     /**
      * Resets the extensions to their initial, empty state.
@@ -259,7 +260,7 @@ public:
      * @return this builder
      * @stable ICU 64
      */
-    LocaleBuilder& clearExtensions() U_LIFETIME_BOUND;
+    LocaleBuilder& clearExtensions();
 
     /**
      * Returns an instance of <code>Locale</code> created from the fields set

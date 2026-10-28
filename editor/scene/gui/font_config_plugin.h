@@ -213,8 +213,6 @@ public:
 	virtual Size2 get_minimum_size() const override;
 
 	void set_data(const Ref<Font> &p_f);
-
-	FontPreview();
 };
 
 /*************************************************************************/

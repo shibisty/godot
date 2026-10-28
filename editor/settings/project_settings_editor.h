@@ -70,7 +70,6 @@ class ProjectSettingsEditor : public AcceptDialog {
 	EditorAutoloadSettings *autoload_settings = nullptr;
 	ShaderGlobalsEditor *shaders_global_shader_uniforms_editor = nullptr;
 	GroupSettingsEditor *group_settings = nullptr;
-	TabContainer *addons_container = nullptr;
 	EditorPluginSettings *plugin_settings = nullptr;
 	ProjectSettingsGDExtension *gdextension_settings = nullptr;
 
@@ -152,7 +151,6 @@ public:
 	EditorAutoloadSettings *get_autoload_settings() { return autoload_settings; }
 	GroupSettingsEditor *get_group_settings() { return group_settings; }
 	TabContainer *get_tabs() { return tab_container; }
-	SectionedInspector *get_inspector() { return general_settings_inspector; }
 
 	void queue_save();
 	void connect_filesystem_dock_signals(FileSystemDock *p_fs_dock);

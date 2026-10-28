@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2026 The Khronos Group Inc.
+// Copyright (c) 2017-2025 The Khronos Group Inc.
 // Copyright (c) 2017-2019 Valve Corporation
 // Copyright (c) 2017-2019 LunarG, Inc.
 //
@@ -179,8 +179,13 @@ LoaderXrEnumerateInstanceExtensionProperties(const char *layerName, uint32_t pro
             return XR_ERROR_SIZE_INSUFFICIENT;
         }
 
+        uint32_t num_to_copy = num_extension_properties;
+        // Determine how many extension properties we can copy over
+        if (propertyCapacityInput < num_to_copy) {
+            num_to_copy = propertyCapacityInput;
+        }
         bool properties_valid = true;
-        for (uint32_t prop = 0; prop < num_extension_properties; ++prop) {
+        for (uint32_t prop = 0; prop < propertyCapacityInput && prop < extension_properties.size(); ++prop) {
             if (XR_TYPE_EXTENSION_PROPERTIES != properties[prop].type) {
                 properties_valid = false;
                 LoaderLogger::LogValidationErrorMessage("VUID-XrExtensionProperties-type-type",
@@ -196,7 +201,7 @@ LoaderXrEnumerateInstanceExtensionProperties(const char *layerName, uint32_t pro
             return XR_ERROR_VALIDATION_FAILURE;
         }
         if (nullptr != propertyCountOutput) {
-            *propertyCountOutput = num_extension_properties;
+            *propertyCountOutput = num_to_copy;
         }
     } else {
         // incoming_count is not 0 BUT the properties is NULL
@@ -346,6 +351,7 @@ static XRAPI_ATTR XrResult XRAPI_CALL LoaderXrDestroyInstance(XrInstance instanc
     // Get rid of the loader instance. This will make it possible to create another instance in the future.
     ActiveLoaderInstance::Remove();
 
+    // Lock the instance create/destroy mutex
     LoaderLogger::LogVerboseMessage("xrDestroyInstance", "Completed loader trampoline");
 
     // Finally, unload the runtime if necessary
@@ -371,7 +377,7 @@ static XrResult ValidateApplicationInfo(const XrApplicationInfo &info) {
     }
     if (strlen(info.applicationName) == 0) {
         LoaderLogger::LogErrorMessage("xrCreateInstance",
-                                      "VUID-XrApplicationInfo-applicationName-parameter: application name must not be empty.");
+                                      "VUID-XrApplicationInfo-engineName-parameter: application name can not be empty.");
         return XR_ERROR_NAME_INVALID;
     }
     return XR_SUCCESS;
@@ -725,9 +731,20 @@ XRAPI_ATTR XrResult XRAPI_CALL LoaderXrGetInstanceProcAddr(XrInstance instance, 
     *function = nullptr;
 
     LoaderInstance *loader_instance = nullptr;
-
-    if (instance != XR_NULL_HANDLE) {
-        // If we are given an instance handle, it should be the one we expect.
+    if (instance == XR_NULL_HANDLE) {
+        // Null instance is allowed for a few specific API entry points, otherwise return error
+        if (strcmp(name, "xrCreateInstance") != 0 && strcmp(name, "xrEnumerateApiLayerProperties") != 0 &&
+            strcmp(name, "xrEnumerateInstanceExtensionProperties") != 0 && strcmp(name, "xrInitializeLoaderKHR") != 0) {
+            // TODO why is xrGetInstanceProcAddr not listed in here?
+            std::string error_str = "XR_NULL_HANDLE for instance but query for ";
+            error_str += name;
+            error_str += " requires a valid instance";
+            LoaderLogger::LogValidationErrorMessage("VUID-xrGetInstanceProcAddr-instance-parameter", "xrGetInstanceProcAddr",
+                                                    error_str);
+            return XR_ERROR_HANDLE_INVALID;
+        }
+    } else {
+        // non null instance passed in, it should be our current instance
         XrResult result = ActiveLoaderInstance::Get(&loader_instance, "xrGetInstanceProcAddr");
         if (XR_FAILED(result)) {
             return result;
@@ -737,79 +754,56 @@ XRAPI_ATTR XrResult XRAPI_CALL LoaderXrGetInstanceProcAddr(XrInstance instance, 
         }
     }
 
-    // First we check for the functions that can be queried with a null instance.
-    if (strcmp(name, "xrInitializeLoaderKHR") == 0) {
-        *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderXrInitializeLoaderKHR);
-        return XR_SUCCESS;
-    }
-
-    if (strcmp(name, "xrEnumerateApiLayerProperties") == 0) {
-        *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderXrEnumerateApiLayerProperties);
-        return XR_SUCCESS;
-    }
-    if (strcmp(name, "xrEnumerateInstanceExtensionProperties") == 0) {
-        *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderXrEnumerateInstanceExtensionProperties);
-        return XR_SUCCESS;
-    }
-    if (strcmp(name, "xrCreateInstance") == 0) {
-        *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderXrCreateInstance);
-        return XR_SUCCESS;
-    }
-
-    // If we are still in this function, then it is invalid to pass XR_NULL_HANDLE for the instance param.
-    if (instance == XR_NULL_HANDLE) {
-        std::string error_str = "XR_NULL_HANDLE for instance but query for ";
-        error_str += name;
-        error_str += " requires a valid instance";
-        LoaderLogger::LogValidationErrorMessage("VUID-xrGetInstanceProcAddr-instance-parameter", "xrGetInstanceProcAddr",
-                                                error_str);
-        return XR_ERROR_HANDLE_INVALID;
-    }
-
-    // So by here, we know that instance is not null and not mismatching, and loader_instance is not null.
-
     // These functions must always go through the loader's implementation (trampoline).
     if (strcmp(name, "xrGetInstanceProcAddr") == 0) {
-        // TODO why are we requiring instance to be non-null for xrGetInstanceProcAddr?
         *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderXrGetInstanceProcAddr);
         return XR_SUCCESS;
-    }
-
-    if (strcmp(name, "xrDestroyInstance") == 0) {
+    } else if (strcmp(name, "xrInitializeLoaderKHR") == 0) {
+        *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderXrInitializeLoaderKHR);
+        return XR_SUCCESS;
+    } else if (strcmp(name, "xrEnumerateApiLayerProperties") == 0) {
+        *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderXrEnumerateApiLayerProperties);
+        return XR_SUCCESS;
+    } else if (strcmp(name, "xrEnumerateInstanceExtensionProperties") == 0) {
+        *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderXrEnumerateInstanceExtensionProperties);
+        return XR_SUCCESS;
+    } else if (strcmp(name, "xrCreateInstance") == 0) {
+        *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderXrCreateInstance);
+        return XR_SUCCESS;
+    } else if (strcmp(name, "xrDestroyInstance") == 0) {
         *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderXrDestroyInstance);
         return XR_SUCCESS;
     }
 
     // XR_EXT_debug_utils is built into the loader and handled partly through the xrGetInstanceProcAddress terminator,
     // but the check to see if the extension is enabled must be done here where ActiveLoaderInstance is safe to use.
-    {
-        PFN_xrVoidFunction debug_utils_function = nullptr;
+    if (*function == nullptr) {
         if (strcmp(name, "xrCreateDebugUtilsMessengerEXT") == 0) {
-            debug_utils_function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineCreateDebugUtilsMessengerEXT);
+            *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineCreateDebugUtilsMessengerEXT);
         } else if (strcmp(name, "xrDestroyDebugUtilsMessengerEXT") == 0) {
-            debug_utils_function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineDestroyDebugUtilsMessengerEXT);
+            *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineDestroyDebugUtilsMessengerEXT);
         } else if (strcmp(name, "xrSessionBeginDebugUtilsLabelRegionEXT") == 0) {
-            debug_utils_function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineSessionBeginDebugUtilsLabelRegionEXT);
+            *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineSessionBeginDebugUtilsLabelRegionEXT);
         } else if (strcmp(name, "xrSessionEndDebugUtilsLabelRegionEXT") == 0) {
-            debug_utils_function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineSessionEndDebugUtilsLabelRegionEXT);
+            *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineSessionEndDebugUtilsLabelRegionEXT);
         } else if (strcmp(name, "xrSessionInsertDebugUtilsLabelEXT") == 0) {
-            debug_utils_function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineSessionInsertDebugUtilsLabelEXT);
+            *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineSessionInsertDebugUtilsLabelEXT);
         } else if (strcmp(name, "xrSetDebugUtilsObjectNameEXT") == 0) {
-            debug_utils_function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineSetDebugUtilsObjectNameEXT);
+            *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineSetDebugUtilsObjectNameEXT);
         } else if (strcmp(name, "xrSubmitDebugUtilsMessageEXT") == 0) {
-            debug_utils_function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineSubmitDebugUtilsMessageEXT);
+            *function = reinterpret_cast<PFN_xrVoidFunction>(LoaderTrampolineSubmitDebugUtilsMessageEXT);
         }
 
-        if (debug_utils_function != nullptr) {
-            if (loader_instance->ExtensionIsEnabled("XR_EXT_debug_utils")) {
-                *function = debug_utils_function;
-
-                return XR_SUCCESS;
-            }
-
+        if (*function != nullptr && !loader_instance->ExtensionIsEnabled("XR_EXT_debug_utils")) {
             // The function matches one of the XR_EXT_debug_utils functions but the extension is not enabled.
+            *function = nullptr;
             return XR_ERROR_FUNCTION_UNSUPPORTED;
         }
+    }
+
+    if (*function != nullptr) {
+        // The loader has a trampoline or implementation of this function.
+        return XR_SUCCESS;
     }
 
     // If the function is not supported by the loader, call down to the next layer.

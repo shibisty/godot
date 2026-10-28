@@ -197,7 +197,7 @@ void HingeConstraint::CalculateRotationLimitsConstraintProperties(float inDeltaT
 {
 	// Apply constraint if outside of limits
 	if (mHasLimits && (mTheta <= mLimitsMin || mTheta >= mLimitsMax))
-		mRotationLimitsConstraintPart.CalculateConstraintPropertiesWithSettingsForLimit(inDeltaTime, *mBody1, *mBody2, mA1, 0.0f, GetSmallestAngleToLimit(), mLimitsSpringSettings);
+		mRotationLimitsConstraintPart.CalculateConstraintPropertiesWithSettings(inDeltaTime, *mBody1, *mBody2, mA1, 0.0f, GetSmallestAngleToLimit(), mLimitsSpringSettings);
 	else
 		mRotationLimitsConstraintPart.Deactivate();
 }
@@ -219,14 +219,7 @@ void HingeConstraint::CalculateMotorConstraintProperties(float inDeltaTime)
 
 	case EMotorState::Position:
 		if (mMotorSettings.mSpringSettings.HasStiffness())
-			mMotorConstraintPart.CalculateConstraintPropertiesWithSettingsForMotor(inDeltaTime, *mBody1, *mBody2, mA1, 0.0f, CenterAngleAroundZero(mTheta - mTargetAngle), mMotorSettings.mSpringSettings);
-		else
-			mMotorConstraintPart.Deactivate();
-		break;
-
-	case EMotorState::PositionAndVelocity:
-		if (mMotorSettings.mSpringSettings.HasStiffnessOrDamping())
-			mMotorConstraintPart.CalculateConstraintPropertiesWithSettingsForMotor(inDeltaTime, *mBody1, *mBody2, mA1, -mTargetAngularVelocity, CenterAngleAroundZero(mTheta - mTargetAngle), mMotorSettings.mSpringSettings);
+			mMotorConstraintPart.CalculateConstraintPropertiesWithSettings(inDeltaTime, *mBody1, *mBody2, mA1, 0.0f, CenterAngleAroundZero(mTheta - mTargetAngle), mMotorSettings.mSpringSettings);
 		else
 			mMotorConstraintPart.Deactivate();
 		break;
@@ -293,7 +286,6 @@ bool HingeConstraint::SolveVelocityConstraint(float inDeltaTime)
 
 		case EMotorState::Velocity:
 		case EMotorState::Position:
-		case EMotorState::PositionAndVelocity:
 			motor = mMotorConstraintPart.SolveVelocityConstraint(*mBody1, *mBody2, mA1, inDeltaTime * mMotorSettings.mMinTorqueLimit, inDeltaTime * mMotorSettings.mMaxTorqueLimit);
 			break;
 		}

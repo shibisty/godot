@@ -672,7 +672,9 @@ WorkerThreadPool::GroupID WorkerThreadPool::_add_group_task(const Callable &p_ca
 		group->done_semaphore.post();
 		group->tasks_used = 0;
 		p_tasks = 0;
-		memdelete(p_template_userdata);
+		if (p_template_userdata) {
+			memdelete(p_template_userdata);
+		}
 
 	} else {
 		group->tasks_used = p_tasks;
@@ -861,8 +863,10 @@ void WorkerThreadPool::finish() {
 
 	{
 		MutexLock lock(task_mutex);
-		for (const Task &task : low_priority_task_queue) {
-			print_error("Task waiting was never re-claimed: " + task.description);
+		SelfList<Task> *E = low_priority_task_queue.first();
+		while (E) {
+			print_error("Task waiting was never re-claimed: " + E->self()->description);
+			E = E->next();
 		}
 
 		_switch_runlevel(RUNLEVEL_EXIT);

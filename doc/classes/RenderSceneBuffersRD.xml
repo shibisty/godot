@@ -108,6 +108,58 @@
 				Returns the applied 3D MSAA mode for this viewport.
 			</description>
 		</method>
+		<method name="get_opaque_late_color" experimental="Part of the late opaque pass of a custom engine build.">
+			<return type="RID" />
+			<param index="0" name="layer" type="int" />
+			<description>
+				Returns the slice [param layer] of the copy of the scene color made right before the late opaque pass: the opaque and motion passes without surfaces whose shader uses [code]render_mode opaque_late[/code], before the sky is drawn (internal resolution, HDR, one mipmap level, separate specular not merged yet). Late opaque materials read the same texture through [code]hint_screen_texture[/code]. Returns an invalid RID when no late opaque surface was drawn this frame (see [method has_opaque_late_textures]).
+			</description>
+		</method>
+		<method name="get_opaque_late_depth" experimental="Part of the late opaque pass of a custom engine build.">
+			<return type="RID" />
+			<param index="0" name="layer" type="int" />
+			<description>
+				Returns the slice [param layer] of the copy of the depth buffer made right before the late opaque pass ([code]R32_SFLOAT[/code], same values as [method get_depth_layer]), i.e. the depth of the scene without late opaque surfaces. Late opaque materials read the same texture through [code]hint_depth_texture[/code]. Compared with [method get_depth_layer] (which includes them), it gives the thickness of a late surface such as water over what lies behind it. Returns an invalid RID when no late opaque surface was drawn this frame (see [method has_opaque_late_textures]).
+			</description>
+		</method>
+		<method name="get_raytracing_instance_buffer" qualifiers="const" experimental="Part of the raytracing scene of a custom engine build.">
+			<return type="RID" />
+			<description>
+				Returns the storage buffer with one 128-byte record per instance of the raytracing scene TLAS ([method get_raytracing_tlas]), indexed by the instance custom index ([code]rayQueryGetIntersectionInstanceCustomIndexEXT[/code]). Layout (std430): [code]uvec2 vertex_address, attribute_address, index_address, multimesh_address; uint vertex_count, position_stride, normal_byte_offset, normal_stride, tangent_byte_offset, tangent_stride, attribute_stride, uv_byte_offset, uv_scale_packed, index_format, primitive_count, flags; float aabb_size_x, aabb_size_y, aabb_size_z; uint color_byte_offset; float aabb_pos_x, aabb_pos_y, aabb_pos_z; uint layer_mask, mm_vertices_per_instance, mm_stride, mm_color_offset, mm_custom_offset;[/code]. Addresses are buffer device addresses of the mesh vertex, attribute and index buffers (read with [code]GL_EXT_buffer_reference[/code]); [code]0xFFFFFFFF[/code] offsets mean the attribute is missing. [code]index_format[/code]: 0 = uint16, 1 = uint32, 2 = not indexed. [code]flags[/code]: 1 = compressed positions (unorm16, the TLAS transform includes the AABB), 4 = skinned / blend shapes, 8 = merged MultiMesh (instance = vertex index / [code]mm_vertices_per_instance[/code]), 16 = one MultiMesh instance. [code]multimesh_address[/code] points at the MultiMesh instance data (12 transform floats, then color and custom data at [code]mm_color_offset[/code] / [code]mm_custom_offset[/code] floats). Returns an invalid RID when there is no raytracing scene this frame.
+			</description>
+		</method>
+		<method name="get_raytracing_instance_count" qualifiers="const" experimental="Part of the raytracing scene of a custom engine build.">
+			<return type="int" />
+			<description>
+				Returns the number of instances in the raytracing scene TLAS of this frame (one per mesh surface, merged MultiMesh surface or large-MultiMesh instance).
+			</description>
+		</method>
+		<method name="get_raytracing_material_buffer" qualifiers="const" experimental="Part of the raytracing scene of a custom engine build.">
+			<return type="RID" />
+			<description>
+				Returns the storage buffer with one 96-byte material record per TLAS instance (same indexing as [method get_raytracing_instance_buffer]). Layout (std430): [code]uint albedo_texture_idx, normal_texture_idx, orm_texture_idx, emission_texture_idx; vec4 albedo_color; vec3 emission_color; float emission_strength; float metallic, roughness, ao_strength; uint flags; vec2 uv1_scale, uv1_offset; float normal_map_depth, specular, alpha_scissor; uint cull_mode;[/code]. Colors are linear. Texture indices refer to [method get_raytracing_textures] (0 = white). [code]flags[/code]: 1 = normal map, 2 = emission texture, 4 = nearest filter, 8 = albedo uses vertex color, 16 = [ShaderMaterial] (parameters such as [code]albedo[/code], [code]roughness[/code], [code]metallic[/code], [code]emission[/code] are taken by name, custom shader code is not evaluated), 32 = unshaded. Transparent surfaces are not part of the scene.
+			</description>
+		</method>
+		<method name="get_raytracing_texture_uniform_set" experimental="Part of the raytracing scene of a custom engine build.">
+			<return type="RID" />
+			<param index="0" name="shader" type="RID" />
+			<param index="1" name="set" type="int" />
+			<description>
+				Returns a uniform set for [param shader] at index [param set] containing all material textures of the raytracing scene. The set must have a single binding: [code]layout(set = N, binding = 0) uniform texture2D textures[];[/code] (runtime-sized, index with [code]nonuniformEXT[/code]). The set is cached and recreated when textures change.
+			</description>
+		</method>
+		<method name="get_raytracing_textures" qualifiers="const" experimental="Part of the raytracing scene of a custom engine build.">
+			<return type="RID[]" />
+			<description>
+				Returns the material textures of the raytracing scene, indexed by the texture indices of [method get_raytracing_material_buffer]. Index 0 is a white texture.
+			</description>
+		</method>
+		<method name="get_raytracing_tlas" qualifiers="const" experimental="Part of the raytracing scene of a custom engine build.">
+			<return type="RID" />
+			<description>
+				Returns the top-level acceleration structure of the visible scene of this viewport, built at the start of the frame when [member Viewport.raytracing_scene_enabled] is [code]true[/code]. Bind it as [constant RenderingDevice.UNIFORM_TYPE_ACCELERATION_STRUCTURE] and trace it with [code]GL_EXT_ray_query[/code] in compute shaders of [CompositorEffect]s. The instance mask has bits 0-6 for render layers 1-7 and bit 7 for any of layers 8-20. Returns an invalid RID when there is no raytracing scene this frame (see [method has_raytracing_scene]).
+			</description>
+		</method>
 		<method name="get_render_target" qualifiers="const">
 			<return type="RID" />
 			<description>
@@ -220,6 +272,18 @@
 			<return type="int" />
 			<description>
 				Returns the view count for the associated viewport.
+			</description>
+		</method>
+		<method name="has_opaque_late_textures" qualifiers="const" experimental="Part of the late opaque pass of a custom engine build.">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the Forward+ renderer drew a late opaque pass for this viewport in the current frame, so [method get_opaque_late_color] and [method get_opaque_late_depth] are valid. Surfaces whose shader uses [code]render_mode opaque_late[/code] are drawn after all other opaque geometry (with a depth and normal-roughness pre-pass and motion vectors), and their [code]hint_screen_texture[/code] / [code]hint_depth_texture[/code] uniforms read the scene drawn before them; such materials stay opaque. Screen-space effects computed before the opaque pass (SSAO, SSIL, SSR) neither include nor shade late surfaces. With MSAA, in reflection probes and on the Mobile and Compatibility renderers there is no late pass: late surfaces are drawn with the other opaque geometry (Forward+) or, on Mobile and Compatibility, as transparent when they read the screen.
+			</description>
+		</method>
+		<method name="has_raytracing_scene" qualifiers="const" experimental="Part of the raytracing scene of a custom engine build.">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the raytracing scene (TLAS and instance data) was built for this frame. Requires [member Viewport.raytracing_scene_enabled], [member ProjectSettings.rendering/raytracing/scene_acceleration_structures], the Forward+ renderer and a Vulkan device with ray query support ([constant RenderingDevice.SUPPORTS_RAY_QUERY]).
 			</description>
 		</method>
 		<method name="has_texture" qualifiers="const">

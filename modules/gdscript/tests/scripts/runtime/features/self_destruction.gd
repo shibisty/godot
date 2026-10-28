@@ -7,7 +7,7 @@ class MyObj:
 		callable.call()
 
 	var prop:
-		set(_value):
+		set(value):
 			callable.call()
 		get:
 			callable.call()

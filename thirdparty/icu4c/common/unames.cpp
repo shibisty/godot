@@ -85,195 +85,6 @@ typedef struct {
     uint32_t tokenStringOffset, groupsOffset, groupStringOffset, algNamesOffset;
 } UCharNames;
 
-namespace {
-// For a character name `name`, a query string `query` matches `name` under UAX44-LM2 if and only if
-// the following returns true:
-//     auto matcher = CharacterNameQuery(query).matcher();
-//     for (const char c : name) {
-//         if (!matcher.consistentWith(c)) {
-//             return false;
-//         }
-//     }
-//     return matcher.matches();
-// `name` must be an exact character name, in particular, all uppercase, with no underscores, no
-// double hyphens, no isolated hyphens.  There are no constraints on `query`; for instance, this
-// class will match name="ZANABAZAR SQUARE LETTER -A" with query="Zanabazar-square_letter_-A".
-// `Matcher::consistentWith` is not retryable: once it returns false, the `Matcher` should not be
-// used again.
-class CharacterNameQuery {
-  public:
-    class Matcher {
-      public:
-        // `query` must outlive the constructed object.
-        Matcher(const CharacterNameQuery& query)
-            : query(query), skeletonIterator(query.skeleton.begin()) {}
-
-        bool consistentWith(char c) {
-            // Instead of constructing a skeleton from the name as in the constructor of
-            // CharacterNameQuery, we check character-by-character if the skeleton we would
-            // construct from the name would be consistent with `query->skeleton`.
-            // We require that this be called with characters from an actual character name, so we
-            // need not worry about case or underscores here.
-
-            if (skeletonIterator == query.skeleton.end()) {
-                return false;
-            }
-            if (c == ' ') {
-                // The last hyphen was word-final; check that there is a corresponding significant
-                // hyphen in the skeleton.  A hyphen in a character name cannot be both word-final
-                // and word-initial by rule R3 in
-                // https://unicode.org/versions/Unicode17.0.0/core-spec/chapter-4/#G135165, so we do
-                // not have to worry about checking the skeleton for the same significant hyphen
-                // twice.
-                if (lastChar == '-') {
-                    if (*skeletonIterator++ != lastChar) {
-                        return false;
-                    }
-                }
-                lastChar = c;
-                return true;
-            } else if (c == '-') {
-                if (lastChar == ' ' ||
-                    (query.is1180 && skeletonIterator == query.skeleton.end() - 2)) {
-                    // If lastChar == ' ', this is a word-initial hyphen, so we know it is
-                    // significant.  Check that we are expecting it.
-                    // If we are looking for U+1180 and we matched everything but the trailing -E,
-                    // this could be that hyphen; move past it.  This could turn out to be a
-                    // different character name if there is something other than E afterwards, in
-                    // which case we should in principle have ignored the hyphen; but then since the
-                    // suffixes will differ, we will return false anyway.
-                    // For example, when searching for HANGUL JUNGSEONG O-E and checking consistency
-                    // with HANGUL JUNGSEONG O-U, if we computed both skeleta and compared them,
-                    // the skeleta would be HANGULJUNGSEONGO-E and HANGULJUNGSEONGOU, and the
-                    // comparison would fail on - vs. U.
-                    // Here, while feeding HANGUL JUNGSEONG O-U character-by-character, we assume
-                    // its skeleton would be HANGULJUNGSEONGO-, and fail on E vs. U.
-                    if (*skeletonIterator++ != c) {
-                        return false;
-                    }
-                }
-                // If lastChar is not ' ', we do not know whether this hyphen is word-final, so we
-                // cannot check against the skeleton.
-                lastChar = c;
-                return true;
-            } else {
-                if (*skeletonIterator++ != c) {
-                    return false;
-                }
-                lastChar = c;
-                return true;
-            }
-        }
-
-        bool consistentWith(const std::string_view substring) {
-            for (const char c : substring) {
-                if (!consistentWith(c)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        bool matches() {
-            // If a character name could end with a HYPHEN-MINUS, that HYPHEN-MINUS would be
-            // significant: we would need to check that if lastChar == '-',
-            // *skeletonIterator == '-', and then advance skeletonIterator.
-            // However, this is disallowed by rule R3 in
-            // https://unicode.org/versions/Unicode17.0.0/core-spec/chapter-4/#G135165.
-            U_ASSERT(lastChar != '-');
-            return skeletonIterator == query.skeleton.end();
-        }
-
-        std::string_view remainingSignificantCharacters() const {
-            return query.skeleton.substr(skeletonIterator - query.skeleton.begin());
-        }
-
-      private:
-        const CharacterNameQuery& query;
-        std::string_view::const_iterator skeletonIterator;
-        // Initialized to ' ' so that a leading hyphen is treated like a hyphen that follows a
-        // space (non-medial and thus not ignorable).  There are in fact no leading hyphens in
-        // character names by rule R3 in
-        // https://unicode.org/versions/Unicode17.0.0/core-spec/chapter-4/#G135165, and technically
-        // we do not read the value of this variable before writing to it because the first call to
-        // consistentWith never has c=' ' either by R4, but it seems cleanest to initialize lastChar
-        // nonetheless.
-        char lastChar = ' ';
-    };
-
-    explicit CharacterNameQuery(std::string_view query) {
-        // Construct a skeleton obtained by
-        // 1. removing medial hyphens (except the one in the name of U+1180);
-        // 2. removing spaces and underscores;
-        // 3. uppercasing,
-        // as described in https://www.unicode.org/reports/tr44/#UAX44-LM2.
-        // We do all three in a single pass.
-        char *skeletonLimit = skeletonData;
-        for (std::size_t i = 0; i < query.length(); ++i) {
-            U_ASSERT(skeletonLimit < skeletonData + sizeof(skeletonData));
-            if (skeletonLimit >= skeletonData + sizeof(skeletonData)) {
-                // The caller should limit the query length appropriately; if they do not, assert,
-                // and if assertions are disabled, query for the empty string (which will quickly
-                // find nothing).
-                skeletonLimit = skeletonData;
-                break;
-            }
-            if (query[i] == ' ' || query[i] == '_') {
-                continue;
-            }
-            if (query[i] == '-') {
-                bool isMedial;
-                bool is1180MedialHyphen = false;
-                if (i == 0 || i == query.length() - 1) {
-                    isMedial = false;
-                } else {
-                    isMedial = isASCIILetterOrDigit(query[i - 1]) && isASCIILetterOrDigit(query[i + 1]);
-                }
-                // A medial hyphen is the hyphen in the name of U+1180 HANGUL JUNGSEONG O-E if what
-                // comes before skeletonizes to HANGULJUNGSEONGO and what comes after skeletonizes
-                // to E.
-                if (isMedial && uprv_toupper(query[i + 1]) == 'E' &&
-                    std::string_view(skeletonData, skeletonLimit - skeletonData) == "HANGULJUNGSEONGO") {
-                    is1180MedialHyphen = true;
-                    // If there is anything significant after the E, the part of the name after the
-                    // hyphen does not skeletonize to E, and thus this is not U+1180.
-                    // There can be no hyphens there: if there is one, it is either non-medial, or
-                    // there is another letter beyond the E.  The insignificant characters are thus
-                    // only spaces and underscores.
-                    for (std::size_t j = i + 2; j < query.length(); ++j) {
-                        if (query[j] != ' ' && query[j] != '_') {
-                            is1180MedialHyphen = false;
-                        }
-                    }
-                }
-                if (!isMedial || is1180MedialHyphen) {
-                    *skeletonLimit++ = query[i];
-                }
-            } else {
-                *skeletonLimit++ = uprv_toupper(query[i]);
-            }
-        }
-        skeleton = std::string_view(skeletonData, skeletonLimit - skeletonData);
-        // This can be true even if we never went through the is1180MedialHyphen path, e.g., if the
-        // query was "HANGUL JUNGSEONG O -E".
-        is1180 = skeleton == "HANGULJUNGSEONGO-E";
-    }
-
-    Matcher matcher() const {
-        return Matcher(*this);
-    }
-
-private:
-    static bool isASCIILetterOrDigit(const char c) {
-        return uprv_isASCIILetter(c) || (c >= '0' && c <= '9');
-    }
-
-    char skeletonData[120];
-    std::string_view skeleton;
-    bool is1180;
-};
-} // namespace
-
 /*
  * Get the groups table from a UCharNames struct.
  * The groups table consists of one uint16_t groupCount followed by
@@ -286,7 +97,7 @@ private:
 #define GET_GROUPS(names) (const uint16_t *)((const char *)names+names->groupsOffset)
 
 typedef struct {
-    const CharacterNameQuery *otherName;
+    const char *otherName;
     UChar32 code;
 } FindName;
 
@@ -482,6 +293,14 @@ expandName(UCharNames *names,
                     /* explicit letter */
                     WRITE_CHAR(buffer, bufferLength, bufferPos, c);
                 } else {
+                    /* stop, but skip the semicolon if we are seeking
+                       extended names and there was no 2.0 name but there
+                       is a 1.0 name. */
+                    if(!bufferPos && nameChoice == U_EXTENDED_CHAR_NAME) {
+                        if (static_cast<uint8_t>(';') >= tokenCount || tokens[static_cast<uint8_t>(';')] == static_cast<uint16_t>(-1)) {
+                            continue;
+                        }
+                    }
                     /* finished */
                     break;
                 }
@@ -511,12 +330,12 @@ expandName(UCharNames *names,
 static UBool
 compareName(UCharNames *names,
             const uint8_t *name, uint16_t nameLength, UCharNameChoice nameChoice,
-            const CharacterNameQuery& otherName) {
+            const char *otherName) {
     uint16_t* tokens = reinterpret_cast<uint16_t*>(names) + 8;
     uint16_t token, tokenCount=*tokens++;
     uint8_t* tokenStrings = reinterpret_cast<uint8_t*>(names) + names->tokenStringOffset;
     uint8_t c;
-    auto matcher = otherName.matcher();
+    const char *origOtherName = otherName;
 
     if(nameChoice!=U_UNICODE_CHAR_NAME && nameChoice!=U_EXTENDED_CHAR_NAME) {
         /*
@@ -551,7 +370,7 @@ compareName(UCharNames *names,
         if(c>=tokenCount) {
             if(c!=';') {
                 /* implicit letter */
-                if (!matcher.consistentWith(c)) {
+                if (static_cast<char>(c) != *otherName++) {
                     return false;
                 }
             } else {
@@ -568,24 +387,35 @@ compareName(UCharNames *names,
             if (token == static_cast<uint16_t>(-1)) {
                 if(c!=';') {
                     /* explicit letter */
-                    if (!matcher.consistentWith(c)) {
+                    if (static_cast<char>(c) != *otherName++) {
                         return false;
                     }
                 } else {
+                    /* stop, but skip the semicolon if we are seeking
+                       extended names and there was no 2.0 name but there
+                       is a 1.0 name. */
+                    if(otherName == origOtherName && nameChoice == U_EXTENDED_CHAR_NAME) {
+                        if (static_cast<uint8_t>(';') >= tokenCount || tokens[static_cast<uint8_t>(';')] == static_cast<uint16_t>(-1)) {
+                            continue;
+                        }
+                    }
                     /* finished */
                     break;
                 }
             } else {
                 /* write token word */
-                if (!matcher.consistentWith(reinterpret_cast<const char *>(tokenStrings + token))) {
-                    return false;
+                uint8_t *tokenString=tokenStrings+token;
+                while((c=*tokenString++)!=0) {
+                    if (static_cast<char>(c) != *otherName++) {
+                        return false;
+                    }
                 }
             }
         }
     }
 
     /* complete match? */
-    return matcher.matches();
+    return *otherName == 0;
 }
 
 static uint8_t getCharCat(UChar32 cp) {
@@ -792,7 +622,7 @@ enumGroupNames(UCharNames *names, const uint16_t *group,
             ++start;
         }
     } else {
-        const CharacterNameQuery& otherName = *static_cast<FindName*>(context)->otherName;
+        const char* otherName = static_cast<FindName*>(context)->otherName;
         while(start<=end) {
             if(compareName(names, s+offsets[start&GROUP_MASK], lengths[start&GROUP_MASK], nameChoice, otherName)) {
                 static_cast<FindName*>(context)->code = start;
@@ -1245,9 +1075,8 @@ enumAlgNames(AlgorithmicRange *range,
  * It returns 0xffff otherwise.
  */
 static UChar32
-findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, CharacterNameQuery& query) {
+findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, const char *otherName) {
     UChar32 code;
-    auto matcher = query.matcher();
 
     if(nameChoice!=U_UNICODE_CHAR_NAME && nameChoice!=U_EXTENDED_CHAR_NAME) {
         return 0xffff;
@@ -1257,15 +1086,22 @@ findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, CharacterNameQu
     case 0: {
         /* name = prefix hex-digits */
         const char* s = reinterpret_cast<const char*>(range + 1);
+        char c;
+
+        uint16_t i, count;
 
         /* compare prefix */
-        if (!matcher.consistentWith(s)) {
-            return 0xffff;
+        while((c=*s++)!=0) {
+            if (c != *otherName++) {
+                return 0xffff;
+            }
         }
 
         /* read hexadecimal code point value */
+        count=range->variant;
         code=0;
-        for(char c : matcher.remainingSignificantCharacters()) {
+        for(i=0; i<count; ++i) {
+            c=*otherName++;
             if('0'<=c && c<='9') {
                 code=(code<<4)|(c-'0');
             } else if('A'<=c && c<='F') {
@@ -1276,7 +1112,7 @@ findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, CharacterNameQu
         }
 
         /* does it fit into the range? */
-        if (range->start <= static_cast<uint32_t>(code) && static_cast<uint32_t>(code) <= range->end) {
+        if (*otherName == 0 && range->start <= static_cast<uint32_t>(code) && static_cast<uint32_t>(code) <= range->end) {
             return code;
         }
         break;
@@ -1287,32 +1123,30 @@ findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, CharacterNameQu
         const char *elementBases[8], *elements[8];
         const uint16_t* factors = reinterpret_cast<const uint16_t*>(range + 1);
         uint16_t count=range->variant;
-        const char *s = reinterpret_cast<const char*>(factors + count);
+        const char *s = reinterpret_cast<const char*>(factors + count), *t;
         UChar32 start, limit;
         uint16_t i, idx;
+
+        char c;
 
         /* name = prefix factorized-elements */
 
         /* compare prefix */
-        std::string_view prefix = s;
-        if (!matcher.consistentWith(prefix)) {
-            return 0xffff;
+        while((c=*s++)!=0) {
+            if (c != *otherName++) {
+                return 0xffff;
+            }
         }
-
-        s += prefix.length() + 1;
 
         start = static_cast<UChar32>(range->start);
         limit = static_cast<UChar32>(range->end + 1);
-        
-        // This implementation assumes that the suffix does not contain SPACEs nor HYPHEN-MINUSes,
-        // which is the case in practice for the names of Hangul syllables.
-        std::string_view querySuffix = matcher.remainingSignificantCharacters();
+
         /* initialize the suffix elements for enumeration; indexes should all be set to 0 */
         writeFactorSuffix(factors, count, s, 0,
                           indexes, elementBases, elements, buffer, sizeof(buffer));
 
         /* compare the first suffix */
-        if(querySuffix == buffer) {
+        if(0==uprv_strcmp(otherName, buffer)) {
             return start;
         }
 
@@ -1337,18 +1171,17 @@ findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, CharacterNameQu
             }
 
             /* to make matters a little easier, just compare all elements of the suffix */
-            auto it = querySuffix.begin();
+            t=otherName;
             for(i=0; i<count; ++i) {
                 s=elements[i];
-                char c;
                 while((c=*s++)!=0) {
-                    if(it == querySuffix.end() || c!=*it++) {
+                    if(c!=*t++) {
                         s=""; /* does not match */
                         i=99;
                     }
                 }
             }
-            if(i<99 && it == querySuffix.end()) {
+            if(i<99 && *t==0) {
                 return start;
             }
         }
@@ -1684,8 +1517,9 @@ u_getISOComment(UChar32 /*c*/,
 
 U_CAPI UChar32 U_EXPORT2
 u_charFromName(UCharNameChoice nameChoice,
-               const char *const name,
+               const char *name,
                UErrorCode *pErrorCode) {
+    char upper[120] = {0};
     char lower[120] = {0};
     FindName findName;
     AlgorithmicRange *algRange;
@@ -1708,26 +1542,24 @@ u_charFromName(UCharNameChoice nameChoice,
         return error;
     }
 
-    /* construct the lowercase of the name first */
-    const char* nameChar = name;
-    for(i=0; i<sizeof(lower); ++i) {
-        if((c0=*nameChar++)!=0) {
+    /* construct the uppercase and lowercase of the name first */
+    for(i=0; i<sizeof(upper); ++i) {
+        if((c0=*name++)!=0) {
+            upper[i]=uprv_toupper(c0);
             lower[i]=uprv_tolower(c0);
         } else {
+            upper[i]=lower[i]=0;
             break;
         }
     }
-    if(i==sizeof(lower)) {
+    if(i==sizeof(upper)) {
         /* name too long, there is no such character */
         *pErrorCode = U_ILLEGAL_CHAR_FOUND;
         return error;
     }
-    // i==strlen(name)==strlen(lower)
+    // i==strlen(name)==strlen(lower)==strlen(upper)
 
     /* try extended names first */
-    // The ICU extended names are not consistent with the UAX44 code point labels, e.g.,
-    // "unassigned" vs. UAX44 "reserved", "private use area" vs. UAX44 "private-use", so we do not
-    // apply UAX44-LM2 matching to them.
     if (lower[0] == '<') {
         if (nameChoice == U_EXTENDED_CHAR_NAME && lower[--i] == '>') {
             // Parse a string like "<category-HHHH>" where HHHH is a hex code point.
@@ -1777,15 +1609,12 @@ u_charFromName(UCharNameChoice nameChoice,
         return error;
     }
 
-    // From now on we do UAX44 matching.
-    CharacterNameQuery query(name);
-
     /* try algorithmic names now */
     p=(uint32_t *)((uint8_t *)uCharNames+uCharNames->algNamesOffset);
     i=*p;
     algRange=(AlgorithmicRange *)(p+1);
     while(i>0) {
-        if((cp=findAlgName(algRange, nameChoice, query))!=0xffff) {
+        if((cp=findAlgName(algRange, nameChoice, upper))!=0xffff) {
             return cp;
         }
         algRange=(AlgorithmicRange *)((uint8_t *)algRange+algRange->size);
@@ -1793,7 +1622,7 @@ u_charFromName(UCharNameChoice nameChoice,
     }
 
     /* normal character name */
-    findName.otherName=&query;
+    findName.otherName=upper;
     findName.code=error;
     enumNames(uCharNames, 0, UCHAR_MAX_VALUE + 1, DO_FIND_NAME, &findName, nameChoice);
     if (findName.code == error) {

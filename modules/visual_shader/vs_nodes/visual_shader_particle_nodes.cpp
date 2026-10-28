@@ -94,6 +94,9 @@ void VisualShaderNodeParticleEmitter::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mode_2d"), "set_mode_2d", "is_mode_2d");
 }
 
+VisualShaderNodeParticleEmitter::VisualShaderNodeParticleEmitter() {
+}
+
 // VisualShaderNodeParticleSphereEmitter
 
 String VisualShaderNodeParticleSphereEmitter::get_caption() const {
@@ -416,39 +419,39 @@ String VisualShaderNodeParticleMeshEmitter::generate_code(Shader::Mode p_mode, V
 	return code;
 }
 
-Vector<ShaderGraph::DefaultTextureParam> VisualShaderNodeParticleMeshEmitter::get_default_texture_parameters(VisualShader::Type p_type, int p_id) const {
-	Vector<ShaderGraph::DefaultTextureParam> ret;
+Vector<VisualShader::DefaultTextureParam> VisualShaderNodeParticleMeshEmitter::get_default_texture_parameters(VisualShader::Type p_type, int p_id) const {
+	Vector<VisualShader::DefaultTextureParam> ret;
 
 	if (is_output_port_connected(0)) {
-		ShaderGraph::DefaultTextureParam dtp;
+		VisualShader::DefaultTextureParam dtp;
 		dtp.name = make_unique_id(p_type, p_id, "mesh_vx");
 		dtp.params.push_back(position_texture);
 		ret.push_back(dtp);
 	}
 
 	if (is_output_port_connected(1)) {
-		ShaderGraph::DefaultTextureParam dtp;
+		VisualShader::DefaultTextureParam dtp;
 		dtp.name = make_unique_id(p_type, p_id, "mesh_nm");
 		dtp.params.push_back(normal_texture);
 		ret.push_back(dtp);
 	}
 
 	if (is_output_port_connected(2) || is_output_port_connected(3)) {
-		ShaderGraph::DefaultTextureParam dtp;
+		VisualShader::DefaultTextureParam dtp;
 		dtp.name = make_unique_id(p_type, p_id, "mesh_col");
 		dtp.params.push_back(color_texture);
 		ret.push_back(dtp);
 	}
 
 	if (is_output_port_connected(4)) {
-		ShaderGraph::DefaultTextureParam dtp;
+		VisualShader::DefaultTextureParam dtp;
 		dtp.name = make_unique_id(p_type, p_id, "mesh_uv");
 		dtp.params.push_back(uv_texture);
 		ret.push_back(dtp);
 	}
 
 	if (is_output_port_connected(5)) {
-		ShaderGraph::DefaultTextureParam dtp;
+		VisualShader::DefaultTextureParam dtp;
 		dtp.name = make_unique_id(p_type, p_id, "mesh_uv2");
 		dtp.params.push_back(uv2_texture);
 		ret.push_back(dtp);
@@ -1428,6 +1431,9 @@ String VisualShaderNodeParticleOutput::generate_code(Shader::Mode p_mode, Visual
 		}
 	}
 	return code;
+}
+
+VisualShaderNodeParticleOutput::VisualShaderNodeParticleOutput() {
 }
 
 // EmitParticle

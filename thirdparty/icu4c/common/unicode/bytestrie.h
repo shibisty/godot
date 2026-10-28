@@ -68,7 +68,7 @@ public:
      * @param trieBytes The byte array that contains the serialized trie.
      * @stable ICU 4.8
      */
-    BytesTrie(const void* trieBytes U_LIFETIME_BOUND)
+    BytesTrie(const void *trieBytes)
             : ownedArray_(nullptr), bytes_(static_cast<const uint8_t *>(trieBytes)),
               pos_(bytes_), remainingMatchLength_(-1) {}
 
@@ -93,7 +93,7 @@ public:
      * @return *this
      * @stable ICU 4.8
      */
-    BytesTrie& reset() U_LIFETIME_BOUND {
+    BytesTrie &reset() {
         pos_=bytes_;
         remainingMatchLength_=-1;
         return *this;
@@ -126,7 +126,7 @@ public:
      * @see reset
      * @stable ICU 65
      */
-    BytesTrie& resetToState64(uint64_t state) U_LIFETIME_BOUND {
+    BytesTrie &resetToState64(uint64_t state) {
         remainingMatchLength_ = static_cast<int32_t>(state >> kState64RemainingShift) - 2;
         pos_ = bytes_ + (state & kState64PosMask);
         return *this;
@@ -159,7 +159,7 @@ public:
      * @see resetToState
      * @stable ICU 4.8
      */
-    const BytesTrie& saveState(State& state) const U_LIFETIME_BOUND {
+    const BytesTrie &saveState(State &state) const {
         state.bytes=bytes_;
         state.pos=pos_;
         state.remainingMatchLength=remainingMatchLength_;
@@ -176,7 +176,7 @@ public:
      * @see reset
      * @stable ICU 4.8
      */
-    BytesTrie& resetToState(const State& state) U_LIFETIME_BOUND {
+    BytesTrie &resetToState(const State &state) {
         if(bytes_==state.bytes && bytes_!=nullptr) {
             pos_=state.pos;
             remainingMatchLength_=state.remainingMatchLength;
@@ -292,9 +292,7 @@ public:
          *                  function chaining. (See User Guide for details.)
          * @stable ICU 4.8
          */
-        Iterator(const void* trieBytes U_LIFETIME_BOUND,
-                 int32_t maxStringLength,
-                 UErrorCode& errorCode);
+        Iterator(const void *trieBytes, int32_t maxStringLength, UErrorCode &errorCode);
 
         /**
          * Iterates from the current state of the specified BytesTrie.
@@ -320,7 +318,7 @@ public:
          * @return *this
          * @stable ICU 4.8
          */
-        Iterator& reset() U_LIFETIME_BOUND;
+        Iterator &reset();
 
         /**
          * @return true if there are more elements.
@@ -348,7 +346,7 @@ public:
          * @return The NUL-terminated byte sequence for the last successful next().
          * @stable ICU 4.8
          */
-        StringPiece getString() const U_LIFETIME_BOUND;
+        StringPiece getString() const;
         /**
          * @return The value for the last successful next().
          * @stable ICU 4.8
@@ -358,9 +356,7 @@ public:
     private:
         UBool truncateAndStop();
 
-        const uint8_t* branchNext(const uint8_t* pos U_LIFETIME_BOUND,
-                                  int32_t length,
-                                  UErrorCode& errorCode);
+        const uint8_t *branchNext(const uint8_t *pos, int32_t length, UErrorCode &errorCode);
 
         const uint8_t *bytes_;
         const uint8_t *pos_;
@@ -407,7 +403,7 @@ private:
     // Reads a compact 32-bit integer.
     // pos is already after the leadByte, and the lead byte is already shifted right by 1.
     static int32_t readValue(const uint8_t *pos, int32_t leadByte);
-    static inline const uint8_t* skipValue(const uint8_t* pos U_LIFETIME_BOUND, int32_t leadByte) {
+    static inline const uint8_t *skipValue(const uint8_t *pos, int32_t leadByte) {
         // U_ASSERT(leadByte>=kMinValueLead);
         if(leadByte>=(kMinTwoByteValueLead<<1)) {
             if(leadByte<(kMinThreeByteValueLead<<1)) {
@@ -420,15 +416,15 @@ private:
         }
         return pos;
     }
-    static inline const uint8_t* skipValue(const uint8_t* pos U_LIFETIME_BOUND) {
+    static inline const uint8_t *skipValue(const uint8_t *pos) {
         int32_t leadByte=*pos++;
         return skipValue(pos, leadByte);
     }
 
     // Reads a jump delta and jumps.
-    static const uint8_t* jumpByDelta(const uint8_t* pos U_LIFETIME_BOUND);
+    static const uint8_t *jumpByDelta(const uint8_t *pos);
 
-    static inline const uint8_t* skipDelta(const uint8_t* pos U_LIFETIME_BOUND) {
+    static inline const uint8_t *skipDelta(const uint8_t *pos) {
         int32_t delta=*pos++;
         if(delta>=kMinTwoByteDeltaLead) {
             if(delta<kMinThreeByteDeltaLead) {
@@ -455,10 +451,8 @@ private:
     // Helper functions for hasUniqueValue().
     // Recursively finds a unique value (or whether there is not a unique one)
     // from a branch.
-    static const uint8_t* findUniqueValueFromBranch(const uint8_t* pos U_LIFETIME_BOUND,
-                                                    int32_t length,
-                                                    UBool haveUniqueValue,
-                                                    int32_t& uniqueValue);
+    static const uint8_t *findUniqueValueFromBranch(const uint8_t *pos, int32_t length,
+                                                    UBool haveUniqueValue, int32_t &uniqueValue);
     // Recursively finds a unique value (or whether there is not a unique one)
     // starting from a position on a node lead byte.
     static UBool findUniqueValue(const uint8_t *pos, UBool haveUniqueValue, int32_t &uniqueValue);

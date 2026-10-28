@@ -31,7 +31,7 @@
 #pragma once
 
 #include "scene/2d/node_2d.h"
-#include "servers/audio/audio_server_enums.h"
+#include "servers/audio/audio_server.h"
 
 struct AudioFrame;
 class AudioStream;
@@ -58,7 +58,7 @@ private:
 	uint64_t last_mix_count = -1;
 	bool force_update_panning = false;
 
-	AuSE::PlaybackType playback_type = AuSE::PlaybackType::PLAYBACK_TYPE_DEFAULT;
+	AudioServer::PlaybackType playback_type = AudioServer::PlaybackType::PLAYBACK_TYPE_DEFAULT;
 
 	void _set_playing(bool p_enable);
 	bool _is_active() const;
@@ -77,6 +77,7 @@ private:
 	float cached_global_panning_strength = 0.5f;
 
 protected:
+	void _validate_property(PropertyInfo &p_property) const;
 	void _notification(int p_what);
 	static void _bind_methods();
 
@@ -135,8 +136,8 @@ public:
 	bool has_stream_playback();
 	Ref<AudioStreamPlayback> get_stream_playback();
 
-	AuSE::PlaybackType get_playback_type() const;
-	void set_playback_type(AuSE::PlaybackType p_playback_type);
+	AudioServer::PlaybackType get_playback_type() const;
+	void set_playback_type(AudioServer::PlaybackType p_playback_type);
 
 	AudioStreamPlayer2D();
 	~AudioStreamPlayer2D();

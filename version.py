@@ -1,9 +1,9 @@
 short_name = "godot"
 name = "Godot Engine"
 major = 4
-minor = 8
-patch = 0
-status = "beta"
+minor = 7
+patch = 2
+status = "stable"
 module_config = ""
 website = "https://godotengine.org"
-docs = "latest"
+docs = "4.7"

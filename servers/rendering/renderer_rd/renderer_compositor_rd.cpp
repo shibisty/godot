@@ -34,10 +34,65 @@
 #include "core/config/project_settings.h"
 #include "core/io/dir_access.h"
 #include "core/os/os.h"
+#include "drivers/streamline/streamline.h"
 #include "servers/display/display_server.h"
+#include "servers/rendering/renderer_rd/effects/dlss.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h"
 #include "servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.h"
 #include "servers/rendering/rendering_server_types.h"
+
+RID RendererCompositorRD::_get_render_target_blit_uniform_set(RID p_rd_texture) {
+	HashMap<RID, RID>::Iterator it = render_target_descriptors.find(p_rd_texture);
+	if (it == render_target_descriptors.end() || !RD::get_singleton()->uniform_set_is_valid(it->value)) {
+		Vector<RD::Uniform> uniforms;
+		RD::Uniform u;
+		u.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+		u.binding = 0;
+		u.append_id(blit.sampler);
+		u.append_id(p_rd_texture);
+		uniforms.push_back(u);
+		RID uniform_set = RD::get_singleton()->uniform_set_create(uniforms, blit.shader.version_get_shader(blit.shader_version, BLIT_MODE_NORMAL), 0);
+
+		it = render_target_descriptors.insert(p_rd_texture, uniform_set);
+	}
+	return it->value;
+}
+
+RendererCompositorRD::BlitMode RendererCompositorRD::_set_blit_push_constant(const RenderingServerTypes::BlitToScreen &p_blit, Size2 p_screen_size, int p_screen_rotation_degrees, RD::ColorSpace p_color_space, float p_reference_multiplier, float p_output_max_value) {
+	BlitMode mode = p_blit.lens_distortion.apply ? BLIT_MODE_LENS : (p_blit.multi_view.use_layer ? BLIT_MODE_USE_LAYER : BLIT_MODE_NORMAL);
+
+	// We need to invert the phone rotation.
+	const int screen_rotation_degrees = -p_screen_rotation_degrees;
+	float screen_rotation = Math::deg_to_rad((float)screen_rotation_degrees);
+
+	blit.push_constant.rotation_cos = Math::cos(screen_rotation);
+	blit.push_constant.rotation_sin = Math::sin(screen_rotation);
+	// Swap width and height when the orientation is not the native one.
+	if (screen_rotation_degrees % 180 != 0) {
+		SWAP(p_screen_size.width, p_screen_size.height);
+	}
+	blit.push_constant.src_rect[0] = p_blit.src_rect.position.x;
+	blit.push_constant.src_rect[1] = p_blit.src_rect.position.y;
+	blit.push_constant.src_rect[2] = p_blit.src_rect.size.width;
+	blit.push_constant.src_rect[3] = p_blit.src_rect.size.height;
+	blit.push_constant.dst_rect[0] = p_blit.dst_rect.position.x / p_screen_size.width;
+	blit.push_constant.dst_rect[1] = p_blit.dst_rect.position.y / p_screen_size.height;
+	blit.push_constant.dst_rect[2] = p_blit.dst_rect.size.width / p_screen_size.width;
+	blit.push_constant.dst_rect[3] = p_blit.dst_rect.size.height / p_screen_size.height;
+	blit.push_constant.layer = p_blit.multi_view.layer;
+	blit.push_constant.eye_center[0] = p_blit.lens_distortion.eye_center.x;
+	blit.push_constant.eye_center[1] = p_blit.lens_distortion.eye_center.y;
+	blit.push_constant.k1 = p_blit.lens_distortion.k1;
+	blit.push_constant.k2 = p_blit.lens_distortion.k2;
+	blit.push_constant.upscale = p_blit.lens_distortion.upscale;
+	blit.push_constant.aspect_ratio = p_blit.lens_distortion.aspect_ratio;
+	blit.push_constant.source_is_srgb = !texture_storage->render_target_is_using_hdr(p_blit.render_target);
+	blit.push_constant.use_debanding = texture_storage->render_target_is_using_debanding(p_blit.render_target);
+	blit.push_constant.target_color_space = p_color_space;
+	blit.push_constant.reference_multiplier = p_reference_multiplier;
+	blit.push_constant.output_max_value = p_output_max_value;
+	return mode;
+}
 
 void RendererCompositorRD::blit_render_targets_to_screen(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen *p_render_targets, int p_amount) {
 	Error err = RD::get_singleton()->screen_prepare_for_drawing(p_screen);
@@ -61,64 +116,84 @@ void RendererCompositorRD::blit_render_targets_to_screen(DisplayServerEnums::Win
 		RID rd_texture = texture_storage->render_target_get_rd_texture(p_render_targets[i].render_target);
 		ERR_CONTINUE(rd_texture.is_null());
 
-		BlitMode mode = p_render_targets[i].lens_distortion.apply ? BLIT_MODE_LENS : (p_render_targets[i].multi_view.use_layer ? BLIT_MODE_USE_LAYER : BLIT_MODE_NORMAL);
-
-		HashMap<RID, RID>::Iterator it = render_target_descriptors.find(rd_texture);
-		if (it == render_target_descriptors.end() || !RD::get_singleton()->uniform_set_is_valid(it->value)) {
-			Vector<RD::Uniform> uniforms;
-			RD::Uniform u;
-			u.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-			u.binding = 0;
-			u.append_id(blit.sampler);
-			u.append_id(rd_texture);
-			uniforms.push_back(u);
-			RID uniform_set = RD::get_singleton()->uniform_set_create(uniforms, blit.shader.version_get_shader(blit.shader_version, mode), 0);
-
-			it = render_target_descriptors.insert(rd_texture, uniform_set);
-		}
+		RID uniform_set = _get_render_target_blit_uniform_set(rd_texture);
 
 		Size2 screen_size(RD::get_singleton()->screen_get_width(p_screen), RD::get_singleton()->screen_get_height(p_screen));
+		BlitMode mode = _set_blit_push_constant(p_render_targets[i], screen_size, RD::get_singleton()->screen_get_pre_rotation_degrees(p_screen), color_space, reference_multiplier, output_max_value);
 
 		RD::get_singleton()->draw_list_bind_render_pipeline(draw_list, blit_pipelines.pipelines[mode]);
 		RD::get_singleton()->draw_list_bind_index_array(draw_list, blit.array);
-		RD::get_singleton()->draw_list_bind_uniform_set(draw_list, it->value, 0);
-
-		// We need to invert the phone rotation.
-		const int screen_rotation_degrees = -RD::get_singleton()->screen_get_pre_rotation_degrees(p_screen);
-		float screen_rotation = Math::deg_to_rad((float)screen_rotation_degrees);
-
-		blit.push_constant.rotation_cos = Math::cos(screen_rotation);
-		blit.push_constant.rotation_sin = Math::sin(screen_rotation);
-		// Swap width and height when the orientation is not the native one.
-		if (screen_rotation_degrees % 180 != 0) {
-			SWAP(screen_size.width, screen_size.height);
-		}
-		blit.push_constant.src_rect[0] = p_render_targets[i].src_rect.position.x;
-		blit.push_constant.src_rect[1] = p_render_targets[i].src_rect.position.y;
-		blit.push_constant.src_rect[2] = p_render_targets[i].src_rect.size.width;
-		blit.push_constant.src_rect[3] = p_render_targets[i].src_rect.size.height;
-		blit.push_constant.dst_rect[0] = p_render_targets[i].dst_rect.position.x / screen_size.width;
-		blit.push_constant.dst_rect[1] = p_render_targets[i].dst_rect.position.y / screen_size.height;
-		blit.push_constant.dst_rect[2] = p_render_targets[i].dst_rect.size.width / screen_size.width;
-		blit.push_constant.dst_rect[3] = p_render_targets[i].dst_rect.size.height / screen_size.height;
-		blit.push_constant.layer = p_render_targets[i].multi_view.layer;
-		blit.push_constant.eye_center[0] = p_render_targets[i].lens_distortion.eye_center.x;
-		blit.push_constant.eye_center[1] = p_render_targets[i].lens_distortion.eye_center.y;
-		blit.push_constant.k1 = p_render_targets[i].lens_distortion.k1;
-		blit.push_constant.k2 = p_render_targets[i].lens_distortion.k2;
-		blit.push_constant.upscale = p_render_targets[i].lens_distortion.upscale;
-		blit.push_constant.aspect_ratio = p_render_targets[i].lens_distortion.aspect_ratio;
-		blit.push_constant.source_is_srgb = !texture_storage->render_target_is_using_hdr(p_render_targets[i].render_target);
-		blit.push_constant.use_debanding = texture_storage->render_target_is_using_debanding(p_render_targets[i].render_target);
-		blit.push_constant.target_color_space = color_space;
-		blit.push_constant.reference_multiplier = reference_multiplier;
-		blit.push_constant.output_max_value = output_max_value;
-
+		RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set, 0);
 		RD::get_singleton()->draw_list_set_push_constant(draw_list, &blit.push_constant, sizeof(BlitPushConstant));
 		RD::get_singleton()->draw_list_draw(draw_list, true);
 	}
 
 	RD::get_singleton()->draw_list_end();
+}
+
+void RendererCompositorRD::frame_generation_capture_hudless(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen &p_blit) {
+	// See RendererViewport::_capture_frame_generation_hudless(). The render target holds the final 3D image (no 2D
+	// yet); it is blitted exactly like blit_render_targets_to_screen() will blit the finished frame (same rect, colour
+	// space conversion, HDR scaling, debanding), into a texture with the swap chain's size and format. DLSS-G needs
+	// the HUD-less colour to match the back buffer in everything but the UI.
+	if (!RendererRD::DLSSEffect::frame_generation_supported()) {
+		return;
+	}
+	RenderingDevice *rd = RD::get_singleton();
+	const RD::DataFormat format = rd->screen_get_data_format(p_screen);
+	if (format == RD::DATA_FORMAT_MAX) {
+		return; // The swap chain does not exist yet (first frame) or the window is minimized.
+	}
+	const Size2i screen_size(rd->screen_get_width(p_screen), rd->screen_get_height(p_screen));
+	if (screen_size.width <= 0 || screen_size.height <= 0) {
+		return;
+	}
+	RID rd_texture = texture_storage->render_target_get_rd_texture(p_blit.render_target);
+	ERR_FAIL_COND(rd_texture.is_null());
+
+	FrameGenerationHudless &hudless = frame_generation_hudless[p_screen];
+	if (hudless.texture.is_null() || hudless.size != screen_size || hudless.format != format) {
+		if (hudless.texture.is_valid()) {
+			rd->free_rid(hudless.texture); // Also frees the framebuffer (dependency).
+		}
+		RD::TextureFormat tf;
+		tf.format = format;
+		tf.width = screen_size.width;
+		tf.height = screen_size.height;
+		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+		hudless.texture = rd->texture_create(tf, RD::TextureView());
+		ERR_FAIL_COND(hudless.texture.is_null());
+		rd->set_resource_name(hudless.texture, "Frame generation HUD-less color");
+		Vector<RID> fb_textures;
+		fb_textures.push_back(hudless.texture);
+		hudless.framebuffer = rd->framebuffer_create(fb_textures);
+		hudless.size = screen_size;
+		hudless.format = format;
+	}
+
+	const RD::ColorSpace color_space = rd->screen_get_color_space(p_screen);
+	const float reference_luminance = rd->get_context_driver()->window_get_hdr_output_reference_luminance(p_screen);
+	const float linear_luminance_scale = rd->get_context_driver()->window_get_hdr_output_linear_luminance_scale(p_screen);
+	const float output_max_value = rd->get_context_driver()->window_get_output_max_linear_value(p_screen);
+	const float reference_multiplier = _compute_reference_multiplier(color_space, reference_luminance, linear_luminance_scale);
+
+	BlitPipelines blit_pipelines = _get_blit_pipelines_for_format(rd->framebuffer_get_format(hudless.framebuffer));
+	RID uniform_set = _get_render_target_blit_uniform_set(rd_texture);
+	BlitMode mode = _set_blit_push_constant(p_blit, Size2(screen_size), rd->screen_get_pre_rotation_degrees(p_screen), color_space, reference_multiplier, output_max_value);
+
+	rd->draw_command_begin_label("Frame Generation HUD-less Color");
+	// Cleared like the screen (draw_list_begin_for_screen() clears to opaque black).
+	Color clear_color(0, 0, 0, 1);
+	RD::DrawListID draw_list = rd->draw_list_begin(hudless.framebuffer, RD::DRAW_CLEAR_COLOR_0, VectorView<Color>(&clear_color, 1));
+	rd->draw_list_bind_render_pipeline(draw_list, blit_pipelines.pipelines[mode]);
+	rd->draw_list_bind_index_array(draw_list, blit.array);
+	rd->draw_list_bind_uniform_set(draw_list, uniform_set, 0);
+	rd->draw_list_set_push_constant(draw_list, &blit.push_constant, sizeof(BlitPushConstant));
+	rd->draw_list_draw(draw_list, true);
+	rd->draw_list_end();
+	rd->draw_command_end_label();
+
+	RendererRD::DLSSEffect::frame_generation_tag_hudless(hudless.texture);
 }
 
 void RendererCompositorRD::begin_frame(double frame_step) {
@@ -131,9 +206,17 @@ void RendererCompositorRD::begin_frame(double frame_step) {
 
 	canvas->set_time(time);
 	scene->set_time(time, frame_step);
+
+	// NVIDIA PCL (Reflex latency markers): render submission of this frame starts.
+	if (Streamline::get_singleton()) {
+		Streamline::get_singleton()->emit_marker(STREAMLINE_MARKER_BEGIN_RENDER);
+	}
 }
 
 void RendererCompositorRD::end_frame(bool p_present) {
+	if (Streamline::get_singleton()) {
+		Streamline::get_singleton()->emit_marker(STREAMLINE_MARKER_END_RENDER);
+	}
 	RD::get_singleton()->swap_buffers(p_present);
 }
 
@@ -172,6 +255,13 @@ void RendererCompositorRD::initialize() {
 uint64_t RendererCompositorRD::frame = 1;
 
 void RendererCompositorRD::finalize() {
+	for (KeyValue<DisplayServerEnums::WindowID, FrameGenerationHudless> &E : frame_generation_hudless) {
+		if (E.value.texture.is_valid()) {
+			RD::get_singleton()->free_rid(E.value.texture);
+		}
+	}
+	frame_generation_hudless.clear();
+
 	texture_storage->_tex_blit_shader_free();
 	memdelete(scene);
 	memdelete(canvas);
@@ -376,22 +466,17 @@ RendererCompositorRD::RendererCompositorRD() {
 
 	if (rendering_method == "mobile" || textures_per_stage < 48) {
 		if (rendering_method == "forward_plus") {
-			WARN_PRINT_ONCE("Platform supports less than 48 textures per stage which is less than required by the Clustered renderer. Attempting to fallback to the Mobile renderer.");
+			WARN_PRINT_ONCE("Platform supports less than 48 textures per stage which is less than required by the Clustered renderer. Defaulting to Mobile renderer.");
 		}
-#ifdef MOBILE_RD_ENABLED
 		scene = memnew(RendererSceneRenderImplementation::RenderForwardMobile());
-#endif // MOBILE_RD_ENABLED
-	} else {
-		if (rendering_method != "forward_plus") {
-			// Fall back to our high end renderer.
-			ERR_PRINT(vformat("Cannot instantiate RenderingDevice-based renderer with renderer type '%s'. Attempting to fallback to the to Forward+ renderer.", rendering_method));
-		}
-#ifdef FORWARD_RD_ENABLED
+	} else if (rendering_method == "forward_plus") {
 		scene = memnew(RendererSceneRenderImplementation::RenderForwardClustered());
-#endif // FORWARD_RD_ENABLED
+	} else {
+		// Fall back to our high end renderer.
+		ERR_PRINT(vformat("Cannot instantiate RenderingDevice-based renderer with renderer type '%s'. Defaulting to Forward+ renderer.", rendering_method));
+		scene = memnew(RendererSceneRenderImplementation::RenderForwardClustered());
 	}
 
-	ERR_FAIL_NULL_MSG(scene, "No RendererSceneRenderRDs available.");
 	scene->init();
 }
 

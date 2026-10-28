@@ -72,6 +72,5 @@ protected:
 private:
 	Ref<OpenXRStructureBase> next;
 
-	uint64_t _get_headergd(uint64_t p_next);
 	uint64_t _get_structure_type();
 };

@@ -51,7 +51,7 @@ LocaleBuilder::~LocaleBuilder()
     delete extensions_;
 }
 
-LocaleBuilder& LocaleBuilder::setLocale(const Locale& locale) U_LIFETIME_BOUND
+LocaleBuilder& LocaleBuilder::setLocale(const Locale& locale)
 {
     clear();
     setLanguage(locale.getLanguage());
@@ -65,7 +65,7 @@ LocaleBuilder& LocaleBuilder::setLocale(const Locale& locale) U_LIFETIME_BOUND
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::setLanguageTag(StringPiece tag) U_LIFETIME_BOUND
+LocaleBuilder& LocaleBuilder::setLanguageTag(StringPiece tag)
 {
     Locale l = Locale::forLanguageTag(tag, status_);
     if (U_FAILURE(status_)) { return *this; }
@@ -92,19 +92,19 @@ void setField(StringPiece input, char* dest, UErrorCode& errorCode,
 
 }  // namespace
 
-LocaleBuilder& LocaleBuilder::setLanguage(StringPiece language) U_LIFETIME_BOUND
+LocaleBuilder& LocaleBuilder::setLanguage(StringPiece language)
 {
     setField(language, language_, status_, &ultag_isLanguageSubtag);
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::setScript(StringPiece script) U_LIFETIME_BOUND
+LocaleBuilder& LocaleBuilder::setScript(StringPiece script)
 {
     setField(script, script_, status_, &ultag_isScriptSubtag);
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::setRegion(StringPiece region) U_LIFETIME_BOUND
+LocaleBuilder& LocaleBuilder::setRegion(StringPiece region)
 {
     setField(region, region_, status_, &ultag_isRegionSubtag);
     return *this;
@@ -124,7 +124,7 @@ void transform(char* data, int32_t len) {
 
 }  // namespace
 
-LocaleBuilder& LocaleBuilder::setVariant(StringPiece variant) U_LIFETIME_BOUND
+LocaleBuilder& LocaleBuilder::setVariant(StringPiece variant)
 {
     if (U_FAILURE(status_)) { return *this; }
     if (variant.empty()) {
@@ -233,7 +233,7 @@ _setUnicodeExtensions(Locale& locale, const CharString& value, UErrorCode& error
 
 }  // namespace
 
-LocaleBuilder& LocaleBuilder::setExtension(char key, StringPiece value) U_LIFETIME_BOUND
+LocaleBuilder& LocaleBuilder::setExtension(char key, StringPiece value)
 {
     if (U_FAILURE(status_)) { return *this; }
     if (!UPRV_ISALPHANUM(key)) {
@@ -269,8 +269,8 @@ LocaleBuilder& LocaleBuilder::setExtension(char key, StringPiece value) U_LIFETI
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::setUnicodeLocaleKeyword(StringPiece key,
-                                                      StringPiece type) U_LIFETIME_BOUND
+LocaleBuilder& LocaleBuilder::setUnicodeLocaleKeyword(
+      StringPiece key, StringPiece type)
 {
     if (U_FAILURE(status_)) { return *this; }
     if (!ultag_isUnicodeLocaleKey(key.data(), key.length()) ||
@@ -290,7 +290,8 @@ LocaleBuilder& LocaleBuilder::setUnicodeLocaleKeyword(StringPiece key,
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::addUnicodeLocaleAttribute(StringPiece value) U_LIFETIME_BOUND
+LocaleBuilder& LocaleBuilder::addUnicodeLocaleAttribute(
+    StringPiece value)
 {
     CharString value_str(value, status_);
     if (U_FAILURE(status_)) { return *this; }
@@ -350,7 +351,8 @@ LocaleBuilder& LocaleBuilder::addUnicodeLocaleAttribute(StringPiece value) U_LIF
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::removeUnicodeLocaleAttribute(StringPiece value) U_LIFETIME_BOUND
+LocaleBuilder& LocaleBuilder::removeUnicodeLocaleAttribute(
+    StringPiece value)
 {
     CharString value_str(value, status_);
     if (U_FAILURE(status_)) { return *this; }
@@ -396,7 +398,7 @@ LocaleBuilder& LocaleBuilder::removeUnicodeLocaleAttribute(StringPiece value) U_
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::clear() U_LIFETIME_BOUND
+LocaleBuilder& LocaleBuilder::clear()
 {
     status_ = U_ZERO_ERROR;
     language_[0] = 0;
@@ -408,7 +410,7 @@ LocaleBuilder& LocaleBuilder::clear() U_LIFETIME_BOUND
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::clearExtensions() U_LIFETIME_BOUND
+LocaleBuilder& LocaleBuilder::clearExtensions()
 {
     delete extensions_;
     extensions_ = nullptr;

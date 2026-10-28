@@ -31,7 +31,7 @@
 #pragma once
 
 #include "core/object/ref_counted.h"
-#include "servers/physics_2d/physics_server_2d_types.h"
+#include "servers/physics_2d/physics_server_2d.h"
 
 class CharacterBody2D;
 class PhysicsBody2D;
@@ -42,7 +42,7 @@ class KinematicCollision2D : public RefCounted {
 	ObjectID owner_id;
 	friend class PhysicsBody2D;
 	friend class CharacterBody2D;
-	PS2DT::MotionResult result;
+	PhysicsServer2D::MotionResult result;
 
 protected:
 	static void _bind_methods();

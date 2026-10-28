@@ -21,43 +21,42 @@
 //
 #pragma once
 #include <atomic>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <unordered_map>
 #include <vector>
 
-#include "parallel.h"
-
 class DisjointSets {
  public:
-  DisjointSets(size_t size) : mData(size) {
-    assert(size <= std::numeric_limits<uint32_t>::max());
-    using namespace manifold;
-    for_each(autoPolicy(size), countAt(0_uz), countAt(size),
-             [this](size_t i) { mData[i] = static_cast<uint32_t>(i); });
+  DisjointSets(uint32_t size) : mData(size) {
+    for (uint32_t i = 0; i < size; ++i) mData[i] = (uint32_t)i;
   }
 
-  size_t find(size_t id) const { return findImpl(ToIndex(id)); }
+  uint32_t find(uint32_t id) const {
+    while (id != parent(id)) {
+      uint64_t value = mData[id];
+      uint32_t new_parent = parent((uint32_t)value);
+      uint64_t new_value = (value & 0xFFFFFFFF00000000ULL) | new_parent;
+      /* Try to update parent (may fail, that's ok) */
+      if (value != new_value) mData[id].compare_exchange_weak(value, new_value);
+      id = new_parent;
+    }
+    return id;
+  }
 
-  bool same(size_t id1In, size_t id2In) const {
-    uint32_t id1 = ToIndex(id1In);
-    uint32_t id2 = ToIndex(id2In);
+  bool same(uint32_t id1, uint32_t id2) const {
     for (;;) {
-      id1 = findImpl(id1);
-      id2 = findImpl(id2);
+      id1 = find(id1);
+      id2 = find(id2);
       if (id1 == id2) return true;
       if (parent(id1) == id1) return false;
     }
   }
 
-  size_t unite(size_t id1In, size_t id2In) {
-    uint32_t id1 = ToIndex(id1In);
-    uint32_t id2 = ToIndex(id2In);
+  uint32_t unite(uint32_t id1, uint32_t id2) {
     for (;;) {
-      id1 = findImpl(id1);
-      id2 = findImpl(id2);
+      id1 = find(id1);
+      id2 = find(id2);
 
       if (id1 == id2) return id1;
 
@@ -86,7 +85,7 @@ class DisjointSets {
     return id2;
   }
 
-  size_t size() const { return mData.size(); }
+  uint32_t size() const { return (uint32_t)mData.size(); }
 
   uint32_t rank(uint32_t id) const {
     return ((uint32_t)(mData[id] >> 32)) & 0x7FFFFFFFu;
@@ -101,7 +100,7 @@ class DisjointSets {
     for (size_t i = 0; i < mData.size(); ++i) {
       // we optimize for connected component of size 1
       // no need to put them into the hashmap
-      uint32_t iParent = findImpl(ToIndex(i));
+      auto iParent = find(i);
       if (rank(iParent) == 0) {
         components[i] = static_cast<int>(toLabel.size()) + lonelyNodes++;
         continue;
@@ -119,22 +118,4 @@ class DisjointSets {
   }
 
   mutable std::vector<std::atomic<uint64_t>> mData;
-
- private:
-  static uint32_t ToIndex(size_t id) {
-    assert(id <= std::numeric_limits<uint32_t>::max());
-    return static_cast<uint32_t>(id);
-  }
-
-  uint32_t findImpl(uint32_t id) const {
-    while (id != parent(id)) {
-      uint64_t value = mData[id];
-      uint32_t new_parent = parent((uint32_t)value);
-      uint64_t new_value = (value & 0xFFFFFFFF00000000ULL) | new_parent;
-      /* Try to update parent (may fail, that's ok) */
-      if (value != new_value) mData[id].compare_exchange_weak(value, new_value);
-      id = new_parent;
-    }
-    return id;
-  }
 };

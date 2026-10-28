@@ -128,8 +128,10 @@ static int32_t u_astrnlen(const char *s1, int32_t n)
     return len;
 }
 
-U_CAPI char16_t* U_EXPORT2
-u_uastrncpy(char16_t* ucs1 U_LIFETIME_BOUND, const char* s2, int32_t n)
+U_CAPI char16_t*  U_EXPORT2
+u_uastrncpy(char16_t *ucs1,
+           const char *s2,
+           int32_t n)
 {
   char16_t *target = ucs1;
   UErrorCode err = U_ZERO_ERROR;
@@ -158,8 +160,9 @@ u_uastrncpy(char16_t* ucs1 U_LIFETIME_BOUND, const char* s2, int32_t n)
   return ucs1;
 }
 
-U_CAPI char16_t* U_EXPORT2
-u_uastrcpy(char16_t* ucs1 U_LIFETIME_BOUND, const char* s2)
+U_CAPI char16_t*  U_EXPORT2
+u_uastrcpy(char16_t *ucs1,
+          const char *s2 )
 {
   UErrorCode err = U_ZERO_ERROR;
   UConverter *cnv = u_getDefaultConverter(&err);
@@ -197,8 +200,10 @@ static int32_t u_ustrnlen(const char16_t *ucs1, int32_t n)
     return len;
 }
 
-U_CAPI char* U_EXPORT2
-u_austrncpy(char* s1 U_LIFETIME_BOUND, const char16_t* ucs2, int32_t n)
+U_CAPI char*  U_EXPORT2
+u_austrncpy(char *s1,
+        const char16_t *ucs2,
+        int32_t n)
 {
   char *target = s1;
   UErrorCode err = U_ZERO_ERROR;
@@ -227,8 +232,9 @@ u_austrncpy(char* s1 U_LIFETIME_BOUND, const char16_t* ucs2, int32_t n)
   return s1;
 }
 
-U_CAPI char* U_EXPORT2
-u_austrcpy(char* s1 U_LIFETIME_BOUND, const char16_t* ucs2)
+U_CAPI char*  U_EXPORT2
+u_austrcpy(char *s1,
+         const char16_t *ucs2 )
 {
   UErrorCode err = U_ZERO_ERROR;
   UConverter *cnv = u_getDefaultConverter(&err);

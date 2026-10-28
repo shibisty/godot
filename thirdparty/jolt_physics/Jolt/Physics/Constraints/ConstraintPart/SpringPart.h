@@ -4,8 +4,6 @@
 
 #pragma once
 
-#include <Jolt/Physics/Constraints/SpringSettings.h>
-
 JPH_NAMESPACE_BEGIN
 #ifndef JPH_PLATFORM_DOXYGEN // Somehow Doxygen gets confused and thinks the parameters to CalculateSpringProperties belong to this macro
 JPH_MSVC_SUPPRESS_WARNING(4723) // potential divide by 0 - caused by line: outEffectiveMass = 1.0f / inInvEffectiveMass, note that JPH_NAMESPACE_BEGIN already pushes the warning state
@@ -14,29 +12,9 @@ JPH_MSVC_SUPPRESS_WARNING(4723) // potential divide by 0 - caused by line: outEf
 /// Class used in other constraint parts to calculate the required bias factor in the lagrange multiplier for creating springs
 class SpringPart
 {
-public:
-	/// Turn off the spring and set a bias only
-	///
-	/// @param inBias Bias term (b) for the constraint impulse: lambda = J v + b
-	JPH_INLINE void				CalculateSpringPropertiesWithBias(float inBias)
+private:
+	JPH_INLINE void				CalculateSpringPropertiesHelper(float inDeltaTime, float inInvEffectiveMass, float inBias, float inC, float inStiffness, float inDamping, float &outEffectiveMass)
 	{
-		mSoftness = 0.0f;
-		mBias = inBias;
-	}
-
-	/// Calculate spring properties with spring Stiffness (k) and damping (c), this is based on the spring equation: F = -k * x - c * v
-	///
-	/// @param inDeltaTime Time step
-	/// @param inInvEffectiveMass Inverse effective mass K
-	/// @param inBias Bias term (b) for the constraint impulse: lambda = J v + b
-	///	@param inC Value of the constraint equation (C).
-	///	@param inStiffness Spring stiffness k.
-	///	@param inDamping Spring damping coefficient c.
-	/// @param outEffectiveMass On return, this contains the new effective mass K^-1
-	JPH_INLINE void				CalculateSpringPropertiesWithStiffnessAndDamping(float inDeltaTime, float inInvEffectiveMass, float inBias, float inC, float inStiffness, float inDamping, float &outEffectiveMass)
-	{
-		JPH_ASSERT(inStiffness > 0.0f || inDamping > 0.0f);
-
 		// Soft constraints as per: Soft Constraints: Reinventing The Spring - Erin Catto - GDC 2011
 
 		// Note that the calculation of beta and gamma below are based on the solution of an implicit Euler integration scheme
@@ -86,71 +64,77 @@ public:
 		outEffectiveMass = 1.0f / (inInvEffectiveMass + mSoftness);
 	}
 
+public:
+	/// Turn off the spring and set a bias only
+	///
+	/// @param inBias Bias term (b) for the constraint impulse: lambda = J v + b
+	inline void					CalculateSpringPropertiesWithBias(float inBias)
+	{
+		mSoftness = 0.0f;
+		mBias = inBias;
+	}
+
 	/// Calculate spring properties based on frequency and damping ratio
 	///
 	/// @param inDeltaTime Time step
 	/// @param inInvEffectiveMass Inverse effective mass K
 	/// @param inBias Bias term (b) for the constraint impulse: lambda = J v + b
-	///	@param inC Value of the constraint equation (C).
-	///	@param inFrequency Oscillation frequency (Hz).
-	///	@param inDamping Damping factor (0 = no damping, 1 = critical damping).
+	///	@param inC Value of the constraint equation (C). Set to zero if you don't want to drive the constraint to zero with a spring.
+	///	@param inFrequency Oscillation frequency (Hz). Set to zero if you don't want to drive the constraint to zero with a spring.
+	///	@param inDamping Damping factor (0 = no damping, 1 = critical damping). Set to zero if you don't want to drive the constraint to zero with a spring.
 	/// @param outEffectiveMass On return, this contains the new effective mass K^-1
-	JPH_INLINE void				CalculateSpringPropertiesWithFrequencyAndDamping(float inDeltaTime, float inInvEffectiveMass, float inBias, float inC, float inFrequency, float inDamping, float &outEffectiveMass)
+	inline void					CalculateSpringPropertiesWithFrequencyAndDamping(float inDeltaTime, float inInvEffectiveMass, float inBias, float inC, float inFrequency, float inDamping, float &outEffectiveMass)
 	{
-		JPH_ASSERT(inFrequency > 0.0f);
-
 		outEffectiveMass = 1.0f / inInvEffectiveMass;
 
-		// Calculate angular frequency
-		float omega = 2.0f * JPH_PI * inFrequency;
+		if (inFrequency > 0.0f)
+		{
+			// Calculate angular frequency
+			float omega = 2.0f * JPH_PI * inFrequency;
 
-		// Calculate spring stiffness k and damping constant c (page 45)
-		float k = outEffectiveMass * Square(omega);
-		float c = 2.0f * outEffectiveMass * inDamping * omega;
+			// Calculate spring stiffness k and damping constant c (page 45)
+			float k = outEffectiveMass * Square(omega);
+			float c = 2.0f * outEffectiveMass * inDamping * omega;
 
-		CalculateSpringPropertiesWithStiffnessAndDamping(inDeltaTime, inInvEffectiveMass, inBias, inC, k, c, outEffectiveMass);
+			CalculateSpringPropertiesHelper(inDeltaTime, inInvEffectiveMass, inBias, inC, k, c, outEffectiveMass);
+		}
+		else
+		{
+			CalculateSpringPropertiesWithBias(inBias);
+		}
 	}
 
-	/// Calculate spring properties with spring stiffness (k) and damping (c) in acceleration mode, this is based on the spring equation: F = m_eff * (-k * x - c * v) where m_eff is the effective mass of the constraint
+	/// Calculate spring properties with spring Stiffness (k) and damping (c), this is based on the spring equation: F = -k * x - c * v
 	///
 	/// @param inDeltaTime Time step
 	/// @param inInvEffectiveMass Inverse effective mass K
 	/// @param inBias Bias term (b) for the constraint impulse: lambda = J v + b
-	///	@param inC Value of the constraint equation (C).
-	///	@param inStiffness Spring stiffness k.
-	///	@param inDamping Spring damping coefficient c.
+	///	@param inC Value of the constraint equation (C). Set to zero if you don't want to drive the constraint to zero with a spring.
+	///	@param inStiffness Spring stiffness k. Set to zero if you don't want to drive the constraint to zero with a spring.
+	///	@param inDamping Spring damping coefficient c. Set to zero if you don't want to drive the constraint to zero with a spring.
 	/// @param outEffectiveMass On return, this contains the new effective mass K^-1
-	JPH_INLINE void				CalculateSpringPropertiesWithMassNormalizedStiffnessAndDamping(float inDeltaTime, float inInvEffectiveMass, float inBias, float inC, float inStiffness, float inDamping, float &outEffectiveMass)
+	inline void					CalculateSpringPropertiesWithStiffnessAndDamping(float inDeltaTime, float inInvEffectiveMass, float inBias, float inC, float inStiffness, float inDamping, float &outEffectiveMass)
 	{
-		CalculateSpringPropertiesWithStiffnessAndDamping(inDeltaTime, inInvEffectiveMass, inBias, inC, inStiffness / inInvEffectiveMass, inDamping / inInvEffectiveMass, outEffectiveMass);
-	}
-
-	/// Calculate spring properties based on SpringSettings object.
-	/// Assumes the spring has either stiffness or damping.
-	JPH_INLINE void				CalculateSpringPropertiesWithSettings(float inDeltaTime, float inInvEffectiveMass, float inBias, float inC, const SpringSettings &inSpringSettings, float &outEffectiveMass)
-	{
-		switch (inSpringSettings.mMode)
+		if (inStiffness > 0.0f)
 		{
-		case ESpringMode::FrequencyAndDamping:
-			CalculateSpringPropertiesWithFrequencyAndDamping(inDeltaTime, inInvEffectiveMass, inBias, inC, inSpringSettings.mFrequency, inSpringSettings.mDamping, outEffectiveMass);
-			break;
-		case ESpringMode::StiffnessAndDamping:
-			CalculateSpringPropertiesWithStiffnessAndDamping(inDeltaTime, inInvEffectiveMass, inBias, inC, inSpringSettings.mStiffness, inSpringSettings.mDamping, outEffectiveMass);
-			break;
-		case ESpringMode::MassNormalizedStiffnessAndDamping:
-			CalculateSpringPropertiesWithMassNormalizedStiffnessAndDamping(inDeltaTime, inInvEffectiveMass, inBias, inC, inSpringSettings.mStiffness, inSpringSettings.mDamping, outEffectiveMass);
-			break;
+			CalculateSpringPropertiesHelper(inDeltaTime, inInvEffectiveMass, inBias, inC, inStiffness, inDamping, outEffectiveMass);
+		}
+		else
+		{
+			outEffectiveMass = 1.0f / inInvEffectiveMass;
+
+			CalculateSpringPropertiesWithBias(inBias);
 		}
 	}
 
 	/// Returns if this spring is active
-	JPH_INLINE bool				IsActive() const
+	inline bool					IsActive() const
 	{
 		return mSoftness != 0.0f;
 	}
 
 	/// Get total bias b, including supplied bias and bias for spring: lambda = J v + b
-	JPH_INLINE float			GetBias(float inTotalLambda) const
+	inline float				GetBias(float inTotalLambda) const
 	{
 		// Remainder of post by Erin Catto: http://www.bulletphysics.org/Bullet/phpBB3/viewtopic.php?f=4&t=1354
 		//

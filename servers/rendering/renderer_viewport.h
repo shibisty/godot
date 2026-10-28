@@ -61,6 +61,8 @@ public:
 		float texture_mipmap_bias = 0.0f;
 		RSE::ViewportAnisotropicFiltering anisotropic_filtering_level = RSE::VIEWPORT_ANISOTROPY_4X;
 		bool fsr_enabled = false;
+		bool dlss_enabled = false;
+		bool frame_generation = false; // Mariner E3: DLSS Frame Generation (needs the DLSS scaling mode).
 		uint32_t jitter_phase_count = 0;
 		RSE::ViewportUpdateMode update_mode = RSE::VIEWPORT_UPDATE_WHEN_VISIBLE;
 		RID render_target;
@@ -78,6 +80,11 @@ public:
 		uint64_t prev_camera_data_frame = 0;
 
 		bool use_occlusion_culling = false;
+
+		// Raytracing scene (TLAS built from the visible scene, for compositor effects).
+		bool raytracing_scene = false;
+		uint32_t raytracing_scene_cull_mask = 0xFFFFF;
+		float raytracing_scene_distance = 0.0;
 		bool occlusion_buffer_dirty = false;
 
 		DisplayServerEnums::WindowID viewport_to_screen = DisplayServerEnums::INVALID_WINDOW_ID;
@@ -207,6 +214,9 @@ private:
 	void _viewport_set_size(Viewport *p_viewport, int p_width, int p_height, uint32_t p_view_count);
 	bool _viewport_requires_motion_vectors(Viewport *p_viewport);
 	void _viewport_set_force_motion_vectors(Viewport *p_viewport, bool p_force_motion_vectors);
+	static bool _is_dlss_available();
+	static bool _is_frame_generation_available();
+	void _capture_frame_generation_hudless(Viewport *p_viewport);
 	void _configure_3d_render_buffers(Viewport *p_viewport);
 	void _draw_3d(Viewport *p_viewport);
 	void _draw_viewport(Viewport *p_viewport);
@@ -233,6 +243,8 @@ public:
 	void viewport_set_parent_viewport(RID p_viewport, RID p_parent_viewport);
 
 	void viewport_set_scaling_3d_mode(RID p_viewport, RSE::ViewportScaling3DMode p_mode);
+	void viewport_set_frame_generation(RID p_viewport, bool p_frame_generation);
+	bool viewport_get_frame_generation(RID p_viewport) const;
 	void viewport_set_scaling_3d_scale(RID p_viewport, float p_scaling_3d_scale);
 	void viewport_set_fsr_sharpness(RID p_viewport, float p_sharpness);
 	void viewport_set_texture_mipmap_bias(RID p_viewport, float p_mipmap_bias);
@@ -247,6 +259,8 @@ public:
 	RID viewport_get_render_target(RID p_viewport) const;
 	RID viewport_get_texture(RID p_viewport) const;
 	RID viewport_get_occluder_debug_texture(RID p_viewport) const;
+	// Returns true when the viewport requested a raytracing scene; fills its cull mask and range (0 = camera far).
+	bool viewport_get_raytracing_scene(RID p_viewport, uint32_t &r_cull_mask, float &r_distance) const;
 
 	void viewport_set_prev_camera_data(RID p_viewport, const RendererSceneRender::CameraData *p_camera_data);
 	const RendererSceneRender::CameraData *viewport_get_prev_camera_data(RID p_viewport);
@@ -282,6 +296,9 @@ public:
 	void viewport_set_use_debanding(RID p_viewport, bool p_use_debanding);
 	void viewport_set_force_motion_vectors(RID p_viewport, bool p_force_motion_vectors);
 	void viewport_set_use_occlusion_culling(RID p_viewport, bool p_use_occlusion_culling);
+	void viewport_set_raytracing_scene(RID p_viewport, bool p_enable, uint32_t p_cull_mask, float p_distance);
+	int viewport_get_pathtracing_sample_count(RID p_viewport);
+	void viewport_reset_pathtracing(RID p_viewport);
 	void viewport_set_occlusion_rays_per_thread(int p_rays_per_thread);
 	void viewport_set_occlusion_culling_build_quality(RSE::ViewportOcclusionCullingBuildQuality p_quality);
 	void viewport_set_mesh_lod_threshold(RID p_viewport, float p_pixels);

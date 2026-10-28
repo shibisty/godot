@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Text;
 using Godot;
 using GodotTools.Internals;
 using static GodotTools.Internals.Globals;
@@ -23,7 +22,7 @@ namespace GodotTools.Build
         public BuildResult? BuildResult { get; private set; }
 
         private readonly object _pendingBuildLogTextLock = new object();
-        private readonly StringBuilder _pendingBuildLogText = new StringBuilder();
+        private string _pendingBuildLogText = string.Empty;
 
         public void UpdateBuildStateIcon()
         {
@@ -89,7 +88,7 @@ namespace GodotTools.Build
             if (Internal.IsAssembliesReloadingNeeded())
             {
                 BuildManager.UpdateLastValidBuildDateTime();
-                Internal.ReloadAssemblies();
+                Internal.ReloadAssemblies(softReload: false);
             }
         }
 
@@ -110,7 +109,7 @@ namespace GodotTools.Build
             if (Internal.IsAssembliesReloadingNeeded())
             {
                 BuildManager.UpdateLastValidBuildDateTime();
-                Internal.ReloadAssemblies();
+                Internal.ReloadAssemblies(softReload: false);
             }
         }
 
@@ -176,8 +175,8 @@ namespace GodotTools.Build
         {
             lock (_pendingBuildLogTextLock)
             {
-                _outputView.Append(_pendingBuildLogText.ToString());
-                _pendingBuildLogText.Clear();
+                _outputView.Append(_pendingBuildLogText);
+                _pendingBuildLogText = string.Empty;
             }
         }
 
@@ -187,7 +186,7 @@ namespace GodotTools.Build
             {
                 if (_pendingBuildLogText.Length == 0)
                     CallDeferred(nameof(UpdateBuildLogText));
-                _pendingBuildLogText.AppendLine(text);
+                _pendingBuildLogText += text + "\n";
             }
         }
 
@@ -197,7 +196,7 @@ namespace GodotTools.Build
             {
                 if (_pendingBuildLogText.Length == 0)
                     CallDeferred(nameof(UpdateBuildLogText));
-                _pendingBuildLogText.AppendLine(text);
+                _pendingBuildLogText += text + "\n";
             }
         }
 

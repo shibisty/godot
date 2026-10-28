@@ -20,7 +20,6 @@
  * SOFTWARE.
  */
 
-#include <climits>
 #include <turbojpeg.h>
 #include "tvgJpgLoader.h"
 
@@ -30,19 +29,21 @@
 
 void JpgLoader::clear()
 {
-    if (owner != Ownership::Borrow) tvg::free(data);
+    if (freeData) tvg::free(data);
     data = nullptr;
     size = 0;
-    owner = Ownership::Borrow;
+    freeData = false;
 }
 
 /************************************************************************/
 /* External Class Implementation                                        */
 /************************************************************************/
 
-JpgLoader::JpgLoader() : BitmapLoader(FileType::Jpg), jpegDecompressor(tjInitDecompress())
+JpgLoader::JpgLoader() : ImageLoader(FileType::Jpg)
 {
+    jpegDecompressor = tjInitDecompress();
 }
+
 
 JpgLoader::~JpgLoader()
 {
@@ -53,62 +54,65 @@ JpgLoader::~JpgLoader()
     tjFree(surface.buf8);
 }
 
-Result JpgLoader::open(const char* path, const LoaderOps& ops)
+
+bool JpgLoader::open(const char* path)
 {
 #ifdef THORVG_FILE_IO_SUPPORT
-    if (!(data = (unsigned char*)Loader::open(path, size))) return Result::InvalidArguments;
-    owner = Ownership::Transfer;
+    if (!(data = (unsigned char*) LoadModule::open(path, size))) return false;
 
     int width, height, subSample, colorSpace;
-    if (tjDecompressHeader3(jpegDecompressor, data, size, &width, &height, &subSample, &colorSpace) < 0) return Result::InvalidArguments;
+    if (tjDecompressHeader3(jpegDecompressor, data, size, &width, &height, &subSample, &colorSpace) < 0) return false;
     w = static_cast<float>(width);
     h = static_cast<float>(height);
-    return Result::Success;
+    freeData = true;
+    return true;
 #else
-    return Result::NonSupport;
+    return false;
 #endif
 }
 
-Result JpgLoader::open(const char* data, uint32_t size, const LoaderOps& ops)
+
+bool JpgLoader::open(const char* data, uint32_t size, TVG_UNUSED const char* rpath, bool copy)
 {
     int width, height, subSample, colorSpace;
-    if (tjDecompressHeader3(jpegDecompressor, (unsigned char*)data, size, &width, &height, &subSample, &colorSpace) < 0) return Result::InvalidArguments;
+    if (tjDecompressHeader3(jpegDecompressor, (unsigned char *) data, size, &width, &height, &subSample, &colorSpace) < 0) return false;
 
-    if (ops.owner == Ownership::Copy) {
+    if (copy) {
         this->data = tvg::malloc<unsigned char>(size);
+        if (!this->data) return false;
         memcpy((unsigned char *)this->data, data, size);
+        freeData = true;
     } else {
         this->data = (unsigned char *) data;
+        freeData = false;
     }
-    owner = ops.owner;
+
     w = static_cast<float>(width);
     h = static_cast<float>(height);
     this->size = size;
 
-    return Result::Success;
+    return true;
 }
 
 
 bool JpgLoader::read()
 {
-    if (!Loader::read()) return true;
+    if (!LoadModule::read()) return true;
 
     if (w == 0 || h == 0) return false;
 
     //determine the image format
-    ColorSpace cs;
     TJPF format;
-    if (BitmapLoader::cs == ColorSpace::ARGB8888 || BitmapLoader::cs == ColorSpace::ARGB8888S) {
+    if (ImageLoader::cs == ColorSpace::ARGB8888 || ImageLoader::cs == ColorSpace::ARGB8888S) {
         format = TJPF_BGRX;
-        cs = ColorSpace::XRGB8888;
+        surface.cs = ColorSpace::ARGB8888;
     } else {
         format = TJPF_RGBX;
-        cs = ColorSpace::XBGR8888;
+        surface.cs = ColorSpace::ABGR8888;
     }
 
-    if (static_cast<int>(w) > INT_MAX / static_cast<int>(h) / tjPixelSize[format]) return false;
-
     auto image = (unsigned char *)tjAlloc(static_cast<int>(w) * static_cast<int>(h) * tjPixelSize[format]);
+    if (!image) return false;
 
     //decompress jpg image
     if (tjDecompress2(jpegDecompressor, data, size, image, static_cast<int>(w), 0, static_cast<int>(h), format, 0) < 0) {
@@ -118,7 +122,14 @@ bool JpgLoader::read()
         return false;
     }
 
-    surface.setup((pixel_t*)image, w, w, h, sizeof(uint32_t), cs);
+    //setup the surface
+    surface.buf8 = image;
+    surface.stride = w;
+    surface.w = w;
+    surface.h = h;
+    surface.channelSize = sizeof(uint32_t);
+    surface.premultiplied = true;
+
     clear();
     return true;
 }

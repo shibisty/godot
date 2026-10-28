@@ -30,7 +30,6 @@
 
 #include "gdscript_workspace.h"
 
-#include "../editor/gdscript_editor_language.h"
 #include "../gdscript.h"
 #include "../gdscript_parser.h"
 #include "gdscript_language_protocol.h"
@@ -38,7 +37,6 @@
 #include "core/config/project_settings.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
-#include "core/object/editor_language.h"
 #include "core/object/script_language.h"
 #include "editor/doc/doc_tools.h"
 #include "editor/doc/editor_help.h"
@@ -607,7 +605,7 @@ void GDScriptWorkspace::publish_diagnostics(const String &p_path) {
 	GDScriptLanguageProtocol::get_singleton()->notify_client("textDocument/publishDiagnostics", params);
 }
 
-void GDScriptWorkspace::completion(const LSP::CompletionParams &p_params, List<EditorLanguage::CompletionOption> *r_options) {
+void GDScriptWorkspace::completion(const LSP::CompletionParams &p_params, List<ScriptLanguage::CodeCompletionOption> *r_options) {
 	String path = get_file_path(p_params.textDocument.uri);
 	String call_hint;
 	bool forced = false;
@@ -639,7 +637,7 @@ void GDScriptWorkspace::completion(const LSP::CompletionParams &p_params, List<E
 		}
 
 		String code = parser->get_text_for_completion(p_params.position);
-		GDScriptEditorLanguage::get_singleton()->complete_code(code, path, current, r_options, forced, call_hint);
+		GDScriptLanguage::get_singleton()->complete_code(code, path, current, r_options, forced, call_hint);
 	}
 }
 
@@ -668,15 +666,17 @@ const LSP::DocumentSymbol *GDScriptWorkspace::resolve_symbol(const LSP::TextDocu
 				symbol = get_script_symbol(class_path);
 
 			} else {
-				EditorLanguage::LookupResult ret;
+				ScriptLanguage::LookupResult ret;
 				// TODO: `lookup_code` should already account for this. We might be able to simplify code here.
 				if (symbol_name == "new" && parser->get_lines()[p_doc_pos.position.line].remove_chars(" \t").contains("new(")) {
 					symbol_name = "_init";
 				}
-				if (OK == GDScriptEditorLanguage::get_singleton()->lookup_code(parser->get_text_for_lookup_symbol(pos, symbol_name, p_func_required), symbol_name, path, nullptr, ret)) {
+				if (OK == GDScriptLanguage::get_singleton()->lookup_code(parser->get_text_for_lookup_symbol(pos, symbol_name, p_func_required), symbol_name, path, nullptr, ret)) {
 					if (ret.location >= 0) {
 						String target_script_path = path;
-						if (!ret.script_path.is_empty()) {
+						if (ret.script.is_valid()) {
+							target_script_path = ret.script->get_path();
+						} else if (!ret.script_path.is_empty()) {
 							target_script_path = ret.script_path;
 						}
 
@@ -770,8 +770,7 @@ Error GDScriptWorkspace::resolve_signature(const LSP::TextDocumentPositionParams
 				if (symbol->kind == LSP::SymbolKind::Method || symbol->kind == LSP::SymbolKind::Function) {
 					LSP::SignatureInformation signature_info;
 					signature_info.label = symbol->detail;
-					const HashSet<String> &allowed_tags = GDScriptLanguageProtocol::get_singleton()->get_client_markdown_allowed_html_tags();
-					signature_info.documentation = symbol->render(allowed_tags);
+					signature_info.documentation = symbol->render();
 
 					for (int i = 0; i < symbol->children.size(); i++) {
 						const LSP::DocumentSymbol &arg = symbol->children[i];

@@ -32,7 +32,6 @@
 
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
-#include "servers/audio/audio_server.h"
 
 AudioStreamSynchronized::AudioStreamSynchronized() {
 }
@@ -44,6 +43,10 @@ Ref<AudioStreamPlayback> AudioStreamSynchronized::instantiate_playback() {
 	playback_playlist->_update_playback_instances();
 	playbacks.insert(playback_playlist.operator->());
 	return playback_playlist;
+}
+
+String AudioStreamSynchronized::get_stream_name() const {
+	return "Synchronized";
 }
 
 void AudioStreamSynchronized::set_sync_stream(int p_stream_index, Ref<AudioStream> p_stream) {

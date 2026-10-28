@@ -63,11 +63,10 @@ class BonePropertiesEditor : public VBoxContainer {
 	EditorInspectorSection *rest_section = nullptr;
 	EditorPropertyTransform3D *rest_matrix = nullptr;
 
-	EditorInspectorSection *skin_section = nullptr;
-	EditorPropertyVector3 *skin_scale_property = nullptr;
-
 	EditorInspectorSection *meta_section = nullptr;
 	AddMetadataDialog *add_meta_dialog = nullptr;
+
+	Rect2 background_rects[5];
 
 	Skeleton3D *skeleton = nullptr;
 	// String property;
@@ -115,8 +114,6 @@ class Skeleton3DEditor : public VBoxContainer {
 	enum SkeletonOption {
 		SKELETON_OPTION_RESET_ALL_POSES,
 		SKELETON_OPTION_RESET_SELECTED_POSES,
-		SKELETON_OPTION_RESET_ALL_POSES_AND_SKIN_SCALES,
-		SKELETON_OPTION_RESET_SELECTED_POSES_AND_SKIN_SCALES,
 		SKELETON_OPTION_ALL_POSES_TO_RESTS,
 		SKELETON_OPTION_SELECTED_POSES_TO_RESTS,
 		SKELETON_OPTION_CREATE_PHYSICAL_SKELETON,
@@ -180,7 +177,7 @@ class Skeleton3DEditor : public VBoxContainer {
 
 	void create_editors();
 
-	void reset_pose(const bool p_all_bones, const bool p_reset_bone_skin_scale);
+	void reset_pose(const bool p_all_bones);
 	void pose_to_rest(const bool p_all_bones);
 
 	void _insert_keys(const bool p_all_bones);

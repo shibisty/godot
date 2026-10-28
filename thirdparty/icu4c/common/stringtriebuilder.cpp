@@ -204,11 +204,8 @@ StringTrieBuilder::writeBranchSubNode(int32_t start, int32_t limit, int32_t unit
 // Requires start<limit,
 // and all strings of the [start..limit[ elements must be sorted and
 // have a common prefix of length unitIndex.
-StringTrieBuilder::Node*
-StringTrieBuilder::makeNode(int32_t start,
-                            int32_t limit,
-                            int32_t unitIndex,
-                            UErrorCode& errorCode) U_LIFETIME_BOUND {
+StringTrieBuilder::Node *
+StringTrieBuilder::makeNode(int32_t start, int32_t limit, int32_t unitIndex, UErrorCode &errorCode) {
     if(U_FAILURE(errorCode)) {
         return nullptr;
     }
@@ -259,12 +256,9 @@ StringTrieBuilder::makeNode(int32_t start,
 
 // start<limit && all strings longer than unitIndex &&
 // length different units at unitIndex
-StringTrieBuilder::Node*
-StringTrieBuilder::makeBranchSubNode(int32_t start,
-                                     int32_t limit,
-                                     int32_t unitIndex,
-                                     int32_t length,
-                                     UErrorCode& errorCode) U_LIFETIME_BOUND {
+StringTrieBuilder::Node *
+StringTrieBuilder::makeBranchSubNode(int32_t start, int32_t limit, int32_t unitIndex,
+                                   int32_t length, UErrorCode &errorCode) {
     if(U_FAILURE(errorCode)) {
         return nullptr;
     }
@@ -321,8 +315,8 @@ StringTrieBuilder::makeBranchSubNode(int32_t start,
     return node;
 }
 
-StringTrieBuilder::Node*
-StringTrieBuilder::registerNode(Node* newNode, UErrorCode& errorCode) U_LIFETIME_BOUND {
+StringTrieBuilder::Node *
+StringTrieBuilder::registerNode(Node *newNode, UErrorCode &errorCode) {
     if(U_FAILURE(errorCode)) {
         delete newNode;
         return nullptr;
@@ -350,8 +344,8 @@ StringTrieBuilder::registerNode(Node* newNode, UErrorCode& errorCode) U_LIFETIME
     return newNode;
 }
 
-StringTrieBuilder::Node*
-StringTrieBuilder::registerFinalValue(int32_t value, UErrorCode& errorCode) U_LIFETIME_BOUND {
+StringTrieBuilder::Node *
+StringTrieBuilder::registerFinalValue(int32_t value, UErrorCode &errorCode) {
     if(U_FAILURE(errorCode)) {
         return nullptr;
     }

@@ -71,7 +71,9 @@ void uninitialize_mono_module(ModuleInitializationLevel p_level) {
 
 	ScriptServer::unregister_language(script_language_cs);
 
-	memdelete(script_language_cs);
+	if (script_language_cs) {
+		memdelete(script_language_cs);
+	}
 
 	if constexpr (GD_IS_CLASS_ENABLED(CSharpScript)) {
 		ResourceLoader::remove_resource_format_loader(resource_loader_cs);
@@ -80,5 +82,7 @@ void uninitialize_mono_module(ModuleInitializationLevel p_level) {
 		resource_saver_cs.unref();
 	}
 
-	memdelete(_godotsharp);
+	if (_godotsharp) {
+		memdelete(_godotsharp);
+	}
 }

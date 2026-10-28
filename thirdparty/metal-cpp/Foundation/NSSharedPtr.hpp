@@ -22,7 +22,6 @@
 
 #include <cstddef>
 #include "NSDefines.hpp"
-#include "NSObject.hpp"
 
 namespace NS
 {
@@ -140,7 +139,7 @@ template <class _Class>
 _NS_INLINE NS::SharedPtr<_Class> RetainPtr(_Class* pObject)
 {
     NS::SharedPtr<_Class> ret;
-    ret.m_pObject = Object::sendMessage<_Class*>(pObject, _NS_PRIVATE_SEL(retain));
+    ret.m_pObject = pObject->retain();
     return ret;
 }
 
@@ -168,7 +167,7 @@ _NS_INLINE NS::SharedPtr<_Class>::SharedPtr()
 template <class _Class>
 _NS_INLINE NS::SharedPtr<_Class>::~SharedPtr<_Class>() __attribute__((no_sanitize("undefined")))
 {
-    Object::sendMessage<void>(m_pObject, _NS_PRIVATE_SEL(release));
+    m_pObject->release();
 }
 
 template <class _Class>
@@ -179,14 +178,14 @@ _NS_INLINE NS::SharedPtr<_Class>::SharedPtr(std::nullptr_t) noexcept
 
 template <class _Class>
 _NS_INLINE NS::SharedPtr<_Class>::SharedPtr(const SharedPtr<_Class>& other) noexcept
-    : m_pObject(Object::sendMessage<_Class*>(other.m_pObject, _NS_PRIVATE_SEL(retain)))
+    : m_pObject(other.m_pObject->retain())
 {
 }
 
 template <class _Class>
 template <class _OtherClass>
 _NS_INLINE NS::SharedPtr<_Class>::SharedPtr(const SharedPtr<_OtherClass>& other, typename std::enable_if_t<std::is_convertible_v<_OtherClass *, _Class *>> *) noexcept
-    : m_pObject(Object::sendMessage<_Class*>(other.get(), _NS_PRIVATE_SEL(retain)))
+    : m_pObject(reinterpret_cast<_Class*>(other.get()->retain()))
 {
 }
 
@@ -226,7 +225,7 @@ _NS_INLINE NS::SharedPtr<_Class>::operator bool() const
 template <class _Class>
 _NS_INLINE void NS::SharedPtr<_Class>::reset() __attribute__((no_sanitize("undefined")))
 {
-    Object::sendMessage<void>(m_pObject, _NS_PRIVATE_SEL(release));
+    m_pObject->release();
     m_pObject = nullptr;
 }
 
@@ -241,9 +240,9 @@ _NS_INLINE NS::SharedPtr<_Class>& NS::SharedPtr<_Class>::operator=(const SharedP
 {
     _Class* pOldObject = m_pObject;
 
-    m_pObject = Object::sendMessage<_Class*>(other.m_pObject, _NS_PRIVATE_SEL(retain));
+    m_pObject = other.m_pObject->retain();
 
-    Object::sendMessage<void>(pOldObject, _NS_PRIVATE_SEL(release));
+    pOldObject->release();
 
     return *this;
 }
@@ -255,9 +254,9 @@ _NS_INLINE NS::SharedPtr<_Class>::operator=(const SharedPtr<_OtherClass>& other)
 {
     _Class* pOldObject = m_pObject;
 
-    m_pObject = Object::sendMessage<_Class*>(other.get(), _NS_PRIVATE_SEL(retain));
+    m_pObject = reinterpret_cast<_Class*>(other.get()->retain());
 
-    Object::sendMessage<void>(pOldObject, _NS_PRIVATE_SEL(release));
+    pOldObject->release();
 
     return *this;
 }
@@ -267,13 +266,13 @@ _NS_INLINE NS::SharedPtr<_Class>& NS::SharedPtr<_Class>::operator=(SharedPtr<_Cl
 {
     if (m_pObject != other.m_pObject)
     {
-        Object::sendMessage<void>(m_pObject, _NS_PRIVATE_SEL(release));
+        m_pObject->release();
         m_pObject = other.m_pObject;
     }
     else
     {
         m_pObject = other.m_pObject;
-        Object::sendMessage<void>(other.m_pObject, _NS_PRIVATE_SEL(release));
+        other.m_pObject->release();
     }
     other.m_pObject = nullptr;
     return *this;
@@ -286,7 +285,7 @@ _NS_INLINE NS::SharedPtr<_Class>::operator=(SharedPtr<_OtherClass>&& other) __at
 {
     if (m_pObject != other.get())
     {
-        Object::sendMessage<void>(m_pObject, _NS_PRIVATE_SEL(release));
+        m_pObject->release();
         m_pObject = reinterpret_cast<_Class*>(other.get());
         other.detach();
     }

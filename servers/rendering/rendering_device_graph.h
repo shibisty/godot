@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/object/worker_thread_pool.h"
+#include "core/templates/safe_refcount.h"
 #include "servers/rendering/rendering_device_commons.h"
 #include "servers/rendering/rendering_device_driver.h"
 
@@ -94,7 +95,11 @@ public:
 			TYPE_SET_PUSH_CONSTANT,
 			TYPE_SET_SCISSOR,
 			TYPE_SET_VIEWPORT,
-			TYPE_UNIFORM_SET_PREPARE_FOR_USE
+			TYPE_UNIFORM_SET_PREPARE_FOR_USE,
+			// Mariner E7: mesh shading.
+			TYPE_DRAW_MESH_TASKS,
+			TYPE_DRAW_MESH_TASKS_INDIRECT,
+			TYPE_DRAW_MESH_TASKS_INDIRECT_COUNT,
 		};
 
 		Type type = TYPE_NONE;
@@ -120,6 +125,7 @@ public:
 			TYPE_TEXTURE_UPDATE,
 			TYPE_CAPTURE_TIMESTAMP,
 			TYPE_DRIVER_CALLBACK,
+			TYPE_BOTTOM_LEVEL_ACCELERATION_STRUCTURE_UPDATE,
 			TYPE_MAX
 		};
 
@@ -173,7 +179,6 @@ public:
 		RESOURCE_USAGE_ATTACHMENT_DEPTH_STENCIL_READ_WRITE,
 		RESOURCE_USAGE_ATTACHMENT_FRAGMENT_SHADING_RATE_READ,
 		RESOURCE_USAGE_ATTACHMENT_FRAGMENT_DENSITY_MAP_READ,
-		RESOURCE_USAGE_ATTACHMENT_RASTERIZATION_RATE_MAP_READ,
 		RESOURCE_USAGE_GENERAL,
 		RESOURCE_USAGE_ACCELERATION_STRUCTURE_READ,
 		RESOURCE_USAGE_ACCELERATION_STRUCTURE_READ_WRITE,
@@ -183,8 +188,6 @@ public:
 	struct ResourceTracker {
 		uint32_t reference_count = 0;
 		int64_t command_frame = -1;
-		int32_t command_index = -1;
-		uint32_t usage_index = UINT32_MAX;
 		BitField<RDD::PipelineStageBits> previous_frame_stages = {};
 		BitField<RDD::PipelineStageBits> current_frame_stages = {};
 		int32_t read_full_command_list_index = -1;
@@ -212,12 +215,14 @@ public:
 		bool in_parent_dirty_list = false;
 		bool write_command_list_enabled = false;
 		bool is_discardable = false;
+		// Mariner E6: the resource may be used by the async compute queue (created with the async compute flag).
+		bool async_compute_shared = false;
+		// Mariner E6: tracking frame of the async compute graph that last used the resource.
+		int64_t async_compute_frame = -1;
 
 		_FORCE_INLINE_ void reset_if_outdated(int64_t new_command_frame) {
 			if (new_command_frame != command_frame) {
 				command_frame = new_command_frame;
-				command_index = -1;
-				usage_index = UINT32_MAX;
 				previous_frame_stages = current_frame_stages;
 				current_frame_stages.clear();
 				read_full_command_list_index = -1;
@@ -260,7 +265,6 @@ public:
 
 	struct WorkaroundsState {
 		bool draw_list_found = false;
-		bool bound_any_draw_list_pipeline = false;
 	};
 
 	enum AttachmentOperation {
@@ -638,6 +642,29 @@ private:
 		uint32_t stride = 0;
 	};
 
+	// Mariner E7.
+	struct DrawListDrawMeshTasksInstruction : DrawListInstruction {
+		uint32_t group_count_x = 0;
+		uint32_t group_count_y = 0;
+		uint32_t group_count_z = 0;
+	};
+
+	struct DrawListDrawMeshTasksIndirectInstruction : DrawListInstruction {
+		RDD::BufferID buffer;
+		uint32_t offset = 0;
+		uint32_t draw_count = 0;
+		uint32_t stride = 0;
+	};
+
+	struct DrawListDrawMeshTasksIndirectCountInstruction : DrawListInstruction {
+		RDD::BufferID buffer;
+		uint32_t offset = 0;
+		RDD::BufferID count_buffer;
+		uint32_t count_buffer_offset = 0;
+		uint32_t max_draw_count = 0;
+		uint32_t stride = 0;
+	};
+
 	struct DrawListEndRenderPassInstruction : DrawListInstruction {
 		// No contents.
 	};
@@ -820,6 +847,7 @@ private:
 	RDD::DriverWorkarounds driver_workarounds;
 	RenderPassCreationFunction render_pass_creation_function = nullptr;
 	int64_t tracking_frame = 0;
+	static SafeNumeric<int64_t> tracking_frame_counter; // Mariner E6.
 	LocalVector<uint8_t> command_data;
 	LocalVector<uint32_t> command_data_offsets;
 	LocalVector<RDD::TextureBarrier> command_normalization_barriers;
@@ -843,10 +871,14 @@ private:
 	bool command_synchronization_pending = false;
 	BarrierGroup barrier_group;
 	bool driver_honors_barriers : 1;
-	bool driver_buffer_clears_with_copy_engine : 1;
-	bool driver_texture_clears_with_copy_engine : 1;
+	bool driver_clears_with_copy_engine : 1;
 	bool driver_buffers_require_transitions : 1;
-	bool driver_textures_require_layout_transitions : 1;
+	// Mariner E6: this graph records the async compute queue (barriers limited to compute queue stages).
+	bool async_compute_queue = false;
+	// Mariner E6 (main graph): tracking frame of the async compute graph in this frame, -1 if none, and whether a
+	// command of this graph used a resource the async compute graph used in this frame.
+	int64_t async_compute_peer_frame = -1;
+	bool async_compute_conflict = false;
 	WorkaroundsState workarounds_state;
 	TightLocalVector<Frame> frames;
 	uint32_t frame = 0;
@@ -899,6 +931,7 @@ public:
 	void finalize();
 	void begin();
 	void add_blas_build(RDD::AccelerationStructureID p_blas, RDD::BufferID p_scratch_buffer, ResourceTracker *p_dst_tracker, VectorView<ResourceTracker *> p_src_trackers);
+	void add_blas_update(RDD::AccelerationStructureID p_blas, RDD::BufferID p_scratch_buffer, ResourceTracker *p_dst_tracker, VectorView<ResourceTracker *> p_src_trackers);
 	void add_tlas_build(RDD::AccelerationStructureID p_tlas, RDD::BufferID p_scratch_buffer, RDD::BufferID p_instance_buffer, uint32_t p_instance_offset, uint32_t p_instance_count, ResourceTracker *p_dst_tracker, VectorView<ResourceTracker *> p_src_trackers);
 	void add_buffer_clear(RDD::BufferID p_dst, ResourceTracker *p_dst_tracker, uint32_t p_offset, uint32_t p_size);
 	void add_buffer_copy(RDD::BufferID p_src, ResourceTracker *p_src_tracker, RDD::BufferID p_dst, ResourceTracker *p_dst_tracker, RDD::BufferCopyRegion p_region);
@@ -937,6 +970,10 @@ public:
 	void add_draw_list_draw_indexed(uint32_t p_index_count, uint32_t p_instance_count, uint32_t p_first_index);
 	void add_draw_list_draw_indirect(RDD::BufferID p_buffer, uint32_t p_offset, uint32_t p_draw_count, uint32_t p_stride);
 	void add_draw_list_draw_indexed_indirect(RDD::BufferID p_buffer, uint32_t p_offset, uint32_t p_draw_count, uint32_t p_stride);
+	// Mariner E7: mesh shading.
+	void add_draw_list_draw_mesh_tasks(uint32_t p_group_count_x, uint32_t p_group_count_y, uint32_t p_group_count_z);
+	void add_draw_list_draw_mesh_tasks_indirect(RDD::BufferID p_buffer, uint32_t p_offset, uint32_t p_draw_count, uint32_t p_stride);
+	void add_draw_list_draw_mesh_tasks_indirect_count(RDD::BufferID p_buffer, uint32_t p_offset, RDD::BufferID p_count_buffer, uint32_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride);
 	void add_draw_list_execute_commands(RDD::CommandBufferID p_command_buffer);
 	void add_draw_list_next_subpass(RDD::CommandBufferType p_command_buffer_type);
 	void add_draw_list_set_blend_constants(const Color &p_color);
@@ -961,6 +998,22 @@ public:
 	void end(bool p_reorder_commands, bool p_full_barriers, RDD::CommandBufferID &r_command_buffer, CommandBufferPool &r_command_buffer_pool);
 	static ResourceTracker *resource_tracker_create();
 	static void resource_tracker_free(ResourceTracker *p_tracker);
+
+	// Mariner E6: async compute queue support.
+	// Pipeline stages and access types a compute-only queue supports. Anything else (graphics stages of the main
+	// queue that used the resource before) is replaced by ALL_COMMANDS / dropped: the queue semaphore wait already
+	// orders and makes visible the main queue's work.
+	static BitField<RDD::PipelineStageBits> async_compute_sanitize_stages(BitField<RDD::PipelineStageBits> p_stages);
+	static BitField<RDD::BarrierAccessBits> async_compute_sanitize_access(BitField<RDD::BarrierAccessBits> p_access);
+	void set_async_compute_queue(bool p_enable) { async_compute_queue = p_enable; }
+	bool is_async_compute_queue() const { return async_compute_queue; }
+	void set_async_compute_peer_frame(int64_t p_frame) { async_compute_peer_frame = p_frame; }
+	int64_t get_tracking_frame() const { return tracking_frame; }
+	bool has_commands() const { return command_count > 0; }
+	// The resource (or the texture it is a slice of) was used by a command of this graph in the current frame.
+	bool is_tracker_used_this_frame(const ResourceTracker *p_tracker) const;
+	// Returns and clears the conflict flag (see async_compute_conflict).
+	bool take_async_compute_conflict();
 	static FramebufferCache *framebuffer_cache_create();
 	static void framebuffer_cache_free(RDD *p_driver, FramebufferCache *p_cache);
 };

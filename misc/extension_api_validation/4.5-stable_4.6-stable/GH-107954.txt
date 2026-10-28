@@ -1,3 +1,5 @@
+GH-107954
+---------
 Validate extension JSON: API was removed: classes/TCPServer/methods/is_connection_available
 Validate extension JSON: API was removed: classes/TCPServer/methods/is_listening
 Validate extension JSON: API was removed: classes/TCPServer/methods/stop

@@ -200,6 +200,31 @@
 			The strength that is used when blurring across the screen to generate the glow effect. This affects the distance and intensity of the blur. When using the Mobile rendering method, this should be increased to compensate for the lower dynamic range.
 			[b]Note:[/b] [member glow_strength] has no effect when using the Compatibility rendering method, due to this rendering method using a simpler glow implementation optimized for low-end devices.
 		</member>
+		<member name="pathtracing_accumulate" type="bool" setter="set_pathtracing_accumulate" getter="is_pathtracing_accumulate" default="true">
+			If [code]true[/code], samples are accumulated over frames into a converging image; the accumulation restarts when the camera, the internal size, the scene (instances, transforms, meshes, materials), the lights or the path tracing settings change, or when [method Viewport.reset_pathtracing] is called. If [code]false[/code], every frame is traced from scratch.
+		</member>
+		<member name="pathtracing_debug_mode" type="int" setter="set_pathtracing_debug_mode" getter="get_pathtracing_debug_mode" enum="Environment.PathtracingDebugMode" default="0">
+			Shows a debug channel of the primary hit instead of the path-traced image. Modes that need DLSS Ray Reconstruction data show the albedo.
+		</member>
+		<member name="pathtracing_denoiser" type="int" setter="set_pathtracing_denoiser" getter="get_pathtracing_denoiser" enum="RenderingServer.PathtracingDenoiser" default="0">
+			Denoiser of the path-traced image. [constant RenderingServer.PT_DENOISER_DLSS_RAY_RECONSTRUCTION] is reserved for compatibility with NVIDIA's Godot fork and is not available in this build: a warning is printed and no denoiser is used. The image converges by accumulation.
+		</member>
+		<member name="pathtracing_enabled" type="bool" setter="set_pathtracing_enabled" getter="is_pathtracing_enabled" default="false">
+			If [code]true[/code], the opaque scene of viewports using this environment is path traced on the viewport's ray tracing scene (TLAS) instead of rasterized: global illumination, reflections, refraction through dielectric media and shadows from light sampling. The sky, transparent materials, compositor effects and post-processing are rendered as usual. Samples accumulate over frames while the camera, the scene, the lights and the path tracing settings stay the same (see [member pathtracing_accumulate]).
+			[b]Note:[/b] Mariner engine patch E5c. Requires Forward+ on Vulkan with ray query support, the [member ProjectSettings.rendering/raytracing/scene_acceleration_structures] project setting and [member Viewport.raytracing_scene_enabled] on the viewport; otherwise the viewport is rasterized.
+		</member>
+		<member name="pathtracing_firefly_clamp" type="float" setter="set_pathtracing_firefly_clamp" getter="get_pathtracing_firefly_clamp" default="0.0">
+			Clamps the luminance of the indirect light of each sample to this value to suppress fireflies (bright isolated pixels) at the cost of some energy. [code]0[/code] disables the clamp.
+		</member>
+		<member name="pathtracing_max_bounces" type="int" setter="set_pathtracing_max_bounces" getter="get_pathtracing_max_bounces" default="3">
+			Maximum number of bounces of a path (at most 2 of them diffuse). Refraction and reflection on dielectric media count as bounces.
+		</member>
+		<member name="pathtracing_max_samples" type="int" setter="set_pathtracing_max_samples" getter="get_pathtracing_max_samples" default="0">
+			Stops tracing once this many samples per pixel are accumulated; the converged image is then only composited each frame. [code]0[/code] means no limit.
+		</member>
+		<member name="pathtracing_samples_per_pixel" type="int" setter="set_pathtracing_samples_per_pixel" getter="get_pathtracing_samples_per_pixel" default="1">
+			Number of paths traced per pixel per frame. Higher values converge faster at a proportional GPU cost.
+		</member>
 		<member name="reflected_light_source" type="int" setter="set_reflection_source" getter="get_reflection_source" enum="Environment.ReflectionSource" default="0">
 			The reflected (specular) light source.
 		</member>
@@ -474,6 +499,75 @@
 		</constant>
 		<constant name="SDFGI_Y_SCALE_100_PERCENT" value="2" enum="SDFGIYScale">
 			Use 100% scale for SDFGI on the Y (vertical) axis. SDFGI cells will be as tall as they are wide. This is usually the best choice for highly vertical scenes. The downside is that light leaking may become more noticeable with thin floors and ceilings.
+		</constant>
+		<constant name="RT_DEBUG_DISABLED" value="0" enum="PathtracingDebugMode">
+			No debug visualization: the path-traced image.
+		</constant>
+		<constant name="RT_DEBUG_MIRROR_REFLECTION" value="1" enum="PathtracingDebugMode">
+			Not available in this build (shows the albedo).
+		</constant>
+		<constant name="RT_DEBUG_GEOMETRY_NORMALS" value="2" enum="PathtracingDebugMode">
+			Geometric (triangle) normals of the primary hit.
+		</constant>
+		<constant name="RT_DEBUG_FINAL_NORMALS" value="3" enum="PathtracingDebugMode">
+			Shading normals of the primary hit, with normal maps.
+		</constant>
+		<constant name="RT_DEBUG_NORMAL_MAP" value="4" enum="PathtracingDebugMode">
+			Tangent space normal map sample of the primary hit.
+		</constant>
+		<constant name="RT_DEBUG_TANGENT" value="5" enum="PathtracingDebugMode">
+			Tangent of the primary hit.
+		</constant>
+		<constant name="RT_DEBUG_BITANGENT" value="6" enum="PathtracingDebugMode">
+			Bitangent of the primary hit.
+		</constant>
+		<constant name="RT_DEBUG_UV" value="7" enum="PathtracingDebugMode">
+			UV coordinates of the primary hit (red = U, green = V).
+		</constant>
+		<constant name="RT_DEBUG_ALBEDO" value="8" enum="PathtracingDebugMode">
+			Albedo of the primary hit.
+		</constant>
+		<constant name="RT_DEBUG_ORM" value="9" enum="PathtracingDebugMode">
+			Occlusion (1), roughness and metallic of the primary hit.
+		</constant>
+		<constant name="RT_DEBUG_DIFFUSE_ALBEDO" value="10" enum="PathtracingDebugMode">
+			DLSS Ray Reconstruction guide buffer; not available in this build (shows the albedo).
+		</constant>
+		<constant name="RT_DEBUG_SPECULAR_ALBEDO" value="11" enum="PathtracingDebugMode">
+			DLSS Ray Reconstruction guide buffer; not available in this build (shows the albedo).
+		</constant>
+		<constant name="RT_DEBUG_NORMAL_ROUGHNESS" value="12" enum="PathtracingDebugMode">
+			Shading normals of the primary hit.
+		</constant>
+		<constant name="RT_DEBUG_SPECULAR_HIT_DISTANCE" value="13" enum="PathtracingDebugMode">
+			DLSS Ray Reconstruction guide buffer; not available in this build (shows the albedo).
+		</constant>
+		<constant name="RT_DEBUG_METALNESS" value="14" enum="PathtracingDebugMode">
+			Metallic of the primary hit.
+		</constant>
+		<constant name="RT_DEBUG_ROUGHNESS" value="15" enum="PathtracingDebugMode">
+			Roughness of the primary hit.
+		</constant>
+		<constant name="RT_DEBUG_VIEW_NORMALS" value="16" enum="PathtracingDebugMode">
+			Shading normals of the primary hit in view space.
+		</constant>
+		<constant name="RT_DEBUG_DIFFUSE_SPECULAR_SPLIT" value="17" enum="PathtracingDebugMode">
+			Not available in this build (shows the albedo).
+		</constant>
+		<constant name="RT_DEBUG_FRESNEL_F0" value="18" enum="PathtracingDebugMode">
+			Specular reflectance at normal incidence (F0) of the primary hit.
+		</constant>
+		<constant name="RT_DEBUG_FRONT_BACK_FACE" value="19" enum="PathtracingDebugMode">
+			Front faces green, back faces red.
+		</constant>
+		<constant name="RT_DEBUG_DEPTH" value="20" enum="PathtracingDebugMode">
+			Distance of the primary hit relative to the camera range.
+		</constant>
+		<constant name="RT_DEBUG_EMISSIVE" value="21" enum="PathtracingDebugMode">
+			Emission of the primary hit.
+		</constant>
+		<constant name="RT_DEBUG_BRDF_REJECTION" value="22" enum="PathtracingDebugMode">
+			Not available in this build (shows the albedo).
 		</constant>
 	</constants>
 </class>

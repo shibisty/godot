@@ -26,7 +26,6 @@
 #include <Jolt/Core/StreamOut.h>
 #include <Jolt/Core/Profiler.h>
 #include <Jolt/Core/UnorderedMap.h>
-#include <Jolt/Core/UnorderedSet.h>
 #include <Jolt/Geometry/AABox4.h>
 #include <Jolt/Geometry/RayAABox.h>
 #include <Jolt/Geometry/Indexify.h>
@@ -931,7 +930,7 @@ void MeshShape::sCastConvexVsMesh(const ShapeCast &inShapeCast, const ShapeCastS
 	Visitor visitor(inShapeCast, inShapeCastSettings, inScale, inCenterOfMassTransform2, inSubShapeIDCreator1, ioCollector);
 	visitor.mInvDirection.Set(inShapeCast.mDirection);
 	visitor.mBoxCenter = inShapeCast.mShapeWorldBounds.GetCenter();
-	visitor.mBoxExtent = inShapeCast.mShapeWorldBounds.GetExtent() + Vec3::sReplicate(inShapeCastSettings.mExtraConvexRadius);
+	visitor.mBoxExtent = inShapeCast.mShapeWorldBounds.GetExtent();
 	shape->WalkTreePerTriangle(inSubShapeIDCreator2, visitor);
 }
 

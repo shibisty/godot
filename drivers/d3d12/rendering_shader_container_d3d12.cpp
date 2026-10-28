@@ -469,11 +469,6 @@ bool RenderingShaderContainerD3D12::_convert_nir_to_dxil(const HashMap<int, nir_
 		nir_to_dxil_options.validator_version_max = NO_DXIL_VALIDATION;
 		nir_to_dxil_options.godot_nir_callbacks = &godot_nir_callbacks;
 
-		// For buffer device address, minimum 6.6 is required.
-		if (reflection_data.has_physical_storage_buffer_addresses) {
-			nir_to_dxil_options.shader_model_max = MAX(nir_to_dxil_options.shader_model_max, SHADER_MODEL_6_6);
-		}
-
 		dxil_logger logger = {};
 		logger.log = [](void *p_priv, const char *p_msg) {
 #ifdef DEBUG_ENABLED
@@ -756,10 +751,6 @@ bool RenderingShaderContainerD3D12::_generate_root_signature(BitField<RenderingD
 		root_sig_flags |= D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 	}
 
-	if (reflection_data.has_physical_storage_buffer_addresses) {
-		root_sig_flags |= D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
-	}
-
 	root_sig_desc.Init_1_1(root_params.size(), root_params.ptr(), 0, nullptr, root_sig_flags);
 
 	// Create and store the root signature and its CRC32.
@@ -912,6 +903,14 @@ void RenderingShaderContainerD3D12::_set_from_shader_reflection_post(const Refle
 bool RenderingShaderContainerD3D12::_set_code_from_spirv(const ReflectShader &p_shader) {
 #if NIR_ENABLED
 	const LocalVector<ReflectShaderStage> &p_spirv = p_shader.shader_stages;
+
+	// Mariner E7: Mesa's NIR to DXIL backend has no mesh / amplification shader kinds (DXIL shader kinds 13/14,
+	// shader model 6.5), so task and mesh stages can't be translated. The engine reports SUPPORTS_MESH_SHADER = false
+	// on Direct3D 12; this keeps containers created by other paths (e.g. the shader baker) from reaching NIR.
+	for (const ReflectShaderStage &stage : p_spirv) {
+		ERR_FAIL_COND_V_MSG(stage.shader_stage == RenderingDeviceCommons::SHADER_STAGE_TASK || stage.shader_stage == RenderingDeviceCommons::SHADER_STAGE_MESH, false,
+				"Mesh and task shaders are not supported on Direct3D 12 (Mesa's SPIR-V to DXIL translation has no mesh/amplification stages). Use the Vulkan rendering driver.");
+	}
 	reflection_data_d3d12.nir_runtime_data_root_param_idx = UINT32_MAX;
 
 	for (int64_t i = 0; i < reflection_specialization_data.size(); i++) {
@@ -1015,7 +1014,7 @@ RenderingDeviceCommons::ShaderLanguageVersion RenderingShaderContainerFormatD3D1
 	return SHADER_LANGUAGE_VULKAN_VERSION_1_1;
 }
 
-RenderingDeviceCommons::ShaderSpirvVersion RenderingShaderContainerFormatD3D12::get_shader_spirv_version(ShaderStage p_stage) const {
+RenderingDeviceCommons::ShaderSpirvVersion RenderingShaderContainerFormatD3D12::get_shader_spirv_version() const {
 	// The SPIR-V part of Mesa supports 1.6, but:
 	// - SPIRV-Reflect won't be able to parse the compute workgroup size.
 	// - We want to play it safe with NIR-DXIL.

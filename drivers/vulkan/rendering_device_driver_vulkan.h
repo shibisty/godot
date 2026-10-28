@@ -100,6 +100,13 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 		uint32_t min_acceleration_structure_scratch_offset_alignment = 0;
 	};
 
+	struct DescriptorIndexingCapabilities {
+		bool shader_sampled_image_array_non_uniform_indexing = false;
+		bool descriptor_binding_partially_bound = false;
+		bool descriptor_binding_variable_descriptor_count = false;
+		bool runtime_descriptor_array = false;
+	};
+
 	struct RaytracingCapabilities {
 		bool raytracing_pipeline_support = false;
 		uint32_t shader_group_handle_size = 0;
@@ -107,6 +114,29 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 		uint32_t shader_group_handle_size_aligned = 0;
 		uint32_t shader_group_base_alignment = 0;
 		bool validation = false;
+	};
+
+	// Mariner E7: VK_EXT_mesh_shader.
+	struct MeshShaderCapabilities {
+		bool task_shader_supported = false;
+		bool mesh_shader_supported = false;
+		bool draw_indirect_count_supported = false; // VK_KHR_draw_indirect_count (vkCmdDrawMeshTasksIndirectCountEXT).
+		uint32_t max_task_work_group_count[3] = {};
+		uint32_t max_task_work_group_total_count = 0;
+		uint32_t max_task_work_group_invocations = 0;
+		uint32_t max_task_work_group_size[3] = {};
+		uint32_t max_task_payload_size = 0;
+		uint32_t max_mesh_work_group_count[3] = {};
+		uint32_t max_mesh_work_group_total_count = 0;
+		uint32_t max_mesh_work_group_invocations = 0;
+		uint32_t max_mesh_work_group_size[3] = {};
+		uint32_t max_mesh_output_vertices = 0;
+		uint32_t max_mesh_output_primitives = 0;
+		uint32_t max_mesh_shared_memory_size = 0;
+		uint32_t max_preferred_task_work_group_invocations = 0;
+		uint32_t max_preferred_mesh_work_group_invocations = 0;
+
+		bool is_supported() const { return task_shader_supported && mesh_shader_supported; }
 	};
 
 	struct DeviceFunctions {
@@ -135,6 +165,11 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 		PFN_vkCreateRayTracingPipelinesKHR CreateRaytracingPipelinesKHR = nullptr;
 		PFN_vkGetRayTracingShaderGroupHandlesKHR GetRayTracingShaderGroupHandlesKHR = nullptr;
 		PFN_vkCmdTraceRaysKHR CmdTraceRaysKHR = nullptr;
+
+		// Mariner E7: mesh shader extension.
+		PFN_vkCmdDrawMeshTasksEXT CmdDrawMeshTasksEXT = nullptr;
+		PFN_vkCmdDrawMeshTasksIndirectEXT CmdDrawMeshTasksIndirectEXT = nullptr;
+		PFN_vkCmdDrawMeshTasksIndirectCountEXT CmdDrawMeshTasksIndirectCountEXT = nullptr;
 	};
 	// Debug marker extensions.
 	VkDebugReportObjectTypeEXT _convert_to_debug_report_objectType(VkObjectType p_object_type);
@@ -164,14 +199,19 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 	bool vulkan_memory_model_device_scope_support = false;
 	AccelerationStructureCapabilities acceleration_structure_capabilities;
 	bool ray_query_support = false;
+	DescriptorIndexingCapabilities descriptor_indexing_capabilities;
 	RaytracingCapabilities raytracing_capabilities;
 	bool pipeline_cache_control_support = false;
 	bool device_fault_support = false;
 	bool framebuffer_depth_resolve = false;
+	// Mariner E6: async compute.
+	bool timeline_semaphore_support = false;
+	// Mariner E7: mesh shaders.
+	MeshShaderCapabilities mesh_shader_capabilities;
+	LocalVector<uint32_t> async_compute_shared_families; // Queue family indices for VK_SHARING_MODE_CONCURRENT.
 #if defined(VK_TRACK_DEVICE_MEMORY)
 	bool device_memory_report_support = false;
 #endif
-	bool device_local_host_visible_host_coherent_memory_support = false;
 #if defined(SWAPPY_FRAME_PACING_ENABLED)
 	// Swappy frame pacer for Android.
 	bool swappy_frame_pacer_enable = false;
@@ -194,7 +234,6 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 
 	PipelineStatistics pipeline_statistics;
 	DriverWorkarounds driver_workarounds;
-	BinaryMutex *powervr_rogue_shader_crash_workaround_mutex = nullptr;
 
 	void _register_requested_device_extension(const CharString &p_extension_name, bool p_required);
 	Error _initialize_device_extensions();
@@ -380,6 +419,9 @@ private:
 		LocalVector<uint32_t> pending_semaphores_for_fence;
 		LocalVector<uint32_t> free_image_semaphores;
 		LocalVector<Pair<Fence *, uint32_t>> image_semaphores_for_fences;
+		// Mariner E6: timeline semaphore operations for the next submission with command buffers.
+		LocalVector<Pair<VkSemaphore, uint64_t>> pending_timeline_waits;
+		LocalVector<Pair<VkSemaphore, uint64_t>> pending_timeline_signals;
 		uint32_t queue_family = 0;
 		uint32_t queue_index = 0;
 	};
@@ -388,6 +430,15 @@ public:
 	virtual CommandQueueID command_queue_create(CommandQueueFamilyID p_cmd_queue_family, bool p_identify_as_main_queue = false) override final;
 	virtual Error command_queue_execute_and_present(CommandQueueID p_cmd_queue, VectorView<SemaphoreID> p_wait_semaphores, VectorView<CommandBufferID> p_cmd_buffers, VectorView<SemaphoreID> p_cmd_semaphores, FenceID p_cmd_fence, VectorView<SwapChainID> p_swap_chains) override final;
 	virtual void command_queue_free(CommandQueueID p_cmd_queue) override final;
+
+	// Mariner E6: async compute.
+	virtual bool timeline_semaphore_is_supported() override final;
+	virtual SemaphoreID timeline_semaphore_create() override final;
+	virtual void timeline_semaphore_free(SemaphoreID p_semaphore) override final;
+	virtual void command_queue_add_timeline_wait(CommandQueueID p_cmd_queue, SemaphoreID p_semaphore, uint64_t p_value) override final;
+	virtual void command_queue_add_timeline_signal(CommandQueueID p_cmd_queue, SemaphoreID p_semaphore, uint64_t p_value) override final;
+	virtual void async_compute_set_shared_queue_families(VectorView<CommandQueueFamilyID> p_families) override final;
+	virtual bool command_queue_family_supports_timestamps(CommandQueueFamilyID p_cmd_queue_family) override final;
 
 private:
 	// ----- POOL -----
@@ -521,6 +572,8 @@ public:
 
 private:
 	static const uint32_t MAX_UNIFORM_POOL_ELEMENT = 65535;
+	// Upper bound reserved in descriptor set layouts for runtime-sized (unbounded) descriptor arrays.
+	static const uint32_t MAX_UNBOUNDED_DESCRIPTOR_COUNT = 16384;
 
 	struct DescriptorSetPoolKey {
 		uint16_t uniform_type[UNIFORM_TYPE_MAX] = {};
@@ -548,7 +601,7 @@ private:
 		VkDescriptorPool vk_descriptor_pool = VK_NULL_HANDLE;
 		VkDescriptorPool vk_linear_descriptor_pool = VK_NULL_HANDLE;
 		DescriptorSetPools::Iterator pool_sets_it;
-		TightLocalVector<const BufferInfo *, uint32_t> dynamic_buffers;
+		TightLocalVector<BufferInfo const *, uint32_t> dynamic_buffers;
 	};
 
 	bool adreno_5xx_empty_descriptor_set_layout_workaround = false;
@@ -657,6 +710,11 @@ public:
 	virtual void command_render_draw_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, uint32_t p_draw_count, uint32_t p_stride) override final;
 	virtual void command_render_draw_indirect_count(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, BufferID p_count_buffer, uint64_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride) override final;
 
+	// Mariner E7: mesh shading.
+	virtual void command_render_draw_mesh_tasks(CommandBufferID p_cmd_buffer, uint32_t p_group_count_x, uint32_t p_group_count_y, uint32_t p_group_count_z) override final;
+	virtual void command_render_draw_mesh_tasks_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, uint32_t p_draw_count, uint32_t p_stride) override final;
+	virtual void command_render_draw_mesh_tasks_indirect_count(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, BufferID p_count_buffer, uint64_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride) override final;
+
 	// Buffer binding.
 	virtual void command_render_bind_vertex_buffers(CommandBufferID p_cmd_buffer, uint32_t p_binding_count, const BufferID *p_buffers, const uint64_t *p_offsets, uint64_t p_dynamic_offsets) override final;
 	virtual void command_render_bind_index_buffer(CommandBufferID p_cmd_buffer, BufferID p_buffer, IndexBufferFormat p_format, uint64_t p_offset) override final;
@@ -709,6 +767,8 @@ public:
 		VkAccelerationStructureKHR vk_acceleration_structure = VK_NULL_HANDLE;
 		// Buffer used for the structure
 		RDD::BufferID buffer;
+		// Device address of `buffer`, cached for TLAS instance writes.
+		VkDeviceAddress cached_device_address = 0;
 
 		// Alignment of the scratch buffer for building the structure
 		uint32_t scratch_alignment;
@@ -736,6 +796,7 @@ private:
 public:
 	// ----- COMMANDS -----
 	virtual void command_build_blas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer) override final;
+	virtual void command_update_blas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer) override final;
 	virtual void command_build_tlas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer, BufferID p_instance_buffer, uint32_t p_instance_offset, uint32_t p_instance_count) override final;
 	virtual void command_bind_raytracing_pipeline(CommandBufferID p_cmd_buffer, RaytracingPipelineID p_pipeline) override final;
 	virtual void command_bind_raytracing_uniform_set(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index) override final;
@@ -775,6 +836,7 @@ public:
 	/**** DEBUG *****/
 	/****************/
 	virtual void command_insert_breadcrumb(CommandBufferID p_cmd_buffer, uint32_t p_data) override final;
+	virtual void *command_buffer_get_native_handle(CommandBufferID p_cmd_buffer) override final;
 	void print_lost_device_info();
 	void on_device_lost() const;
 	static String get_vulkan_result(VkResult err);

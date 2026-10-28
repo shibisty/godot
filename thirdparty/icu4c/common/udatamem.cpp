@@ -54,8 +54,9 @@ U_CFUNC UDataMemory *UDataMemory_createNewInstance(UErrorCode *pErr) {
     return This;
 }
 
-U_CFUNC const DataHeader*
-UDataMemory_normalizeDataPointer(const void* p U_LIFETIME_BOUND) {
+
+U_CFUNC const DataHeader *
+UDataMemory_normalizeDataPointer(const void *p) {
     /* allow the data to be optionally prepended with an alignment-forcing double value */
     const DataHeader *pdh = (const DataHeader *)p;
     if(pdh==nullptr || (pdh->dataHeader.magic1==0xda && pdh->dataHeader.magic2==0x27)) {
@@ -99,8 +100,8 @@ udata_close(UDataMemory *pData) {
     }
 }
 
-U_CAPI const void* U_EXPORT2
-udata_getMemory(UDataMemory* pData U_LIFETIME_BOUND) {
+U_CAPI const void * U_EXPORT2
+udata_getMemory(UDataMemory *pData) {
     if(pData!=nullptr && pData->pHeader!=nullptr) {
         return (char *)(pData->pHeader)+udata_getHeaderSize(pData->pHeader);
     } else {
@@ -146,8 +147,8 @@ udata_getLength(const UDataMemory *pData) {
  * Used in cintltst/udatatst.c
  * @internal
  */
-U_CAPI const void* U_EXPORT2
-udata_getRawMemory(const UDataMemory* pData U_LIFETIME_BOUND) {
+U_CAPI const void * U_EXPORT2
+udata_getRawMemory(const UDataMemory *pData) {
     if(pData!=nullptr && pData->pHeader!=nullptr) {
         return pData->pHeader;
     } else {

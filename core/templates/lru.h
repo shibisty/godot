@@ -34,7 +34,7 @@
 #include "core/templates/list.h"
 
 template <typename TKey, typename TData, typename Hasher = HashMapHasherDefault, typename Comparator = HashMapComparatorDefault<TKey>, void (*BeforeEvict)(TKey &, TData &) = nullptr>
-class _WARN_UNUSED_ LRUCache {
+class LRUCache {
 public:
 	struct Pair {
 		TKey key;

@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="Streamline" inherits="Object" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		NVIDIA Streamline interface (DLSS, DLSS Frame Generation, Reflex).
+	</brief_description>
+	<description>
+		Global NVIDIA Streamline interface. Streamline provides NVIDIA DLSS Super Resolution and DLAA through [constant Viewport.SCALING_3D_MODE_DLSS], DLSS Frame Generation through [member Viewport.frame_generation], and NVIDIA Reflex low latency mode with PC Latency (PCL) markers.
+		Streamline is only compiled into Windows builds ([code]use_streamline=yes[/code], the default) and is only initialized for the D3D12 and Vulkan rendering drivers. DLSS needs [code]sl.interposer.dll[/code], [code]sl.common.dll[/code], [code]sl.dlss.dll[/code] and [code]nvngx_dlss.dll[/code] from the NVIDIA Streamline SDK next to the executable; Frame Generation and Reflex also need [code]sl.dlss_g.dll[/code], [code]nvngx_dlssg.dll[/code], [code]sl.reflex.dll[/code] and [code]sl.pcl.dll[/code]. Frame Generation, Reflex and PCL are only loaded for the running project, never in the editor or project manager. In every other case, all capabilities are reported as unavailable.
+		[codeblock]
+		var sl = Engine.get_singleton("Streamline") if Engine.has_singleton("Streamline") else null
+		if sl and sl.get_capability(0): # STREAMLINE_CAPABILITY_DLSS
+		    get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_DLSS
+		    if sl.get_capability(1): # STREAMLINE_CAPABILITY_DLSS_G
+		        get_viewport().frame_generation = true
+		[/codeblock]
+		[b]Note:[/b] Ray Reconstruction and NIS are not part of this build; their capabilities are always reported as unavailable.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_capability">
+			<return type="bool" />
+			<param index="0" name="capability_type" type="int" enum="StreamlineCapabilityType" />
+			<description>
+				Returns [code]true[/code] if Streamline reports the capability as supported on the current rendering device. See [enum StreamlineCapabilityType] for types. The value is known once the rendering device is created (i.e. from any script's [code]_ready()[/code]).
+			</description>
+		</method>
+		<method name="get_frame_generation_max_frames" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the maximum number of frames DLSS Frame Generation can generate per rendered frame on this GPU: [code]1[/code] (2x, RTX 40 series) or [code]3[/code] (up to 4x, DLSS Multi Frame Generation on RTX 50 series). Returns [code]0[/code] if frame generation is unavailable or has not been started yet (the value is queried when frame generation is first enabled).
+			</description>
+		</method>
+		<method name="get_frame_generation_status" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the last DLSS Frame Generation status reported by Streamline while frame generation was active, as a bitmask of [code]sl::DLSSGStatus[/code] failure flags: [code]1[/code] resolution too low, [code]2[/code] Reflex not running, [code]4[/code] unsupported back buffer format, [code]8[/code] invalid constants. [code]0[/code] means everything works (or frame generation never ran). Failures are also printed as errors.
+			</description>
+		</method>
+		<method name="get_parameter" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="parameter_type" type="int" enum="StreamlineParameterType" />
+			<description>
+				Returns the value requested with [method set_parameter] (or from the project settings once the rendering device is created). [constant STREAMLINE_PARAM_DLSS_RR_PRESET] returns [code]null[/code].
+			</description>
+		</method>
+		<method name="get_reflex_mode" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the NVIDIA Reflex mode actually applied, see [enum StreamlineReflexMode]. It can be higher than the requested [constant STREAMLINE_PARAM_REFLEX_MODE], since DLSS Frame Generation forces low latency mode while it is active. Returns [constant STREAMLINE_REFLEX_MODE_OFF] when Reflex is unavailable.
+			</description>
+		</method>
+		<method name="is_frame_generation_active" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while DLSS Frame Generation is enabled on a viewport. Frame generation starts a few frames after [member Viewport.frame_generation] is set (once Reflex runs), and is turned off temporarily while the window is resized and when the viewport is not rendered with DLSS.
+			</description>
+		</method>
+		<method name="set_parameter">
+			<return type="void" />
+			<param index="0" name="parameter_type" type="int" enum="StreamlineParameterType" />
+			<param index="1" name="value" type="Variant" />
+			<description>
+				Set various parameters related to Streamline. See [enum StreamlineParameterType] for types.
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="STREAMLINE_PARAM_REFLEX_MODE" value="0" enum="StreamlineParameterType">
+			NVIDIA Reflex mode: [code]0.0[/code] off, [code]1.0[/code] low latency, [code]2.0[/code] low latency with boost (see [enum StreamlineReflexMode]). Overrides [member ProjectSettings.rendering/streamline/reflex_mode].
+		</constant>
+		<constant name="STREAMLINE_PARAM_REFLEX_FRAME_LIMIT_US" value="1" enum="StreamlineParameterType">
+			Frame rate limit done by NVIDIA Reflex, as a frame time in microseconds ([code]0[/code] = no limit). Overrides [member ProjectSettings.rendering/streamline/reflex_frame_limit_us].
+		</constant>
+		<constant name="STREAMLINE_PARAM_DLSS_PRESET" value="2" enum="StreamlineParameterType">
+			The default DLSS preset to use, as a one-letter [String]. Overrides [member ProjectSettings.rendering/streamline/dlss_preset].
+			Valid values: ?,F,G,H,I,J,K,L,M,N,O
+		</constant>
+		<constant name="STREAMLINE_PARAM_DLSS_RR_PRESET" value="3" enum="StreamlineParameterType">
+			The default DLSS Ray Reconstruction preset to use. Not supported in this build (ignored).
+		</constant>
+		<constant name="STREAMLINE_PARAM_DLSS_G_FRAMES" value="4" enum="StreamlineParameterType">
+			Number of frames DLSS Frame Generation generates per rendered frame, [code]1[/code] to [code]3[/code] (2x to 4x). Values above [method get_frame_generation_max_frames] are clamped. Overrides [member ProjectSettings.rendering/streamline/frame_generation_frames].
+		</constant>
+		<constant name="STREAMLINE_CAPABILITY_DLSS" value="0" enum="StreamlineCapabilityType">
+			Whether Streamline reports that NVIDIA DLSS Super Resolution / DLAA is supported.
+		</constant>
+		<constant name="STREAMLINE_CAPABILITY_DLSS_G" value="1" enum="StreamlineCapabilityType">
+			Whether NVIDIA DLSS Frame Generation can be used: Streamline reports it as supported (RTX 40 series or newer, hardware-accelerated GPU scheduling enabled, recent driver) and Reflex and PCL are available too. Always [code]false[/code] in the editor.
+		</constant>
+		<constant name="STREAMLINE_CAPABILITY_DLSS_RR" value="2" enum="StreamlineCapabilityType">
+			Whether Streamline reports that NVIDIA DLSS Ray Reconstruction is supported. Always [code]false[/code] in this build.
+		</constant>
+		<constant name="STREAMLINE_CAPABILITY_NIS" value="5" enum="StreamlineCapabilityType">
+			Whether Streamline reports that NVIDIA Image Scaling is supported. Always [code]false[/code] in this build.
+		</constant>
+		<constant name="STREAMLINE_CAPABILITY_REFLEX" value="3" enum="StreamlineCapabilityType">
+			Whether Streamline reports that NVIDIA Reflex low latency mode is supported. Always [code]false[/code] in the editor.
+		</constant>
+		<constant name="STREAMLINE_CAPABILITY_PCL" value="4" enum="StreamlineCapabilityType">
+			Whether Streamline reports that PC Latency (PCL) markers are supported. Always [code]false[/code] in the editor.
+		</constant>
+		<constant name="STREAMLINE_REFLEX_MODE_OFF" value="0" enum="StreamlineReflexMode">
+			NVIDIA Reflex is off.
+		</constant>
+		<constant name="STREAMLINE_REFLEX_MODE_LOW_LATENCY" value="1" enum="StreamlineReflexMode">
+			NVIDIA Reflex low latency mode.
+		</constant>
+		<constant name="STREAMLINE_REFLEX_MODE_LOW_LATENCY_WITH_BOOST" value="2" enum="StreamlineReflexMode">
+			NVIDIA Reflex low latency mode with boost (keeps GPU clocks high).
+		</constant>
+	</constants>
+</class>

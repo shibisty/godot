@@ -75,39 +75,39 @@ bool DirAccess::drives_are_shortcuts() {
 	return false;
 }
 
-static Error _erase_recursive(DirAccess *p_dir) {
+static Error _erase_recursive(DirAccess *da) {
 	List<String> dirs;
 	List<String> files;
 
-	p_dir->list_dir_begin();
-	String n = p_dir->get_next();
+	da->list_dir_begin();
+	String n = da->get_next();
 	while (!n.is_empty()) {
 		if (n != "." && n != "..") {
-			if (p_dir->current_is_dir() && !p_dir->is_link(n)) {
+			if (da->current_is_dir() && !da->is_link(n)) {
 				dirs.push_back(n);
 			} else {
 				files.push_back(n);
 			}
 		}
 
-		n = p_dir->get_next();
+		n = da->get_next();
 	}
 
-	p_dir->list_dir_end();
+	da->list_dir_end();
 
 	for (const String &E : dirs) {
-		Error err = p_dir->change_dir(E);
+		Error err = da->change_dir(E);
 		if (err == OK) {
-			err = _erase_recursive(p_dir);
+			err = _erase_recursive(da);
 			if (err) {
-				p_dir->change_dir("..");
+				da->change_dir("..");
 				return err;
 			}
-			err = p_dir->change_dir("..");
+			err = da->change_dir("..");
 			if (err) {
 				return err;
 			}
-			err = p_dir->remove(p_dir->get_current_dir().path_join(E));
+			err = da->remove(da->get_current_dir().path_join(E));
 			if (err) {
 				return err;
 			}
@@ -117,7 +117,10 @@ static Error _erase_recursive(DirAccess *p_dir) {
 	}
 
 	for (const String &E : files) {
-		RETURN_IF_ERROR(p_dir->remove(p_dir->get_current_dir().path_join(E)));
+		Error err = da->remove(da->get_current_dir().path_join(E));
+		if (err) {
+			return err;
+		}
 	}
 
 	return OK;
@@ -487,6 +490,7 @@ public:
 Error DirAccess::_copy_dir(Ref<DirAccess> &p_target_da, const String &p_to, int p_chmod_flags, bool p_copy_links) {
 	List<String> dirs;
 
+	String curdir = get_current_dir();
 	list_dir_begin();
 	String n = get_next();
 	while (!n.is_empty()) {

@@ -71,7 +71,7 @@ public:
      * @return *this
      * @stable ICU 4.8
      */
-    BytesTrieBuilder& add(StringPiece s, int32_t value, UErrorCode& errorCode) U_LIFETIME_BOUND;
+    BytesTrieBuilder &add(StringPiece s, int32_t value, UErrorCode &errorCode);
 
     /**
      * Builds a BytesTrie for the add()ed data.
@@ -116,8 +116,7 @@ public:
      * @return A StringPiece which refers to the byte-serialized BytesTrie for the add()ed data.
      * @stable ICU 4.8
      */
-    StringPiece buildStringPiece(UStringTrieBuildOption buildOption,
-                                 UErrorCode& errorCode) U_LIFETIME_BOUND;
+    StringPiece buildStringPiece(UStringTrieBuildOption buildOption, UErrorCode &errorCode);
 
     /**
      * Removes all (byte sequence, value) pairs.
@@ -125,7 +124,7 @@ public:
      * @return *this
      * @stable ICU 4.8
      */
-    BytesTrieBuilder& clear() U_LIFETIME_BOUND;
+    BytesTrieBuilder &clear();
 
 private:
     friend class ::BytesTrieTest;

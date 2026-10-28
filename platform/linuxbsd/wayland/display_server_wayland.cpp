@@ -636,20 +636,6 @@ Ref<Image> DisplayServerWayland::clipboard_get_image() const {
 	return image;
 }
 
-bool DisplayServerWayland::clipboard_has_image() const {
-	MutexLock mutex_lock(wayland_thread.mutex);
-
-	return wayland_thread.selection_has_mime("image/png") ||
-			wayland_thread.selection_has_mime("image/jpeg") ||
-			wayland_thread.selection_has_mime("image/webp") ||
-			wayland_thread.selection_has_mime("image/svg+xml") ||
-			wayland_thread.selection_has_mime("image/bmp") ||
-			wayland_thread.selection_has_mime("image/x-tga") ||
-			wayland_thread.selection_has_mime("image/x-targa") ||
-			wayland_thread.selection_has_mime("image/ktx") ||
-			wayland_thread.selection_has_mime("image/x-exr");
-}
-
 void DisplayServerWayland::clipboard_set_primary(const String &p_text) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
@@ -1090,18 +1076,8 @@ void DisplayServerWayland::window_set_title(const String &p_title, DisplayServer
 }
 
 void DisplayServerWayland::window_set_mouse_passthrough(const Vector<Vector2> &p_region, DisplayServerEnums::WindowID p_window_id) {
-	MutexLock mutex_lock(wayland_thread.mutex);
-
-	ERR_FAIL_COND(!windows.has(p_window_id));
-
-	WindowData &wd = windows[p_window_id];
-	if (wd.mpass_region == p_region) {
-		return;
-	}
-
-	wd.mpass_region = p_region;
-
-	wayland_thread.window_set_input_region(p_window_id, window_get_flag(DisplayServerEnums::WINDOW_FLAG_MOUSE_PASSTHROUGH), wd.mpass_region);
+	// TODO
+	DEBUG_LOG_WAYLAND(vformat("wayland stub window_set_mouse_passthrough region %s", p_region));
 }
 
 void DisplayServerWayland::window_set_rect_changed_callback(const Callable &p_callable, DisplayServerEnums::WindowID p_window_id) {
@@ -1371,10 +1347,6 @@ void DisplayServerWayland::window_set_flag(DisplayServerEnums::WindowFlags p_fla
 			ERR_FAIL_COND_MSG(wd.created && (wd.flags & DisplayServerEnums::WINDOW_FLAG_POPUP_WM_HINT_BIT) != p_enabled, "Popup hint can't changed while window is opened.");
 		} break;
 
-		case DisplayServerEnums::WINDOW_FLAG_MOUSE_PASSTHROUGH: {
-			wayland_thread.window_set_input_region(p_window_id, p_enabled, wd.mpass_region);
-		} break;
-
 		default: {
 		}
 	}
@@ -1398,11 +1370,11 @@ void DisplayServerWayland::window_request_attention(DisplayServerEnums::WindowID
 
 	DEBUG_LOG_WAYLAND("Requested attention.");
 
-	wayland_thread.window_request_attention(p_window_id, false);
+	wayland_thread.window_request_attention(p_window_id);
 }
 
 void DisplayServerWayland::window_move_to_foreground(DisplayServerEnums::WindowID p_window_id) {
-	wayland_thread.window_request_attention(p_window_id, true);
+	// Standard Wayland APIs don't support this.
 }
 
 bool DisplayServerWayland::window_is_focused(DisplayServerEnums::WindowID p_window_id) const {
@@ -1544,9 +1516,10 @@ void DisplayServerWayland::window_start_resize(DisplayServerEnums::WindowResizeE
 }
 
 void DisplayServerWayland::_window_update_hdr_state(WindowData &p_window) {
+	DisplayServerEnums::WindowID window_id = p_window.id;
+
 #if defined(RD_ENABLED)
 	if (rendering_context) {
-		DisplayServerEnums::WindowID window_id = p_window.id;
 		// The `display/window/hdr/request_hdr_output` project setting makes the main window "request" HDR.
 		// On Windows, this means enable HDR for the main window if it is on an HDR screen.
 		// Since all screens support HDR on Wayland, we use whether the window "prefers" HDR or not instead.
@@ -2612,18 +2585,31 @@ DisplayServerWayland::~DisplayServerWayland() {
 
 	// Destroy all drivers.
 #ifdef RD_ENABLED
-	memdelete(rendering_device);
-	memdelete(rendering_context);
+	if (rendering_device) {
+		memdelete(rendering_device);
+	}
+
+	if (rendering_context) {
+		memdelete(rendering_context);
+	}
 #endif
 
 #ifdef SPEECHD_ENABLED
-	memdelete(tts);
+	if (tts) {
+		memdelete(tts);
+	}
 #endif
 
 #ifdef DBUS_ENABLED
-	memdelete(portal_desktop);
-	memdelete(screensaver);
-	memdelete(atspi_monitor);
+	if (portal_desktop) {
+		memdelete(portal_desktop);
+	}
+	if (screensaver) {
+		memdelete(screensaver);
+	}
+	if (atspi_monitor) {
+		memdelete(atspi_monitor);
+	}
 #endif
 }
 

@@ -30,7 +30,11 @@
 
 #pragma once
 
+#include "core/math/projection.h"
 #include "core/templates/hash_map.h"
+#include "core/templates/local_vector.h"
+#include "core/templates/safe_refcount.h"
+#include "core/variant/typed_array.h"
 #include "servers/rendering/renderer_rd/effects/vrs.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_buffer_custom_data_rd.h"
@@ -63,10 +67,15 @@
 #define RB_TEX_BACK_COLOR SNAME("back_color")
 #define RB_TEX_BACK_DEPTH SNAME("back_depth")
 
+// Mariner: scene color/depth drawn before the late opaque pass (render_mode opaque_late).
+#define RB_TEX_OPAQUE_LATE_COLOR SNAME("opaque_late_color")
+#define RB_TEX_OPAQUE_LATE_DEPTH SNAME("opaque_late_depth")
+
 class RenderSceneBuffersRD : public RenderSceneBuffers {
 	GDCLASS(RenderSceneBuffersRD, RenderSceneBuffers);
 
 private:
+	bool upscaler_ready = true; // False while a temporal upscaler (DLSS) cannot produce output yet.
 	bool can_be_storage = true;
 	bool force_hdr = false;
 	uint32_t max_cluster_elements = 512;
@@ -96,6 +105,7 @@ private:
 	RSE::ViewportScreenSpaceAA screen_space_aa = RSE::VIEWPORT_SCREEN_SPACE_AA_DISABLED;
 	bool use_taa = false;
 	bool use_debanding = false;
+	bool frame_generation = false; // Mariner E3: DLSS Frame Generation requested for this viewport.
 	RD::TextureSamples texture_samples = RD::TEXTURE_SAMPLES_1;
 
 	// Named Textures
@@ -127,10 +137,9 @@ private:
 		uint32_t mipmap;
 		uint32_t mipmaps;
 		RD::TextureView texture_view;
-		RD::TextureSliceType slice_type;
 
 		bool operator==(const NTSliceKey &p_val) const {
-			return (layer == p_val.layer) && (layers == p_val.layers) && (mipmap == p_val.mipmap) && (mipmaps == p_val.mipmaps) && (texture_view == p_val.texture_view) && (slice_type == p_val.slice_type);
+			return (layer == p_val.layer) && (layers == p_val.layers) && (mipmap == p_val.mipmap) && (mipmaps == p_val.mipmaps) && (texture_view == p_val.texture_view);
 		}
 
 		static uint32_t hash(const NTSliceKey &p_val) {
@@ -143,18 +152,16 @@ private:
 			h = hash_murmur3_one_32(p_val.texture_view.swizzle_g, h);
 			h = hash_murmur3_one_32(p_val.texture_view.swizzle_b, h);
 			h = hash_murmur3_one_32(p_val.texture_view.swizzle_a, h);
-			h = hash_murmur3_one_32(p_val.slice_type, h);
 			return hash_fmix32(h);
 		}
 
 		NTSliceKey() {}
-		NTSliceKey(uint32_t p_layer, uint32_t p_layers, uint32_t p_mipmap, uint32_t p_mipmaps, RD::TextureView p_texture_view, RD::TextureSliceType p_slice_type) {
+		NTSliceKey(uint32_t p_layer, uint32_t p_layers, uint32_t p_mipmap, uint32_t p_mipmaps, RD::TextureView p_texture_view) {
 			layer = p_layer;
 			layers = p_layers;
 			mipmap = p_mipmap;
 			mipmaps = p_mipmaps;
 			texture_view = p_texture_view;
-			slice_type = p_slice_type;
 		}
 	};
 
@@ -248,6 +255,7 @@ public:
 	_FORCE_INLINE_ RSE::ViewportScreenSpaceAA get_screen_space_aa() const { return screen_space_aa; }
 	_FORCE_INLINE_ bool get_use_taa() const { return use_taa; }
 	_FORCE_INLINE_ bool get_use_debanding() const { return use_debanding; }
+	_FORCE_INLINE_ bool get_frame_generation() const { return frame_generation; }
 
 	uint64_t get_auto_exposure_version() const { return auto_exposure_version; }
 	void set_auto_exposure_version(const uint64_t p_auto_exposure_version) { auto_exposure_version = p_auto_exposure_version; }
@@ -308,6 +316,9 @@ public:
 
 	// Upscaled.
 	void ensure_upscaled();
+
+	_FORCE_INLINE_ bool get_upscaler_ready() const { return upscaler_ready; }
+	_FORCE_INLINE_ void set_upscaler_ready(bool p_ready) { upscaler_ready = p_ready; }
 
 	_FORCE_INLINE_ bool has_upscaled_texture() const {
 		return has_texture(RB_SCOPE_BUFFERS, RB_TEX_COLOR_UPSCALED);
@@ -444,12 +455,12 @@ private:
 
 #ifndef DISABLE_DEPRECATED
 
-	RID _get_color_texture_bind_compat_80214();
-	RID _get_color_layer_bind_compat_80214(const uint32_t p_layer);
-	RID _get_depth_texture_bind_compat_80214();
-	RID _get_depth_layer_bind_compat_80214(const uint32_t p_layer);
-	RID _get_velocity_texture_bind_compat_80214();
-	RID _get_velocity_layer_bind_compat_80214(const uint32_t p_layer);
+	RID _get_color_texture_compat_80214();
+	RID _get_color_layer_compat_80214(const uint32_t p_layer);
+	RID _get_depth_texture_compat_80214();
+	RID _get_depth_layer_compat_80214(const uint32_t p_layer);
+	RID _get_velocity_texture_compat_80214();
+	RID _get_velocity_layer_compat_80214(const uint32_t p_layer);
 
 	RID _create_texture_bind_compat_98670(const StringName &p_context, const StringName &p_texture_name, const RD::DataFormat p_data_format, const uint32_t p_usage_bits, const RD::TextureSamples p_texture_samples, const Size2i p_size, const uint32_t p_layers, const uint32_t p_mipmaps, bool p_unique);
 
@@ -467,4 +478,78 @@ public:
 
 	// 2 full size, 2 half size
 	WeightBuffers weight_buffers[4]; // Only used in raster
+
+	/* Raytracing scene: TLAS of this viewport's scene and per-instance data, built by the Forward+ renderer at the
+	   start of the frame when Viewport.raytracing_scene_enabled is on. Exposed to compositor effects. */
+
+	struct RaytracingScene {
+		RID tlas;
+		uint32_t tlas_capacity = 0;
+		RID instance_buffer; // RT_InstanceData[] (128 bytes each), indexed by the TLAS instance custom index.
+		uint32_t instance_buffer_capacity = 0;
+		RID material_buffer; // RT_MaterialData[] (96 bytes each), same indexing.
+		uint32_t material_buffer_capacity = 0;
+		uint32_t instance_count = 0;
+		uint64_t frame = UINT64_MAX; // Frame the TLAS was last built in.
+		uint64_t scene_hash = 0; // Instances, transforms, BLAS rebuilds / refits and materials of this frame (E5c).
+		bool has_dielectrics = false; // Some material is a dielectric medium (E5c path tracer water).
+
+		// Bindless material textures (index 0 is white), copied from the renderer when they change.
+		Vector<RID> textures;
+		uint64_t textures_version = 0;
+
+		struct TextureSet {
+			RID shader;
+			uint32_t set = 0;
+			uint64_t version = 0;
+			RID uniform_set;
+		};
+		LocalVector<TextureSet> texture_sets;
+	} raytracing_scene;
+
+	void free_raytracing_scene();
+
+	bool has_raytracing_scene() const;
+	RID get_raytracing_tlas() const;
+	RID get_raytracing_instance_buffer() const;
+	RID get_raytracing_material_buffer() const;
+	uint32_t get_raytracing_instance_count() const;
+	TypedArray<RID> get_raytracing_textures() const;
+	RID get_raytracing_texture_uniform_set(RID p_shader, uint32_t p_set);
+
+	/* Late opaque pass (render_mode opaque_late): copy of the scene color and depth drawn before it, made by the
+	   Forward+ renderer in the frames where late opaque surfaces are visible. Exposed to compositor effects. */
+
+	uint64_t opaque_late_frame = UINT64_MAX; // Frame the copy was last made in.
+
+	void set_opaque_late_frame(uint64_t p_frame) { opaque_late_frame = p_frame; }
+	bool has_opaque_late_textures() const;
+	RID get_opaque_late_color(uint32_t p_layer);
+	RID get_opaque_late_depth(uint32_t p_layer);
+
+	/* Path tracer accumulation (Mariner E5c, Environment.pathtracing_enabled), owned by the Forward+ renderer. */
+
+	struct Pathtracing {
+		RID accum; // RGBA32F: sum of path radiance (rgb) and primary hit coverage (a).
+		RID depth; // R32F: depth of the primary hit (0 = sky), copied into the depth buffer every frame.
+		Size2i size;
+		uint32_t samples = 0; // Samples per pixel accumulated in `accum`.
+		uint32_t frame_index = 0;
+		Transform3D cam_transform;
+		Projection cam_projection;
+		uint64_t settings_hash = 0;
+		uint64_t scene_hash = 0;
+		uint64_t light_hash = 0;
+		RID light_buffer;
+		RID params_buffer;
+	} pathtracing;
+
+	SafeNumeric<uint32_t> pathtracing_published_samples;
+	SafeFlag pathtracing_reset_requested;
+
+	void free_pathtracing();
+	void set_pathtracing_samples(uint32_t p_samples) { pathtracing_published_samples.set(p_samples); }
+	virtual uint32_t get_pathtracing_sample_count() const override { return pathtracing_published_samples.get(); }
+	virtual void reset_pathtracing() override { pathtracing_reset_requested.set(); }
+	bool consume_pathtracing_reset() { return pathtracing_reset_requested.clear_if_set(); }
 };

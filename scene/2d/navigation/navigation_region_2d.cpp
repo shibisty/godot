@@ -35,7 +35,6 @@
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "scene/main/scene_tree.h"
-#include "scene/resources/2d/navigation_mesh_source_geometry_data_2d.h"
 #include "scene/resources/world_2d.h"
 #include "servers/navigation_2d/navigation_server_2d.h"
 #include "servers/rendering/rendering_server.h"
@@ -165,7 +164,7 @@ void NavigationRegion2D::_notification(int p_what) {
 		} break;
 
 		case NOTIFICATION_TRANSFORM_CHANGED: {
-			_region_update_transform();
+			set_physics_process_internal(true);
 		} break;
 
 		case NOTIFICATION_VISIBILITY_CHANGED: {
@@ -179,6 +178,11 @@ void NavigationRegion2D::_notification(int p_what) {
 #ifdef DEBUG_ENABLED
 			_set_debug_visible(false);
 #endif // DEBUG_ENABLED
+		} break;
+
+		case NOTIFICATION_INTERNAL_PHYSICS_PROCESS: {
+			set_physics_process_internal(false);
+			_region_update_transform();
 		} break;
 
 		case NOTIFICATION_DRAW: {
@@ -420,7 +424,9 @@ void NavigationRegion2D::_region_enter_navigation_map() {
 		NavigationServer2D::get_singleton()->region_set_map(region, get_world_2d()->get_navigation_map());
 	}
 
-	NavigationServer2D::get_singleton()->region_set_transform(region, get_global_transform());
+	current_global_transform = get_global_transform();
+	NavigationServer2D::get_singleton()->region_set_transform(region, current_global_transform);
+
 	NavigationServer2D::get_singleton()->region_set_enabled(region, enabled);
 
 	queue_redraw();
@@ -435,7 +441,11 @@ void NavigationRegion2D::_region_update_transform() {
 		return;
 	}
 
-	NavigationServer2D::get_singleton()->region_set_transform(region, get_global_transform());
+	Transform2D new_global_transform = get_global_transform();
+	if (current_global_transform != new_global_transform) {
+		current_global_transform = new_global_transform;
+		NavigationServer2D::get_singleton()->region_set_transform(region, current_global_transform);
+	}
 
 	queue_redraw();
 }

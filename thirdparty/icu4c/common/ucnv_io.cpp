@@ -249,15 +249,14 @@ static void U_CALLCONV initAliasData(UErrorCode &errCode) {
 
     sectionSizes = static_cast<const uint32_t*>(udata_getMemory(data));
     int32_t dataLength = udata_getLength(data); // This is the length minus the UDataInfo size
-    UBool isDataLengthKnown = dataLength >= 0; // Only false when using a pointer table of contents (not files nor a common data archive)
-    if (isDataLengthKnown && dataLength <= int32_t(sizeof(sectionSizes[0]))) {
+    if (dataLength <= int32_t(sizeof(sectionSizes[0]))) {
         // We don't even have a TOC!
         goto invalidFormat;
     }
     table = reinterpret_cast<const uint16_t*>(sectionSizes);
     tableStart = sectionSizes[0];
     sizeOfTOC = int32_t((tableStart + 1) * sizeof(sectionSizes[0]));
-    if (tableStart < minTocLength || (isDataLengthKnown && dataLength <= sizeOfTOC)) {
+    if (tableStart < minTocLength || dataLength <= sizeOfTOC) {
         // We don't have a whole TOC!
         goto invalidFormat;
     }
@@ -280,7 +279,7 @@ static void U_CALLCONV initAliasData(UErrorCode &errCode) {
     for (uint32_t section = 1; section <= tableStart; section++) {
         sizeOfData += sectionSizes[section] * sizeof(table[0]);
     }
-    if (isDataLengthKnown && dataLength < sizeOfData) {
+    if (dataLength < sizeOfData) {
         // Truncated file!
         goto invalidFormat;
     }
@@ -407,8 +406,8 @@ static const uint8_t ebcdicTypes[128] = {
 
 
 /* @see ucnv_compareNames */
-U_CAPI char* U_CALLCONV
-ucnv_io_stripASCIIForCompare(char* dst U_LIFETIME_BOUND, const char* name) {
+U_CAPI char * U_CALLCONV
+ucnv_io_stripASCIIForCompare(char *dst, const char *name) {
     char *dstItr = dst;
     uint8_t type, nextType;
     char c1;
@@ -442,8 +441,8 @@ ucnv_io_stripASCIIForCompare(char* dst U_LIFETIME_BOUND, const char* name) {
     return dst;
 }
 
-U_CAPI char* U_CALLCONV
-ucnv_io_stripEBCDICForCompare(char* dst U_LIFETIME_BOUND, const char* name) {
+U_CAPI char * U_CALLCONV
+ucnv_io_stripEBCDICForCompare(char *dst, const char *name) {
     char *dstItr = dst;
     uint8_t type, nextType;
     char c1;

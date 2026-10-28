@@ -75,14 +75,16 @@ public:
 
 class EditorInspectorPluginAudioStream : public EditorInspectorPlugin {
 	GDCLASS(EditorInspectorPluginAudioStream, EditorInspectorPlugin);
-
-public:
-	virtual void parse_begin(Object *p_object) override;
-};
-
-class EditorInspectorPluginAudioStreamWAV : public EditorInspectorPluginAudioStream {
-	GDCLASS(EditorInspectorPluginAudioStreamWAV, EditorInspectorPluginAudioStream);
+	AudioStreamEditor *editor = nullptr;
 
 public:
 	virtual bool can_handle(Object *p_object) override;
+	virtual void parse_begin(Object *p_object) override;
+};
+
+class AudioStreamEditorPlugin : public EditorPlugin {
+	GDCLASS(AudioStreamEditorPlugin, EditorPlugin);
+
+public:
+	AudioStreamEditorPlugin();
 };

@@ -107,7 +107,7 @@ static Color _material_color(const ufbx_material_map &p_map) {
 		float r = float(p_map.value_vec4.x);
 		float g = float(p_map.value_vec4.y);
 		float b = float(p_map.value_vec4.z);
-		float a = float(p_map.value_vec4.w);
+		float a = float(p_map.value_vec4.z);
 		return Color(r, g, b, a);
 	}
 }
@@ -758,7 +758,8 @@ Error FBXDocument::_parse_meshes(Ref<FBXState> p_state) {
 				mesh_surface_tool->set_skin_weight_count(num_skin_weights == 8 ? SurfaceTool::SKIN_8_WEIGHTS : SurfaceTool::SKIN_4_WEIGHTS);
 				mesh_surface_tool->index();
 				if (generate_tangents) {
-					mesh_surface_tool->generate_tangents(/*split*/ !use_blend_shapes);
+					//must generate mikktspace tangents.. ergh..
+					mesh_surface_tool->generate_tangents();
 				}
 				array = mesh_surface_tool->commit_to_arrays();
 
@@ -827,7 +828,8 @@ Error FBXDocument::_parse_meshes(Ref<FBXState> p_state) {
 							blend_surface_tool->create_from_triangle_arrays(array_copy);
 							blend_surface_tool->set_skin_weight_count(num_skin_weights == 8 ? SurfaceTool::SKIN_8_WEIGHTS : SurfaceTool::SKIN_4_WEIGHTS);
 							if (generate_tangents) {
-								blend_surface_tool->generate_tangents(/*split*/ false);
+								//must generate mikktspace tangents.. ergh..
+								blend_surface_tool->generate_tangents();
 							}
 							array_copy = blend_surface_tool->commit_to_arrays();
 
@@ -928,7 +930,7 @@ Ref<Image> FBXDocument::_parse_image_bytes_into_image(Ref<FBXState> p_state, con
 		r_image->load_jpg_from_buffer(p_bytes);
 	}
 	if (r_image->is_empty()) { // And then TGA.
-		r_image->load_tga_from_buffer(p_bytes);
+		r_image->load_jpg_from_buffer(p_bytes);
 	}
 	// If it still can't be loaded, give up and insert an empty image as placeholder.
 	if (r_image->is_empty()) {
@@ -1139,6 +1141,7 @@ Error FBXDocument::_parse_materials(Ref<FBXState> p_state) {
 			material->set_name(vformat("material_%s", itos(material_i)));
 		}
 		material->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+		Dictionary material_extensions;
 
 		if (fbx_material->pbr.base_color.has_value) {
 			Color albedo = _material_color(fbx_material->pbr.base_color, fbx_material->pbr.base_factor);

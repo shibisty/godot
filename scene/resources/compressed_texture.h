@@ -51,6 +51,7 @@ public:
 	};
 
 	enum FormatBits {
+		FORMAT_BIT_STREAM = 1 << 22,
 		FORMAT_BIT_HAS_MIPMAPS = 1 << 23,
 		FORMAT_BIT_DETECT_3D = 1 << 24,
 		//FORMAT_BIT_DETECT_SRGB = 1 << 25,
@@ -64,10 +65,9 @@ private:
 	Image::Format format = Image::FORMAT_L8;
 	int w = 0;
 	int h = 0;
-	bool mipmaps = false;
 	mutable Ref<BitMap> alpha_cache;
 
-	Error _load_data(const String &p_path, int &r_width, int &r_height, Ref<Image> &image, bool &r_request_3d, bool &r_request_normal, bool &r_request_roughness, int &mipmap_limit);
+	Error _load_data(const String &p_path, int &r_width, int &r_height, Ref<Image> &image, bool &r_request_3d, bool &r_request_normal, bool &r_request_roughness, int &mipmap_limit, int p_size_limit = 0);
 	virtual void reload_from_file() override;
 
 	static void _requested_3d(void *p_ud);
@@ -78,7 +78,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	static Ref<Image> load_image_from_file(Ref<FileAccess> p_file);
+	static Ref<Image> load_image_from_file(Ref<FileAccess> p_file, int p_size_limit);
 
 	typedef void (*TextureFormatRequestCallback)(const Ref<CompressedTexture2D> &);
 	typedef void (*TextureFormatRoughnessRequestCallback)(const Ref<CompressedTexture2D> &, const String &p_normal_path, RSE::TextureDetectRoughnessChannel p_roughness_channel);
@@ -88,8 +88,6 @@ public:
 	static TextureFormatRequestCallback request_normal_callback;
 
 	virtual Image::Format get_format() const override;
-	virtual int get_mipmap_count() const override;
-	virtual bool has_mipmaps() const override;
 	Error load(const String &p_path);
 	String get_load_path() const;
 
@@ -127,11 +125,12 @@ public:
 	};
 
 	enum FormatBits {
+		FORMAT_BIT_STREAM = 1 << 22,
 		FORMAT_BIT_HAS_MIPMAPS = 1 << 23,
 	};
 
 private:
-	Error _load_data(const String &p_path, Vector<Ref<Image>> &images, int &mipmap_limit);
+	Error _load_data(const String &p_path, Vector<Ref<Image>> &images, int &mipmap_limit, int p_size_limit = 0);
 	String path_to_file;
 	mutable RID texture;
 	Image::Format format = Image::FORMAT_L8;
@@ -205,6 +204,7 @@ public:
 	};
 
 	enum FormatBits {
+		FORMAT_BIT_STREAM = 1 << 22,
 		FORMAT_BIT_HAS_MIPMAPS = 1 << 23,
 	};
 

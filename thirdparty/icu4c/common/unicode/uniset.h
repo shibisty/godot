@@ -39,126 +39,236 @@ class UVector;
 class RuleCharacterIterator;
 
 /**
- * A mutable set of Unicode characters and multicharacter strings. Objects of this class represent
- * <em>character classes</em> used in regular expressions. A UnicodeSet specifies a finite set of
- * Unicode code point sequences, optimized for single code points.
- *
- * <p>Note: method freeze() will not only make the set immutable, but also makes important methods
- * much higher performance: contains(c), containsNone(...), span(...), spanBack(...) etc. After the
- * object is frozen, any subsequent call that wants to change the object will throw
- * UnsupportedOperationException.
+ * A mutable set of Unicode characters and multicharacter strings.  Objects of this class
+ * represent <em>character classes</em> used in regular expressions.
+ * A character specifies a subset of Unicode code points.  Legal
+ * code points are U+0000 to U+10FFFF, inclusive.
  *
  * <p>The UnicodeSet class is not designed to be subclassed.
  *
- * <p><code>UnicodeSet</code> supports two APIs. The first is the <em>operand</em> API that allows
- * the caller to modify the value of a <code>UnicodeSet</code> object. It conforms to Java 2's
- * <code>java.util.Set</code> interface, although <code>UnicodeSet</code> does not actually
- * implement that interface. All methods of <code>Set</code> are supported, with the modification
- * that they take a character range, a single character, or a string instead of an <code>Object
- * </code>, and they take a <code>UnicodeSet</code> instead of a <code>Collection</code>. The
- * operand API may be thought of in terms of boolean logic: a boolean OR is implemented by <code>add
- * </code>, a boolean AND is implemented by <code>retain</code>, a boolean XOR is implemented by
- * <code>complement
- * </code> taking an argument, and a boolean NOT is implemented by <code>complement</code> with no
- * argument. In terms of traditional set theory function names, <code>add</code> is a union, <code>
- * retain</code> is an intersection, <code>remove</code> is an asymmetric difference, and <code>
- * complement</code> with no argument is a set complement with respect to the superset range <code>
- * MIN_VALUE-MAX_VALUE</code>.
+ * <p><code>UnicodeSet</code> supports two APIs. The first is the
+ * <em>operand</em> API that allows the caller to modify the value of
+ * a <code>UnicodeSet</code> object. It conforms to Java 2's
+ * <code>java.util.Set</code> interface, although
+ * <code>UnicodeSet</code> does not actually implement that
+ * interface. All methods of <code>Set</code> are supported, with the
+ * modification that they take a character range or single character
+ * instead of an <code>Object</code>, and they take a
+ * <code>UnicodeSet</code> instead of a <code>Collection</code>.  The
+ * operand API may be thought of in terms of boolean logic: a boolean
+ * OR is implemented by <code>add</code>, a boolean AND is implemented
+ * by <code>retain</code>, a boolean XOR is implemented by
+ * <code>complement</code> taking an argument, and a boolean NOT is
+ * implemented by <code>complement</code> with no argument.  In terms
+ * of traditional set theory function names, <code>add</code> is a
+ * union, <code>retain</code> is an intersection, <code>remove</code>
+ * is an asymmetric difference, and <code>complement</code> with no
+ * argument is a set complement with respect to the superset range
+ * <code>MIN_VALUE-MAX_VALUE</code>
  *
- * <p>The second API for building up a UnicodeSet is the <code>applyPattern()</code>/<code>
- * toPattern()</code> API from the <code>
- * java.text.Format</code>-derived classes. Unlike the methods that add characters, add categories,
- * and control the logic of the set, the method <code>applyPattern()</code> sets all attributes of a
- * <code>UnicodeSet</code> at once, based on a pattern string.
+ * <p>The second API is the
+ * <code>applyPattern()</code>/<code>toPattern()</code> API from the
+ * <code>java.text.Format</code>-derived classes.  Unlike the
+ * methods that add characters, add categories, and control the logic
+ * of the set, the method <code>applyPattern()</code> sets all
+ * attributes of a <code>UnicodeSet</code> at once, based on a
+ * string pattern.
  *
- * <p><b>Pattern syntax</b> Pattern strings are accepted by the constructors and the {@link
- * #applyPattern()} methods and returned by the {@link #toPattern()} method. These patterns follow
- * the UnicodeSet syntax defined by <a href="https://www.unicode.org/reports/tr61/">Draft Unicode
- * Technical Standard #61, UnicodeSet notation.</a>
+ * <p><b>Pattern syntax</b></p>
  *
- * <blockquote>
+ * Patterns are accepted by the constructors and the
+ * <code>applyPattern()</code> methods and returned by the
+ * <code>toPattern()</code> method.  These patterns follow a syntax
+ * similar to that employed by version 8 regular expression character
+ * classes.  Here are some simple examples:
  *
- * <table>
- *     <tr style="vertical-align: top">
- *       <td style="white-space: nowrap; vertical-align: top; horizontal-align: left;"><code>[]</code></td>
- *       <td style="vertical-align: top;">No characters</td>
- *     </tr><tr style="vertical-align: top">
- *       <td style="white-space: nowrap; vertical-align: top; horizontal-align: left;"><code>[a]</code></td>
- *       <td style="vertical-align: top;">The character 'a'</td>
- *     </tr><tr style="vertical-align: top">
- *       <td style="white-space: nowrap; vertical-align: top; horizontal-align: left;"><code>[ae]</code></td>
- *       <td style="vertical-align: top;">The characters 'a' and 'e'</td>
+ * \htmlonly<blockquote>\endhtmlonly
+ *   <table>
+ *     <tr align="top">
+ *       <td nowrap valign="top" align="left"><code>[]</code></td>
+ *       <td valign="top">No characters</td>
+ *     </tr><tr align="top">
+ *       <td nowrap valign="top" align="left"><code>[a]</code></td>
+ *       <td valign="top">The character 'a'</td>
+ *     </tr><tr align="top">
+ *       <td nowrap valign="top" align="left"><code>[ae]</code></td>
+ *       <td valign="top">The characters 'a' and 'e'</td>
  *     </tr>
  *     <tr>
- *       <td style="white-space: nowrap; vertical-align: top; horizontal-align: left;"><code>[a-e]</code></td>
- *       <td style="vertical-align: top;">The characters 'a' through 'e' inclusive, in Unicode code
+ *       <td nowrap valign="top" align="left"><code>[a-e]</code></td>
+ *       <td valign="top">The characters 'a' through 'e' inclusive, in Unicode code
  *       point order</td>
  *     </tr>
  *     <tr>
- *       <td style="white-space: nowrap; vertical-align: top; horizontal-align: left;"><code>[\\u4E01]</code></td>
- *       <td style="vertical-align: top;">The character U+4E01</td>
+ *       <td nowrap valign="top" align="left"><code>[\\u4E01]</code></td>
+ *       <td valign="top">The character U+4E01</td>
  *     </tr>
  *     <tr>
- *       <td style="white-space: nowrap; vertical-align: top; horizontal-align: left;"><code>[a{ab}{ac}]</code></td>
- *       <td style="vertical-align: top;">The character 'a' and the multicharacter strings &quot;ab&quot; and
+ *       <td nowrap valign="top" align="left"><code>[a{ab}{ac}]</code></td>
+ *       <td valign="top">The character 'a' and the multicharacter strings &quot;ab&quot; and
  *       &quot;ac&quot;</td>
  *     </tr>
  *     <tr>
- *       <td style="white-space: nowrap; vertical-align: top; horizontal-align: left;"><code>[\\p{Lu}]</code></td>
- *       <td style="vertical-align: top;">All characters in the general category Uppercase Letter</td>
- *     </tr>
- *     <tr>
- *       <td style="white-space: nowrap; vertical-align: top; horizontal-align: left;"><code>[[:Letter:][:Number_Letter:]]</code></td>
- *       <td style="vertical-align: top;">All characters that have a General_Category in the Letter grouping or have the General_Category Number_Letter</td>
- *     </tr>
- *     <tr>
- *       <td style="white-space: nowrap; vertical-align: top; horizontal-align: left;"><code>[[:Word_Break=ALetter:]-[:Letter:]]</code></td>
- *       <td style="vertical-align: top;">All characters with a Word_Break property assignment of ALetter that do not have a General_Category in the Letter grouping</td>
- *     </tr>
- *     <tr>
- *       <td style="white-space: nowrap; vertical-align: top; horizontal-align: left;"><code>[\\p{Greek}&\\p{Letter}]</code></td>
- *       <td style="vertical-align: top;">All characters with a Script property assignment of Greek whose General_Category is in the Letter grouping</td>
- *     </tr>
- *     <tr>
- *       <td style="white-space: nowrap; vertical-align: top; horizontal-align: left;"><code>[^a]</code></td>
- *       <td style="vertical-align: top;">All code points except U+0061 'a'.</td>
+ *       <td nowrap valign="top" align="left"><code>[\\p{Lu}]</code></td>
+ *       <td valign="top">All characters in the general category Uppercase Letter</td>
  *     </tr>
  *   </table>
+ * \htmlonly</blockquote>\endhtmlonly
  *
- * </blockquote>
+ * Any character may be preceded by a backslash in order to remove any special
+ * meaning.  White space characters, as defined by UCharacter.isWhitespace(), are
+ * ignored, unless they are escaped.
  *
- * Most characters may be preceded by a backslash in order to remove any special meaning. Unescaped
- * white space characters, as defined by the Unicode Pattern_White_Space property, are ignored
- * outside of string literals, except insofar as they separate lexical elements.
+ * <p>Property patterns specify a set of characters having a certain
+ * property as defined by the Unicode standard.  Both the POSIX-like
+ * "[:Lu:]" and the Perl-like syntax "\\p{Lu}" are recognized.  For a
+ * complete list of supported property patterns, see the User's Guide
+ * for UnicodeSet at
+ * <a href="https://unicode-org.github.io/icu/userguide/strings/unicodeset">
+ * https://unicode-org.github.io/icu/userguide/strings/unicodeset</a>.
+ * Actual determination of property data is defined by the underlying
+ * Unicode database as implemented by UCharacter.
  *
- * <p>Property queries specify a set of characters having a certain property as defined by the
- * Unicode standard. Both the POSIX-like "[:Lu:]" and the Perl-like syntax "\\p{Lu}" are recognized.
+ * <p>Patterns specify individual characters, ranges of characters, and
+ * Unicode property sets.  When elements are concatenated, they
+ * specify their union.  To complement a set, place a '^' immediately
+ * after the opening '['.  Property patterns are inverted by modifying
+ * their delimiters; "[:^foo]" and "\\P{foo}".  In any other location,
+ * '^' has no special meaning.
  *
- * <p>As shown in the examples above, UnicodeSet syntax supports some set operations: the union of
- * sets 𝑋 and 𝑌 union is written [𝑋𝑌], their intersection [𝑋&amp;𝑌], and their asymmetric set
- * difference (the complement of 𝑌 in 𝑋) is [𝑋-𝑌]. The code point complement of 𝑋, equivalent
- * to .{@link #complement()}.{@link #removeAllStrings()}, is written [^𝑋].
+ * <p>Since ICU 70, "[^...]", "[:^foo]", "\\P{foo}", and "[:binaryProperty=No:]"
+ * perform a “code point complement” (all code points minus the original set),
+ * removing all multicharacter strings,
+ * equivalent to <code>.complement().removeAllStrings()</code>.
+ * The complement() API function continues to perform a
+ * symmetric difference with all code points and thus retains all multicharacter strings.
  *
- * <p>Ranges are indicated by placing a '-' between two characters, as in "a-z". This specifies the
- * range of all characters from the left to the right, in code point order.
+ * <p>Ranges are indicated by placing two a '-' between two
+ * characters, as in "a-z".  This specifies the range of all
+ * characters from the left to the right, in Unicode order.  If the
+ * left character is greater than or equal to the
+ * right character it is a syntax error.  If a '-' occurs as the first
+ * character after the opening '[' or '[^', or if it occurs as the
+ * last character before the closing ']', then it is taken as a
+ * literal.  Thus "[a\-b]", "[-ab]", and "[ab-]" all indicate the same
+ * set of three characters, 'a', 'b', and '-'.
  *
- * <p><b>Formal specification</b>
+ * <p>Sets may be intersected using the '&' operator or the asymmetric
+ * set difference may be taken using the '-' operator, for example,
+ * "[[:L:]&[\\u0000-\\u0FFF]]" indicates the set of all Unicode letters
+ * with values less than 4096.  Operators ('&' and '|') have equal
+ * precedence and bind left-to-right.  Thus
+ * "[[:L:]-[a-z]-[\\u0100-\\u01FF]]" is equivalent to
+ * "[[[:L:]-[a-z]]-[\\u0100-\\u01FF]]".  This only really matters for
+ * difference; intersection is commutative.
  *
- * <p>This class is a conformant and consistent implementation of UnicodeSet notation as defined in
- * <a href="https://www.unicode.org/reports/tr61/">Draft Unicode Technical Standard #61, UnicodeSet
- * notation</a>. It supports only property queries that are recommended for general-purpose APIs
- * (that is, it does not support the productions with a gray background in the grammar). The set of
- * supported properties, and additional restrictions, are described in the User Guide <a
- * href="https://unicode-org.github.io/icu/userguide/strings/unicodeset#Restrictions">UnicodeSet /
- * Restrictions</a>.
+ * <table>
+ * <tr valign=top><td nowrap><code>[a]</code><td>The set containing 'a'
+ * <tr valign=top><td nowrap><code>[a-z]</code><td>The set containing 'a'
+ * through 'z' and all letters in between, in Unicode order
+ * <tr valign=top><td nowrap><code>[^a-z]</code><td>The set containing
+ * all characters but 'a' through 'z',
+ * that is, U+0000 through 'a'-1 and 'z'+1 through U+10FFFF
+ * <tr valign=top><td nowrap><code>[[<em>pat1</em>][<em>pat2</em>]]</code>
+ * <td>The union of sets specified by <em>pat1</em> and <em>pat2</em>
+ * <tr valign=top><td nowrap><code>[[<em>pat1</em>]&[<em>pat2</em>]]</code>
+ * <td>The intersection of sets specified by <em>pat1</em> and <em>pat2</em>
+ * <tr valign=top><td nowrap><code>[[<em>pat1</em>]-[<em>pat2</em>]]</code>
+ * <td>The asymmetric difference of sets specified by <em>pat1</em> and
+ * <em>pat2</em>
+ * <tr valign=top><td nowrap><code>[:Lu:] or \\p{Lu}</code>
+ * <td>The set of characters having the specified
+ * Unicode property; in
+ * this case, Unicode uppercase letters
+ * <tr valign=top><td nowrap><code>[:^Lu:] or \\P{Lu}</code>
+ * <td>The set of characters <em>not</em> having the given
+ * Unicode property
+ * </table>
  *
- * <p>It implements a number of pure extensions documented in the User Guide at <a
- * href="https://unicode-org.github.io/icu/userguide/strings/unicodeset#Extensions">UnicodeSet /
- * Extensions</a>. In particular, the support for variables interacts with the API: If a {@link
- * SymbolTable} is passed to the constructor of {@code UnicodeSet}, a lexical element <a
- * href=https://unicode-org.github.io/icu/userguide/strings/unicodeset#variable>variable</a> is
- * introduced, whose definition is given by the implementation of {@link
- * SymbolTable#parseReference}.
+ * <p><b>Formal syntax</b></p>
+ *
+ * \htmlonly<blockquote>\endhtmlonly
+ *   <table>
+ *     <tr align="top">
+ *       <td nowrap valign="top" align="right"><code>pattern :=&nbsp; </code></td>
+ *       <td valign="top"><code>('[' '^'? item* ']') |
+ *       property</code></td>
+ *     </tr>
+ *     <tr align="top">
+ *       <td nowrap valign="top" align="right"><code>item :=&nbsp; </code></td>
+ *       <td valign="top"><code>char | (char '-' char) | pattern-expr<br>
+ *       </code></td>
+ *     </tr>
+ *     <tr align="top">
+ *       <td nowrap valign="top" align="right"><code>pattern-expr :=&nbsp; </code></td>
+ *       <td valign="top"><code>pattern | pattern-expr pattern |
+ *       pattern-expr op pattern<br>
+ *       </code></td>
+ *     </tr>
+ *     <tr align="top">
+ *       <td nowrap valign="top" align="right"><code>op :=&nbsp; </code></td>
+ *       <td valign="top"><code>'&amp;' | '-'<br>
+ *       </code></td>
+ *     </tr>
+ *     <tr align="top">
+ *       <td nowrap valign="top" align="right"><code>special :=&nbsp; </code></td>
+ *       <td valign="top"><code>'[' | ']' | '-'<br>
+ *       </code></td>
+ *     </tr>
+ *     <tr align="top">
+ *       <td nowrap valign="top" align="right"><code>char :=&nbsp; </code></td>
+ *       <td valign="top"><em>any character that is not</em><code> special<br>
+ *       | ('\' </code><em>any character</em><code>)<br>
+ *       | ('\\u' hex hex hex hex)<br>
+ *       </code></td>
+ *     </tr>
+ *     <tr align="top">
+ *       <td nowrap valign="top" align="right"><code>hex :=&nbsp; </code></td>
+ *       <td valign="top"><code>'0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' |<br>
+ *       &nbsp;&nbsp;&nbsp;&nbsp;'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'a' | 'b' | 'c' | 'd' | 'e' | 'f'</code></td>
+ *     </tr>
+ *     <tr>
+ *       <td nowrap valign="top" align="right"><code>property :=&nbsp; </code></td>
+ *       <td valign="top"><em>a Unicode property set pattern</em></td>
+ *     </tr>
+ *   </table>
+ *   <br>
+ *   <table border="1">
+ *     <tr>
+ *       <td>Legend: <table>
+ *         <tr>
+ *           <td nowrap valign="top"><code>a := b</code></td>
+ *           <td width="20" valign="top">&nbsp; </td>
+ *           <td valign="top"><code>a</code> may be replaced by <code>b</code> </td>
+ *         </tr>
+ *         <tr>
+ *           <td nowrap valign="top"><code>a?</code></td>
+ *           <td valign="top"></td>
+ *           <td valign="top">zero or one instance of <code>a</code><br>
+ *           </td>
+ *         </tr>
+ *         <tr>
+ *           <td nowrap valign="top"><code>a*</code></td>
+ *           <td valign="top"></td>
+ *           <td valign="top">one or more instances of <code>a</code><br>
+ *           </td>
+ *         </tr>
+ *         <tr>
+ *           <td nowrap valign="top"><code>a | b</code></td>
+ *           <td valign="top"></td>
+ *           <td valign="top">either <code>a</code> or <code>b</code><br>
+ *           </td>
+ *         </tr>
+ *         <tr>
+ *           <td nowrap valign="top"><code>'a'</code></td>
+ *           <td valign="top"></td>
+ *           <td valign="top">the literal string between the quotes </td>
+ *         </tr>
+ *       </table>
+ *       </td>
+ *     </tr>
+ *   </table>
+ * \htmlonly</blockquote>\endhtmlonly
  * 
  * <p>Note:
  *  - Most UnicodeSet methods do not take a UErrorCode parameter because
@@ -372,7 +482,7 @@ public:
      * A frozen set will not be modified.
      * @stable ICU 2.0
      */
-    UnicodeSet& operator=(const UnicodeSet& o) U_LIFETIME_BOUND;
+    UnicodeSet& operator=(const UnicodeSet& o);
 
     /**
      * Compares the specified object with this set for equality.  Returns
@@ -422,7 +532,7 @@ public:
      *
      * @stable ICU 4.2
      */
-    inline static UnicodeSet* fromUSet(USet* uset U_LIFETIME_BOUND);
+    inline static UnicodeSet *fromUSet(USet *uset);
 
     /**
      * Get a UnicodeSet pointer from a const USet
@@ -432,8 +542,8 @@ public:
      *
      * @stable ICU 4.2
      */
-    inline static const UnicodeSet* fromUSet(const USet* uset U_LIFETIME_BOUND);
-
+    inline static const UnicodeSet *fromUSet(const USet *uset);
+    
     /**
      * Produce a USet * pointer for this UnicodeSet.
      * USet is the plain C type for UnicodeSet
@@ -441,7 +551,8 @@ public:
      * @return a USet pointer for this UnicodeSet
      * @stable ICU 4.2
      */
-    inline USet* toUSet() U_LIFETIME_BOUND;
+    inline USet *toUSet();
+
 
     /**
      * Produce a const USet * pointer for this UnicodeSet.
@@ -450,7 +561,7 @@ public:
      * @return a const USet pointer for this UnicodeSet
      * @stable ICU 4.2
      */
-    inline const USet* toUSet() const U_LIFETIME_BOUND;
+    inline const USet * toUSet() const;
 
 
     //----------------------------------------------------------------
@@ -480,7 +591,7 @@ public:
      * @see cloneAsThawed
      * @stable ICU 3.8
      */
-    UnicodeSet* freeze() U_LIFETIME_BOUND;
+    UnicodeSet *freeze();
 
     /**
      * Clone the set and make the clone mutable.
@@ -505,7 +616,7 @@ public:
      * @param end last character in the set, inclusive
      * @stable ICU 2.4
      */
-    UnicodeSet& set(UChar32 start, UChar32 end) U_LIFETIME_BOUND;
+    UnicodeSet& set(UChar32 start, UChar32 end);
 
     /**
      * Return true if the given position, in the given pattern, appears
@@ -527,7 +638,8 @@ public:
      * @return a reference to this
      * @stable ICU 2.0
      */
-    UnicodeSet& applyPattern(const UnicodeString& pattern, UErrorCode& status) U_LIFETIME_BOUND;
+    UnicodeSet& applyPattern(const UnicodeString& pattern,
+                             UErrorCode& status);
 
 #ifndef U_HIDE_INTERNAL_API
     /**
@@ -551,7 +663,7 @@ public:
     UnicodeSet& applyPattern(const UnicodeString& pattern,
                              uint32_t options,
                              const SymbolTable* symbols,
-                             UErrorCode& status) U_LIFETIME_BOUND;
+                             UErrorCode& status);
 #endif  /* U_HIDE_INTERNAL_API */
 
     /**
@@ -591,7 +703,7 @@ public:
                              ParsePosition& pos,
                              uint32_t options,
                              const SymbolTable* symbols,
-                             UErrorCode& status) U_LIFETIME_BOUND;
+                             UErrorCode& status);
 
     /**
      * Returns a string representation of this set.  If the result of
@@ -606,7 +718,7 @@ public:
      * U+000A, U+0020..U+007E.
      * @stable ICU 2.0
      */
-    virtual UnicodeString& toPattern(UnicodeString& result U_LIFETIME_BOUND,
+    virtual UnicodeString& toPattern(UnicodeString& result,
                                      UBool escapeUnprintable = false) const override;
 
     /**
@@ -633,7 +745,7 @@ public:
      */
     UnicodeSet& applyIntPropertyValue(UProperty prop,
                                       int32_t value,
-                                      UErrorCode& ec) U_LIFETIME_BOUND;
+                                      UErrorCode& ec);
 
     /**
      * Modifies this set to contain those code points which have the
@@ -666,7 +778,7 @@ public:
      */
     UnicodeSet& applyPropertyAlias(const UnicodeString& prop,
                                    const UnicodeString& value,
-                                   UErrorCode& ec) U_LIFETIME_BOUND;
+                                   UErrorCode& ec);
 
     /**
      * Returns the number of elements in this set (its cardinality).
@@ -1007,7 +1119,7 @@ public:
      * @see begin
      * @see end
      */
-    inline U_HEADER_NESTED_NAMESPACE::USetCodePoints codePoints() const U_LIFETIME_BOUND {
+    inline U_HEADER_NESTED_NAMESPACE::USetCodePoints codePoints() const {
         return U_HEADER_NESTED_NAMESPACE::USetCodePoints(toUSet());
     }
 
@@ -1033,7 +1145,7 @@ public:
      * @see begin
      * @see end
      */
-    inline U_HEADER_NESTED_NAMESPACE::USetRanges ranges() const U_LIFETIME_BOUND {
+    inline U_HEADER_NESTED_NAMESPACE::USetRanges ranges() const {
         return U_HEADER_NESTED_NAMESPACE::USetRanges(toUSet());
     }
 
@@ -1057,10 +1169,11 @@ public:
      * @see begin
      * @see end
      */
-    inline U_HEADER_NESTED_NAMESPACE::USetStrings strings() const U_LIFETIME_BOUND {
+    inline U_HEADER_NESTED_NAMESPACE::USetStrings strings() const {
         return U_HEADER_NESTED_NAMESPACE::USetStrings(toUSet());
     }
 
+#ifndef U_HIDE_DRAFT_API
     /**
      * Returns a C++ iterator for iterating over all of the elements of this set.
      * Convenient all-in one iteration, but creates a std::u16string for each
@@ -1079,27 +1192,28 @@ public:
      * \endcode
      *
      * @return an all-elements iterator.
-     * @stable ICU 77
+     * @draft ICU 77
      * @see end
      * @see codePoints
      * @see ranges
      * @see strings
      */
-    inline U_HEADER_NESTED_NAMESPACE::USetElementIterator begin() const U_LIFETIME_BOUND {
+    inline U_HEADER_NESTED_NAMESPACE::USetElementIterator begin() const {
         return U_HEADER_NESTED_NAMESPACE::USetElements(toUSet()).begin();
     }
 
     /**
      * @return an exclusive-end sentinel for iterating over all of the elements of this set.
-     * @stable ICU 77
+     * @draft ICU 77
      * @see begin
      * @see codePoints
      * @see ranges
      * @see strings
      */
-    inline U_HEADER_NESTED_NAMESPACE::USetElementIterator end() const U_LIFETIME_BOUND {
+    inline U_HEADER_NESTED_NAMESPACE::USetElementIterator end() const {
         return U_HEADER_NESTED_NAMESPACE::USetElements(toUSet()).end();
     }
+#endif  // U_HIDE_DRAFT_API
 
     /**
      * Adds the specified range to this set if it is not already
@@ -1115,7 +1229,7 @@ public:
      * to this set.
      * @stable ICU 2.0
      */
-    UnicodeSet& add(UChar32 start, UChar32 end) U_LIFETIME_BOUND;
+    UnicodeSet& add(UChar32 start, UChar32 end);
 
     /**
      * Adds the specified character to this set if it is not already
@@ -1127,7 +1241,7 @@ public:
      * @return this object, for chaining
      * @stable ICU 2.0
      */
-    UnicodeSet& add(UChar32 c) U_LIFETIME_BOUND;
+    UnicodeSet& add(UChar32 c);
 
     /**
      * Adds the specified multicharacter to this set if it is not already
@@ -1140,7 +1254,7 @@ public:
      * @return this object, for chaining
      * @stable ICU 2.4
      */
-    UnicodeSet& add(const UnicodeString& s) U_LIFETIME_BOUND;
+    UnicodeSet& add(const UnicodeString& s);
 
  private:
     /**
@@ -1161,7 +1275,7 @@ public:
      * @return this object, for chaining
      * @stable ICU 2.4
      */
-    UnicodeSet& addAll(const UnicodeString& s) U_LIFETIME_BOUND;
+    UnicodeSet& addAll(const UnicodeString& s);
 
     /**
      * Retains EACH of the characters in this string. Note: "ch" == {"c", "h"}
@@ -1170,7 +1284,7 @@ public:
      * @return this object, for chaining
      * @stable ICU 2.4
      */
-    UnicodeSet& retainAll(const UnicodeString& s) U_LIFETIME_BOUND;
+    UnicodeSet& retainAll(const UnicodeString& s);
 
     /**
      * Complement EACH of the characters in this string. Note: "ch" == {"c", "h"}
@@ -1179,7 +1293,7 @@ public:
      * @return this object, for chaining
      * @stable ICU 2.4
      */
-    UnicodeSet& complementAll(const UnicodeString& s) U_LIFETIME_BOUND;
+    UnicodeSet& complementAll(const UnicodeString& s);
 
     /**
      * Remove EACH of the characters in this string. Note: "ch" == {"c", "h"}
@@ -1188,7 +1302,7 @@ public:
      * @return this object, for chaining
      * @stable ICU 2.4
      */
-    UnicodeSet& removeAll(const UnicodeString& s) U_LIFETIME_BOUND;
+    UnicodeSet& removeAll(const UnicodeString& s);
 
     /**
      * Makes a set from a multicharacter string. Thus "ch" => {"ch"}
@@ -1221,7 +1335,7 @@ public:
      * @param end last character, inclusive, of range
      * @stable ICU 2.0
      */
-    UnicodeSet& retain(UChar32 start, UChar32 end) U_LIFETIME_BOUND;
+    UnicodeSet& retain(UChar32 start, UChar32 end);
 
 
     /**
@@ -1232,7 +1346,7 @@ public:
      * @return this object, for chaining
      * @stable ICU 2.0
      */
-    UnicodeSet& retain(UChar32 c) U_LIFETIME_BOUND;
+    UnicodeSet& retain(UChar32 c);
 
     /**
      * Retains only the specified string from this set if it is present.
@@ -1244,7 +1358,7 @@ public:
      * @return this object, for chaining
      * @stable ICU 69
      */
-    UnicodeSet& retain(const UnicodeString& s) U_LIFETIME_BOUND;
+    UnicodeSet& retain(const UnicodeString &s);
 
     /**
      * Removes the specified range from this set if it is present.
@@ -1259,7 +1373,7 @@ public:
      * from this set.
      * @stable ICU 2.0
      */
-    UnicodeSet& remove(UChar32 start, UChar32 end) U_LIFETIME_BOUND;
+    UnicodeSet& remove(UChar32 start, UChar32 end);
 
     /**
      * Removes the specified character from this set if it is present.
@@ -1271,7 +1385,7 @@ public:
      * @return this object, for chaining
      * @stable ICU 2.0
      */
-    UnicodeSet& remove(UChar32 c) U_LIFETIME_BOUND;
+    UnicodeSet& remove(UChar32 c);
 
     /**
      * Removes the specified string from this set if it is present.
@@ -1282,7 +1396,7 @@ public:
      * @return this object, for chaining
      * @stable ICU 2.4
      */
-    UnicodeSet& remove(const UnicodeString& s) U_LIFETIME_BOUND;
+    UnicodeSet& remove(const UnicodeString& s);
 
     /**
      * This is equivalent to
@@ -1296,7 +1410,7 @@ public:
      * A frozen set will not be modified.
      * @stable ICU 2.0
      */
-    UnicodeSet& complement() U_LIFETIME_BOUND;
+    UnicodeSet& complement();
 
     /**
      * Complements the specified range in this set.  Any character in
@@ -1310,7 +1424,7 @@ public:
      * @param end last character, inclusive, of range
      * @stable ICU 2.0
      */
-    UnicodeSet& complement(UChar32 start, UChar32 end) U_LIFETIME_BOUND;
+    UnicodeSet& complement(UChar32 start, UChar32 end);
 
     /**
      * Complements the specified character in this set.  The character
@@ -1322,7 +1436,7 @@ public:
      * @return this object, for chaining
      * @stable ICU 2.0
      */
-    UnicodeSet& complement(UChar32 c) U_LIFETIME_BOUND;
+    UnicodeSet& complement(UChar32 c);
 
     /**
      * Complement the specified string in this set.
@@ -1333,7 +1447,7 @@ public:
      * @return this object, for chaining
      * @stable ICU 2.4
      */
-    UnicodeSet& complement(const UnicodeString& s) U_LIFETIME_BOUND;
+    UnicodeSet& complement(const UnicodeString& s);
 
     /**
      * Adds all of the elements in the specified set to this set if
@@ -1347,7 +1461,7 @@ public:
      * @see #add(UChar32, UChar32)
      * @stable ICU 2.0
      */
-    UnicodeSet& addAll(const UnicodeSet& c) U_LIFETIME_BOUND;
+    UnicodeSet& addAll(const UnicodeSet& c);
 
     /**
      * Retains only the elements in this set that are contained in the
@@ -1360,7 +1474,7 @@ public:
      * @param c set that defines which elements this set will retain.
      * @stable ICU 2.0
      */
-    UnicodeSet& retainAll(const UnicodeSet& c) U_LIFETIME_BOUND;
+    UnicodeSet& retainAll(const UnicodeSet& c);
 
     /**
      * Removes from this set all of its elements that are contained in the
@@ -1373,7 +1487,7 @@ public:
      *          this set.
      * @stable ICU 2.0
      */
-    UnicodeSet& removeAll(const UnicodeSet& c) U_LIFETIME_BOUND;
+    UnicodeSet& removeAll(const UnicodeSet& c);
 
     /**
      * Complements in this set all elements contained in the specified
@@ -1385,7 +1499,7 @@ public:
      *          this set.
      * @stable ICU 2.4
      */
-    UnicodeSet& complementAll(const UnicodeSet& c) U_LIFETIME_BOUND;
+    UnicodeSet& complementAll(const UnicodeSet& c);
 
     /**
      * Removes all of the elements from this set.  This set will be
@@ -1393,7 +1507,7 @@ public:
      * A frozen set will not be modified.
      * @stable ICU 2.0
      */
-    UnicodeSet& clear() U_LIFETIME_BOUND;
+    UnicodeSet& clear();
 
     /**
      * Close this set over the given attribute.  For the attribute
@@ -1422,7 +1536,7 @@ public:
      * @return a reference to this set.
      * @stable ICU 4.2
      */
-    UnicodeSet& closeOver(int32_t attribute) U_LIFETIME_BOUND;
+    UnicodeSet& closeOver(int32_t attribute);
 
     /**
      * Remove all strings from this set.
@@ -1430,7 +1544,7 @@ public:
      * @return a reference to this set.
      * @stable ICU 4.2
      */
-    UnicodeSet& removeAllStrings() U_LIFETIME_BOUND;
+    UnicodeSet &removeAllStrings();
 
     /**
      * Iteration method that returns the number of ranges contained in
@@ -1515,7 +1629,7 @@ public:
      * A frozen set will not be modified.
      * @stable ICU 2.4
      */
-    UnicodeSet& compact() U_LIFETIME_BOUND;
+    UnicodeSet& compact();
 
     /**
      * Return the class ID for this class.  This is useful only for
@@ -1546,7 +1660,7 @@ public:
 
     friend class USetAccess;
 
-    const UnicodeString* getString(int32_t index) const U_LIFETIME_BOUND;
+    const UnicodeString* getString(int32_t index) const;
 
     //----------------------------------------------------------------
     // RuleBasedTransliterator support
@@ -1569,7 +1683,7 @@ private:
     //----------------------------------------------------------------
 
     UnicodeSet(const UnicodeSet& o, UBool /* asThawed */);
-    UnicodeSet& copyFrom(const UnicodeSet& o, UBool asThawed) U_LIFETIME_BOUND;
+    UnicodeSet& copyFrom(const UnicodeSet& o, UBool asThawed);
 
     //----------------------------------------------------------------
     // Implementation: Pattern parsing
@@ -1580,58 +1694,13 @@ private:
                                  const SymbolTable* symbols,
                                  UErrorCode& status);
 
-    void applyPattern(const UnicodeString &pattern,
-                      const ParsePosition& parsePosition,
-                      RuleCharacterIterator &chars,
-                      const SymbolTable *symbols,
-                      UnicodeString &rebuiltPat,
+    void applyPattern(RuleCharacterIterator& chars,
+                      const SymbolTable* symbols,
+                      UnicodeString& rebuiltPat,
                       uint32_t options,
-                      UnicodeSet &(UnicodeSet::*caseClosure)(int32_t attribute),
-                      UErrorCode &ec);
-
-    // Recursive-descent predictive parsing.  These functions parse the syntactic categories
-    // matching their name in the base grammar of PD UTR #56 (before the highlighted changes are
-    // applied).
-    // See https://www.unicode.org/reports/tr61/tr61-1.html#Set-Operations.
-    // `parseUnicodeSet` clears `*this` and makes it represent the parsed UnicodeSet; all other functions
-    // add the set represented by the parsed construct to `*this`.
-
-    class Lexer;
-
-    static UnicodeSet parseUnicodeSet(Lexer &lexer,
-                                      UnicodeString &rebuiltPat,
-                                      uint32_t options,
-                                      UnicodeSet &(UnicodeSet::*caseClosure)(int32_t attribute),
-                                      int32_t depth,
-                                      UErrorCode &ec);
-
-    static UnicodeSet parseContent(Lexer &lexer,
-                                   UnicodeString &rebuiltPat,
-                                   uint32_t options,
-                                   UnicodeSet &(UnicodeSet::*caseClosure)(int32_t attribute),
-                                   int32_t depth,
-                                   bool &containsSetOperation,
-                                   UErrorCode &ec);
-
-    void parseMutation(Lexer &lexer,
-                       UnicodeString &rebuiltPat,
-                       uint32_t options,
-                       UnicodeSet &(UnicodeSet::*caseClosure)(int32_t attribute),
-                       int32_t depth,
-                       bool &containsSetOperation,
-                       UErrorCode &ec);
-
-    void parseSetOperations(Lexer &lexer,
-                            UnicodeString &rebuiltPat,
-                            uint32_t options,
-                            UnicodeSet &(UnicodeSet::*caseClosure)(int32_t attribute),
-                            int32_t depth,
-                            UErrorCode &ec);
-
-    static UnicodeSet parseElements(Lexer &lexer,
-                                    UnicodeString &rebuiltPat,
-                                    UErrorCode &ec);
-
+                      UnicodeSet& (UnicodeSet::*caseClosure)(int32_t attribute),
+                      int32_t depth,
+                      UErrorCode& ec);
 
     void closeOverCaseInsensitive(bool simple);
     void closeOverAddCaseMappings();
@@ -1652,10 +1721,10 @@ private:
     int32_t stringsSize() const;
     UBool stringsContains(const UnicodeString &s) const;
 
-    UnicodeString& _toPattern(UnicodeString& result U_LIFETIME_BOUND,
+    UnicodeString& _toPattern(UnicodeString& result,
                               UBool escapeUnprintable) const;
 
-    UnicodeString& _generatePattern(UnicodeString& result U_LIFETIME_BOUND,
+    UnicodeString& _generatePattern(UnicodeString& result,
                                     UBool escapeUnprintable) const;
 
     static void _appendToPat(UnicodeString& buf, const UnicodeString& s, UBool escapeUnprintable);
@@ -1682,6 +1751,9 @@ private:
      */
     static UBool resemblesPropertyPattern(const UnicodeString& pattern,
                                           int32_t pos);
+
+    static UBool resemblesPropertyPattern(RuleCharacterIterator& chars,
+                                          int32_t iterOpts);
 
     /**
      * Parse the given property pattern at the given parse position
@@ -1724,7 +1796,11 @@ private:
      */
     UnicodeSet& applyPropertyPattern(const UnicodeString& pattern,
                                      ParsePosition& ppos,
-                                     UErrorCode& ec) U_LIFETIME_BOUND;
+                                     UErrorCode &ec);
+
+    void applyPropertyPattern(RuleCharacterIterator& chars,
+                              UnicodeString& rebuiltPat,
+                              UErrorCode& ec);
 
     /**
      * A filter that returns true if the given code point should be
@@ -1787,19 +1863,19 @@ inline UBool UnicodeSet::isBogus() const {
     return fFlags & kIsBogus;
 }
 
-inline UnicodeSet* UnicodeSet::fromUSet(USet* uset U_LIFETIME_BOUND) {
+inline UnicodeSet *UnicodeSet::fromUSet(USet *uset) {
     return reinterpret_cast<UnicodeSet *>(uset);
 }
 
-inline const UnicodeSet* UnicodeSet::fromUSet(const USet* uset U_LIFETIME_BOUND) {
+inline const UnicodeSet *UnicodeSet::fromUSet(const USet *uset) {
     return reinterpret_cast<const UnicodeSet *>(uset);
 }
 
-inline USet* UnicodeSet::toUSet() U_LIFETIME_BOUND {
-    return reinterpret_cast<USet*>(this);
+inline USet *UnicodeSet::toUSet() {
+    return reinterpret_cast<USet *>(this);
 }
 
-inline const USet* UnicodeSet::toUSet() const U_LIFETIME_BOUND {
+inline const USet *UnicodeSet::toUSet() const {
     return reinterpret_cast<const USet *>(this);
 }
 

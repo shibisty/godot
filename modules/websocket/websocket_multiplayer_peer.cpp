@@ -200,7 +200,10 @@ Error WebSocketMultiplayerPeer::create_client(const String &p_url, const Ref<TLS
 	ERR_FAIL_COND_V(p_options.is_valid() && p_options->is_server(), ERR_INVALID_PARAMETER);
 	_clear();
 	Ref<WebSocketPeer> peer = _create_peer();
-	RETURN_IF_ERROR(peer->connect_to_url(p_url, p_options));
+	Error err = peer->connect_to_url(p_url, p_options);
+	if (err != OK) {
+		return err;
+	}
 	PendingPeer pending;
 	pending.time = OS::get_singleton()->get_ticks_msec();
 	pending_peers[1] = pending;

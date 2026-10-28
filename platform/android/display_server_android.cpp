@@ -39,7 +39,6 @@
 #include "core/input/input.h"
 #include "core/input/input_event.h"
 #include "core/os/os.h"
-#include "servers/display/accessibility_server.h"
 #include "servers/display/native_menu.h"
 
 #if defined(RD_ENABLED)
@@ -100,8 +99,6 @@ bool DisplayServerAndroid::has_feature(DisplayServerEnums::Feature p_feature) co
 		case DisplayServerEnums::FEATURE_VIRTUAL_KEYBOARD:
 		case DisplayServerEnums::FEATURE_TEXT_TO_SPEECH:
 			return true;
-		case DisplayServerEnums::FEATURE_ACCESSIBILITY_SCREEN_READER:
-			return AccessibilityServer::get_singleton()->is_supported();
 		default:
 			return false;
 	}
@@ -109,24 +106,6 @@ bool DisplayServerAndroid::has_feature(DisplayServerEnums::Feature p_feature) co
 
 String DisplayServerAndroid::get_name() const {
 	return "Android";
-}
-
-int DisplayServerAndroid::accessibility_should_increase_contrast() const {
-	GodotJavaWrapper *godot_java = OS_Android::get_singleton()->get_godot_java();
-	ERR_FAIL_NULL_V(godot_java, -1);
-	return godot_java->is_high_contrast_active();
-}
-
-int DisplayServerAndroid::accessibility_screen_reader_active() const {
-	GodotJavaWrapper *godot_java = OS_Android::get_singleton()->get_godot_java();
-	ERR_FAIL_NULL_V(godot_java, -1);
-	return godot_java->is_screen_reader_active();
-}
-
-int DisplayServerAndroid::accessibility_should_reduce_animation() const {
-	GodotJavaWrapper *godot_java = OS_Android::get_singleton()->get_godot_java();
-	ERR_FAIL_NULL_V(godot_java, -1);
-	return godot_java->is_animation_disabled();
 }
 
 bool DisplayServerAndroid::tts_is_speaking() const {
@@ -276,21 +255,13 @@ Color DisplayServerAndroid::get_base_color() const {
 	return godot_java->get_base_color();
 }
 
-TypedArray<Rect2> DisplayServerAndroid::get_display_cutouts(int p_screen) const {
-	p_screen = _get_screen_index(p_screen);
-	int screen_count = get_screen_count();
-	ERR_FAIL_INDEX_V(p_screen, screen_count, TypedArray<Rect2>());
-
+TypedArray<Rect2> DisplayServerAndroid::get_display_cutouts() const {
 	GodotIOJavaWrapper *godot_io_java = OS_Android::get_singleton()->get_godot_io_java();
 	ERR_FAIL_NULL_V(godot_io_java, Array());
 	return godot_io_java->get_display_cutouts();
 }
 
-Rect2i DisplayServerAndroid::get_display_safe_area(int p_screen) const {
-	p_screen = _get_screen_index(p_screen);
-	int screen_count = get_screen_count();
-	ERR_FAIL_INDEX_V(p_screen, screen_count, Rect2i());
-
+Rect2i DisplayServerAndroid::get_display_safe_area() const {
 	GodotIOJavaWrapper *godot_io_java = OS_Android::get_singleton()->get_godot_io_java();
 	ERR_FAIL_NULL_V(godot_io_java, Rect2i());
 	return godot_io_java->get_display_safe_area();
@@ -396,9 +367,8 @@ float DisplayServerAndroid::screen_get_scale(int p_screen) const {
 	// Update the scale to avoid cropping.
 	Size2i screen_size = screen_get_size(p_screen);
 	if (screen_size != Size2i()) {
-		bool is_portrait = screen_size.height > screen_size.width;
-		float width_scale = screen_size.width / (float)(is_portrait ? OS_Android::DEFAULT_WINDOW_HEIGHT : OS_Android::DEFAULT_WINDOW_WIDTH);
-		float height_scale = screen_size.height / (float)(is_portrait ? OS_Android::DEFAULT_WINDOW_WIDTH : OS_Android::DEFAULT_WINDOW_HEIGHT);
+		float width_scale = screen_size.width / (float)OS_Android::DEFAULT_WINDOW_WIDTH;
+		float height_scale = screen_size.height / (float)OS_Android::DEFAULT_WINDOW_HEIGHT;
 		screen_scale = MIN(screen_scale, MIN(width_scale, height_scale));
 	}
 
@@ -809,7 +779,7 @@ void DisplayServerAndroid::notify_surface_changed(int p_width, int p_height) {
 
 void DisplayServerAndroid::notify_application_paused() {
 #if defined(RD_ENABLED)
-	if (rendering_device && rendering_device->is_pipeline_cache_enabled()) {
+	if (rendering_device) {
 		rendering_device->update_pipeline_cache();
 	}
 #endif // defined(RD_ENABLED)
@@ -878,7 +848,9 @@ DisplayServerAndroid::~DisplayServerAndroid() {
 	}
 
 #if defined(RD_ENABLED)
-	memdelete(rendering_device);
+	if (rendering_device) {
+		memdelete(rendering_device);
+	}
 
 	free_vulkan_global_context();
 #endif
@@ -898,10 +870,6 @@ void DisplayServerAndroid::process_magnetometer(const Vector3 &p_magnetometer) {
 
 void DisplayServerAndroid::process_gyroscope(const Vector3 &p_gyroscope) {
 	Input::get_singleton()->set_gyroscope(p_gyroscope);
-}
-
-void DisplayServerAndroid::process_device_orientation(const Quaternion &p_orientation) {
-	Input::get_singleton()->set_device_orientation(p_orientation);
 }
 
 void DisplayServerAndroid::_mouse_update_mode() {

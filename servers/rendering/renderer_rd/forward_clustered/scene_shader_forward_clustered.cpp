@@ -64,6 +64,8 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	uses_alpha_antialiasing = false;
 	uses_blend_alpha = false;
 	uses_depth_prepass_alpha = false;
+	uses_transparent_motion_vectors = false;
+	uses_opaque_late = false;
 	uses_discard = false;
 	uses_roughness = false;
 	uses_normal = false;
@@ -128,6 +130,9 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	actions.usage_flag_pointers["ALPHA_ANTIALIASING_EDGE"] = &uses_alpha_antialiasing;
 	actions.usage_flag_pointers["ALPHA_TEXTURE_COORDINATE"] = &uses_alpha_antialiasing;
 	actions.render_mode_flags["depth_prepass_alpha"] = &uses_depth_prepass_alpha;
+	actions.render_mode_flags["motion_vectors_transparent"] = &uses_transparent_motion_vectors;
+	actions.render_mode_flags["opaque_late"] = &uses_opaque_late;
+	actions.usage_flag_pointers["PREVIOUS_FRAME"] = &uses_time; // animated: include in the motion pass
 
 	actions.usage_flag_pointers["SSS_STRENGTH"] = &uses_sss;
 	actions.usage_flag_pointers["SSS_TRANSMITTANCE_DEPTH"] = &uses_transmittance;
@@ -252,7 +257,7 @@ bool SceneShaderForwardClustered::ShaderData::is_animated() const {
 }
 
 bool SceneShaderForwardClustered::ShaderData::casts_shadows() const {
-	bool has_read_screen_alpha = uses_screen_texture || uses_depth_texture || uses_normal_texture;
+	bool has_read_screen_alpha = !uses_opaque_late && (uses_screen_texture || uses_depth_texture || uses_normal_texture);
 	bool has_base_alpha = (uses_alpha && (!uses_alpha_clip || uses_alpha_antialiasing)) || has_read_screen_alpha;
 	bool has_alpha = has_base_alpha || uses_blend_alpha;
 
@@ -405,7 +410,7 @@ void SceneShaderForwardClustered::ShaderData::_create_pipeline(PipelineKey p_pip
 		depth_stencil_state.back_op = op;
 	}
 
-	const bool depth_pre_pass_enabled = SceneShaderForwardClustered::singleton->depth_prepass_enabled;
+	bool depth_pre_pass_enabled = bool(GLOBAL_GET_CACHED(bool, "rendering/driver/depth_prepass/enable"));
 
 	RD::RenderPrimitive primitive_rd_table[RSE::PRIMITIVE_MAX] = {
 		RD::RENDER_PRIMITIVE_POINTS,
@@ -442,6 +447,14 @@ void SceneShaderForwardClustered::ShaderData::_create_pipeline(PipelineKey p_pip
 			}
 
 			blend_state = blend_state_color_blend;
+			if ((p_pipeline_key.color_pass_flags & PIPELINE_COLOR_PASS_FLAG_MOTION_VECTORS) && !uses_transparent_motion_vectors) {
+				// Mariner: transparent pass with motion vectors bound - only materials that opted in write them.
+				RD::PipelineColorBlendState::Attachment &mv = blend_state.attachments.write[2];
+				mv.write_r = false;
+				mv.write_g = false;
+				mv.write_b = false;
+				mv.write_a = false;
+			}
 
 			if (depth_draw == DEPTH_DRAW_OPAQUE) {
 				depth_stencil_state.enable_depth_write = false; //alpha does not draw depth
@@ -626,7 +639,6 @@ SceneShaderForwardClustered::~SceneShaderForwardClustered() {
 
 	RD::get_singleton()->free_rid(default_vec4_xform_buffer);
 	RD::get_singleton()->free_rid(shadow_sampler);
-	RD::get_singleton()->free_rid(default_material_feedback_buffer);
 
 	material_storage->shader_free(overdraw_material_shader);
 	material_storage->shader_free(default_shader);
@@ -641,8 +653,6 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
 
 	emulate_point_size = !RD::get_singleton()->has_feature(RD::SUPPORTS_POINT_SIZE);
-
-	depth_prepass_enabled = GLOBAL_GET("rendering/driver/depth_prepass/enable");
 
 	{
 		Vector<ShaderRD::VariantDefine> shader_versions;
@@ -722,12 +732,12 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.renames["BINORMAL"] = "binormal";
 		actions.renames["POSITION"] = "position";
 		actions.renames["UV"] = "uv_interp";
-		actions.renames["STREAMING_LOD"] = "streaming_lod";
 		actions.renames["UV2"] = "uv2_interp";
 		actions.renames["COLOR"] = "color_interp";
 		actions.renames["POINT_SIZE"] = "point_size";
 		actions.renames["INSTANCE_ID"] = "INSTANCE_INDEX";
 		actions.renames["VERTEX_ID"] = "VERTEX_INDEX";
+		actions.renames["PREVIOUS_FRAME"] = "is_prev_frame";
 		actions.renames["Z_CLIP_SCALE"] = "z_clip_scale";
 
 		actions.renames["ALPHA_SCISSOR_THRESHOLD"] = "alpha_scissor_threshold";
@@ -863,11 +873,6 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.usage_defines["POINT_SIZE"] = "#define POINT_SIZE_USED\n";
 		actions.usage_defines["POINT_COORD"] = "#define POINT_COORD_USED\n";
 
-		actions.usage_defines["DISCARD"] = "#define DISCARD_USED\n";
-		actions.usage_defines["DEPTH"] = "#define DEPTH_USED\n";
-
-		actions.usage_defines["STREAMING_LOD"] = "#define STREAMING_LOD_USED\n";
-
 		actions.render_mode_defines["skip_vertex_transform"] = "#define SKIP_TRANSFORM_USED\n";
 		actions.render_mode_defines["world_vertex_coords"] = "#define VERTEX_WORLD_COORDS_USED\n";
 		actions.render_mode_defines["ensure_correct_normals"] = "#define ENSURE_CORRECT_NORMALS\n";
@@ -875,12 +880,6 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.render_mode_defines["cull_disabled"] = "#define DO_SIDE_CHECK\n";
 		actions.render_mode_defines["particle_trails"] = "#define USE_PARTICLE_TRAILS\n";
 		actions.render_mode_defines["depth_prepass_alpha"] = "#define USE_OPAQUE_PREPASS\n";
-
-		actions.render_mode_defines["depth_draw_never"] = "#define DEPTH_DRAW_NEVER_USED\n";
-		actions.render_mode_defines["depth_draw_always"] = "#define DEPTH_DRAW_ALWAYS_USED\n";
-		actions.render_mode_defines["depth_test_disabled"] = "#define DEPTH_TEST_DISABLED_USED\n";
-		actions.stencil_mode_defines["write"] = "#define STENCIL_WRITE_USED\n";
-		actions.stencil_mode_defines["write_depth_fail"] = "#define STENCIL_WRITE_USED\n";
 
 		bool force_lambert = GLOBAL_GET("rendering/shading/overrides/force_lambert_over_burley");
 
@@ -1008,7 +1007,6 @@ void fragment() {
 
 	{
 		default_vec4_xform_buffer = RD::get_singleton()->storage_buffer_create(256);
-		default_material_feedback_buffer = RD::get_singleton()->storage_buffer_create(256);
 		Vector<RD::Uniform> uniforms;
 		RD::Uniform u;
 		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
@@ -1031,8 +1029,8 @@ void fragment() {
 void SceneShaderForwardClustered::set_default_specialization(const ShaderSpecialization &p_specialization) {
 	default_specialization = p_specialization;
 
-	for (ShaderData &shader_data : shader_list) {
-		shader_data.pipeline_hash_map.clear_pipelines();
+	for (SelfList<ShaderData> *E = shader_list.first(); E; E = E->next()) {
+		E->self()->pipeline_hash_map.clear_pipelines();
 	}
 }
 
@@ -1062,24 +1060,4 @@ bool SceneShaderForwardClustered::is_advanced_shader_group_enabled(bool p_multiv
 uint32_t SceneShaderForwardClustered::get_pipeline_compilations(RSE::PipelineSource p_source) {
 	MutexLock lock(SceneShaderForwardClustered::singleton_mutex);
 	return pipeline_compilations[p_source];
-}
-
-RID SceneShaderForwardClustered::get_default_shader_rd(bool p_is_multiview) {
-	RID &shader_rd = p_is_multiview ? default_multiview_shader_rd : default_shader_rd;
-
-	if (shader_rd.is_null()) {
-		RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
-		ERR_FAIL_NULL_V(material_storage, RID());
-		ERR_FAIL_COND_V(!default_material.is_valid(), RID());
-
-		uint32_t flags = 0;
-		if (p_is_multiview) {
-			flags |= SHADER_COLOR_PASS_FLAG_MULTIVIEW;
-		}
-
-		MaterialData *md = static_cast<MaterialData *>(material_storage->material_get_data(default_material, RendererRD::MaterialStorage::SHADER_TYPE_3D));
-		shader_rd = md->shader_data->get_shader_variant(PIPELINE_VERSION_COLOR_PASS, flags, false);
-	}
-
-	return shader_rd;
 }

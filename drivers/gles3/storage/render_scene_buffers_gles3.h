@@ -49,7 +49,6 @@ public:
 	//bool use_taa = false;
 	//bool use_debanding = false;
 	uint32_t view_count = 1;
-	bool emulate_multiview = false;
 	bool apply_environment_effects_in_post = false;
 	bool apply_canvas_bg_exposure = false;
 
@@ -96,7 +95,7 @@ private:
 	void _clear_glow_buffers();
 
 	void _rt_attach_textures(GLuint p_color, GLuint p_depth, GLsizei p_samples, uint32_t p_view_count, bool p_depth_has_stencil);
-	GLuint _rt_get_cached_fbo(GLuint p_color, GLuint p_depth, GLsizei p_samples, uint32_t p_view_count, bool p_depth_has_stencil);
+	GLuint _rt_get_cached_fbo(GLuint p_color, GLuint p_depth, GLsizei p_samples, uint32_t p_view_count);
 
 public:
 	RenderSceneBuffersGLES3();
@@ -116,9 +115,7 @@ public:
 	void check_backbuffer(bool p_need_color, bool p_need_depth); // Check if we need to initialize our backbuffer.
 	void check_glow_buffers(); // Check if we need to initialize our glow buffers.
 
-	GLuint get_render_fbo(int p_view = -1);
-	void attach_backbuffer_layer(uint32_t p_view);
-
+	GLuint get_render_fbo();
 	GLuint get_msaa3d_fbo() {
 		_check_render_buffers();
 		return msaa3d.fbo;

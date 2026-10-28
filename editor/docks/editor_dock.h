@@ -42,11 +42,9 @@ class EditorDock : public MarginContainer {
 
 public:
 	enum DockLayout {
-		DOCK_LAYOUT_NONE = 0,
 		DOCK_LAYOUT_VERTICAL = 1,
 		DOCK_LAYOUT_HORIZONTAL = 2,
 		DOCK_LAYOUT_FLOATING = 4,
-		DOCK_LAYOUT_MAIN_SCREEN = 8,
 		DOCK_LAYOUT_ALL = DOCK_LAYOUT_VERTICAL | DOCK_LAYOUT_HORIZONTAL | DOCK_LAYOUT_FLOATING,
 	};
 
@@ -63,7 +61,6 @@ public:
 		DOCK_SLOT_BOTTOM,
 		DOCK_SLOT_BOTTOM_L,
 		DOCK_SLOT_BOTTOM_R,
-		DOCK_SLOT_MAIN_SCREEN,
 		DOCK_SLOT_MAX
 	};
 
@@ -81,13 +78,11 @@ private:
 	Color title_color = Color(0, 0, 0, 0);
 	Ref<Shortcut> shortcut;
 	DockSlot default_slot = DOCK_SLOT_NONE;
-
 	bool global = true;
 	bool transient = false;
 	bool closable = false;
-	bool allow_switch_screen = false;
 
-	DockLayout current_layout = DOCK_LAYOUT_NONE;
+	DockLayout current_layout;
 	BitField<DockLayout> available_layouts = DOCK_LAYOUT_VERTICAL | DOCK_LAYOUT_FLOATING;
 
 	bool is_open = false;
@@ -108,20 +103,15 @@ protected:
 	void _notification(int p_what);
 	static void _bind_methods();
 
-	GDVIRTUAL2(_update_layout_and_slot, int, int)
+	GDVIRTUAL1(_update_layout, int)
 	GDVIRTUAL2C(_save_layout_to_config, Ref<ConfigFile>, const String &)
 	GDVIRTUAL2(_load_layout_from_config, Ref<ConfigFile>, const String &)
-
-#ifndef DISABLE_DEPRECATED
-	GDVIRTUAL1(_update_layout, int)
-#endif
 
 public:
 	void open();
 	void make_visible();
-	void make_floating(int p_screen = -1);
+	void make_floating();
 	void close();
-	bool is_dock_open() { return is_open; }
 
 	void set_title(const String &p_title);
 	String get_title() const { return title; }
@@ -137,9 +127,6 @@ public:
 
 	void set_closable(bool p_closable) { closable = p_closable; }
 	bool is_closable() const { return closable; }
-
-	void set_allow_switch_screen(bool p_allow) { allow_switch_screen = p_allow; }
-	bool is_allow_switch_screen() const { return allow_switch_screen; }
 
 	void set_icon_name(const StringName &p_name);
 	StringName get_icon_name() const { return icon_name; }
@@ -170,9 +157,8 @@ public:
 	void update_tab_style();
 	Ref<Texture2D> get_effective_icon(const Callable &p_icon_fetch);
 
-	virtual void update_layout(DockLayout p_layout, int p_slot);
+	virtual void update_layout(DockLayout p_layout) { GDVIRTUAL_CALL(_update_layout, p_layout); }
 	DockLayout get_current_layout() const { return current_layout; }
-	DockSlot get_current_slot() const { return (DockSlot)dock_slot_index; }
 
 	virtual void save_layout_to_config(Ref<ConfigFile> &p_layout, const String &p_section) const { GDVIRTUAL_CALL(_save_layout_to_config, p_layout, p_section); }
 	virtual void load_layout_from_config(const Ref<ConfigFile> &p_layout, const String &p_section) { GDVIRTUAL_CALL(_load_layout_from_config, p_layout, p_section); }

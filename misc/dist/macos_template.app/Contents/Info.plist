@@ -52,13 +52,15 @@ $usage_descriptions
 	<string>public.app-category.$app_category</string>
 	<key>LSArchitecturePriority</key>
 	<array>
-$arch_priority
+		<string>arm64</string>
+		<string>x86_64</string>
 	</array>
-	<key>LSMinimumSystemVersion</key>
-	<string>$min_version_common</string>
 	<key>LSMinimumSystemVersionByArchitecture</key>
 	<dict>
-$min_version_info
+		<key>arm64</key>
+		<string>$min_version_arm64</string>
+		<key>x86_64</key>
+		<string>$min_version_x86_64</string>
 	</dict>
 	<key>NSHighResolutionCapable</key>
 $highres

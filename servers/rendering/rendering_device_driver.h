@@ -70,7 +70,7 @@ class RenderingShaderContainerFormat;
 template <typename... RESOURCE_TYPES>
 struct VersatileResourceTemplate {
 	static constexpr size_t RESOURCE_SIZES[] = { sizeof(RESOURCE_TYPES)... };
-	static constexpr size_t MAX_RESOURCE_SIZE = Span<size_t>(RESOURCE_SIZES).max();
+	static constexpr size_t MAX_RESOURCE_SIZE = Span(RESOURCE_SIZES).max();
 	uint8_t data[MAX_RESOURCE_SIZE];
 
 	template <typename T>
@@ -148,6 +148,19 @@ public:
 	/**** GENERIC ****/
 	/*****************/
 
+protected:
+	// Mariner E8: set by RenderingDevice before initialize().
+	bool local_device = false; // Not the main device: no Streamline / Aftermath / XR device hooks.
+	bool explicit_device = false; // On a physical device chosen by index (RenderingServer.create_local_rendering_device_on()).
+
+public:
+	void set_local_device(bool p_local, bool p_explicit) {
+		local_device = p_local;
+		explicit_device = p_explicit;
+	}
+	bool is_local_device() const { return local_device; }
+	bool is_explicit_device() const { return explicit_device; }
+
 	virtual Error initialize(uint32_t p_device_index, uint32_t p_frame_count) = 0;
 
 	/****************/
@@ -157,7 +170,6 @@ public:
 	enum MemoryAllocationType {
 		MEMORY_ALLOCATION_TYPE_CPU, // For images, CPU allocation also means linear, GPU is tiling optimal.
 		MEMORY_ALLOCATION_TYPE_GPU,
-		MEMORY_ALLOCATION_TYPE_GPU_MAPPABLE, // Supported on UMA devices or discrete devices with ReBAR.
 	};
 
 	/*****************/
@@ -178,6 +190,8 @@ public:
 		BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT = (1 << 19),
 		BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT = (1 << 20),
 		// There are no Vulkan-equivalent. Try to use unused/unclaimed bits.
+		// Mariner E6: shared with the asynchronous compute queue (see TEXTURE_USAGE_ASYNC_COMPUTE_BIT).
+		BUFFER_USAGE_ASYNC_COMPUTE_SHARED_BIT = (1 << 30),
 		BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT = (1 << 31),
 	};
 
@@ -331,6 +345,9 @@ public:
 		PIPELINE_STAGE_ALL_GRAPHICS_BIT = (1 << 15),
 		PIPELINE_STAGE_ALL_COMMANDS_BIT = (1 << 16),
 		PIPELINE_STAGE_CLEAR_STORAGE_BIT = (1 << 17),
+		// Mariner E7: same values as VK_PIPELINE_STAGE_TASK_SHADER_BIT_EXT / VK_PIPELINE_STAGE_MESH_SHADER_BIT_EXT.
+		PIPELINE_STAGE_TASK_SHADER_BIT = (1 << 19),
+		PIPELINE_STAGE_MESH_SHADER_BIT = (1 << 20),
 		PIPELINE_STAGE_RAY_TRACING_SHADER_BIT = (1 << 21),
 		PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT = (1 << 22),
 		PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT = (1 << 23),
@@ -441,6 +458,26 @@ public:
 	virtual Error command_queue_execute_and_present(CommandQueueID p_cmd_queue, VectorView<SemaphoreID> p_wait_semaphores, VectorView<CommandBufferID> p_cmd_buffers, VectorView<SemaphoreID> p_cmd_semaphores, FenceID p_cmd_fence, VectorView<SwapChainID> p_swap_chains) = 0;
 	virtual void command_queue_free(CommandQueueID p_cmd_queue) = 0;
 
+	// ----- ASYNC COMPUTE (Mariner E6) -----
+
+	// Timeline semaphores (Vulkan 1.2 timeline semaphores, D3D12 fences) synchronize the main queue with the
+	// asynchronous compute queue. Values only grow. Unsupported by default: RenderingDevice then keeps all compute
+	// work on the main queue.
+	virtual bool timeline_semaphore_is_supported() { return false; }
+	virtual SemaphoreID timeline_semaphore_create() { return SemaphoreID(); }
+	virtual void timeline_semaphore_free(SemaphoreID p_semaphore) {}
+	// Queue a GPU-side wait (value >= p_value) / signal (= p_value) on p_cmd_queue. They are applied to the next
+	// command_queue_execute_and_present() call on that queue that executes command buffers (waits before them,
+	// signals after them).
+	virtual void command_queue_add_timeline_wait(CommandQueueID p_cmd_queue, SemaphoreID p_semaphore, uint64_t p_value) {}
+	virtual void command_queue_add_timeline_signal(CommandQueueID p_cmd_queue, SemaphoreID p_semaphore, uint64_t p_value) {}
+	// Queue families that may access resources created with BUFFER_USAGE_ASYNC_COMPUTE_SHARED_BIT /
+	// TEXTURE_USAGE_ASYNC_COMPUTE_BIT (Vulkan: VK_SHARING_MODE_CONCURRENT among them). Set once, before such
+	// resources are created. An empty list (the default) means those bits are ignored.
+	virtual void async_compute_set_shared_queue_families(VectorView<CommandQueueFamilyID> p_families) {}
+	// Whether command buffers of the family can write timestamps (Vulkan: timestampValidBits > 0).
+	virtual bool command_queue_family_supports_timestamps(CommandQueueFamilyID p_cmd_queue_family) { return true; }
+
 	// ----- POOL -----
 
 	enum CommandBufferType {
@@ -533,6 +570,9 @@ public:
 		// Flag to indicate  that this is an immutable sampler so it is skipped when creating uniform
 		// sets, as it would be set previously when creating the pipeline layout.
 		bool immutable_sampler = false;
+		// Runtime-sized array binding: allocate the descriptor set with ids.size() descriptors for it.
+		// Only the last binding of a set can be variable.
+		bool variable_count = false;
 
 		_FORCE_INLINE_ bool is_dynamic() const {
 			return type == UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC || type == UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC;
@@ -698,6 +738,11 @@ public:
 	virtual void command_render_draw_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, uint32_t p_draw_count, uint32_t p_stride) = 0;
 	virtual void command_render_draw_indirect_count(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, BufferID p_count_buffer, uint64_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride) = 0;
 
+	// Mariner E7: mesh shading (only called when the driver reports SUPPORTS_MESH_SHADER).
+	virtual void command_render_draw_mesh_tasks(CommandBufferID p_cmd_buffer, uint32_t p_group_count_x, uint32_t p_group_count_y, uint32_t p_group_count_z) = 0;
+	virtual void command_render_draw_mesh_tasks_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, uint32_t p_draw_count, uint32_t p_stride) = 0;
+	virtual void command_render_draw_mesh_tasks_indirect_count(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, BufferID p_count_buffer, uint64_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride) = 0;
+
 	// Buffer binding.
 	virtual void command_render_bind_vertex_buffers(CommandBufferID p_cmd_buffer, uint32_t p_binding_count, const BufferID *p_buffers, const uint64_t *p_offsets, uint64_t p_dynamic_offsets) = 0;
 	virtual void command_render_bind_index_buffer(CommandBufferID p_cmd_buffer, BufferID p_buffer, IndexBufferFormat p_format, uint64_t p_offset) = 0;
@@ -727,9 +772,6 @@ public:
 	/*****************/
 
 	// ----- COMMANDS -----
-
-	virtual void command_begin_compute_pass(CommandBufferID p_cmd_buffer);
-	virtual void command_end_compute_pass(CommandBufferID p_cmd_buffer);
 
 	// Binding.
 	virtual void command_bind_compute_pipeline(CommandBufferID p_cmd_buffer, PipelineID p_pipeline) = 0;
@@ -801,6 +843,9 @@ public:
 	// ----- COMMANDS -----
 
 	virtual void command_build_blas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer) = 0;
+	// In-place refit of a BLAS created with ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT (same topology, new vertex positions).
+	// Drivers without raytracing support never get here (RenderingDevice refuses to create acceleration structures).
+	virtual void command_update_blas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer) {}
 	virtual void command_build_tlas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer, BufferID p_instance_buffer, uint32_t p_instance_offset, uint32_t p_instance_count) = 0;
 	virtual void command_bind_raytracing_pipeline(CommandBufferID p_cmd_buffer, RaytracingPipelineID p_pipeline) = 0;
 	virtual void command_bind_raytracing_uniform_set(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index) = 0;
@@ -843,16 +888,13 @@ public:
 	virtual void command_begin_label(CommandBufferID p_cmd_buffer, const char *p_label_name, const Color &p_color) = 0;
 	virtual void command_end_label(CommandBufferID p_cmd_buffer) = 0;
 
-	// Marks the start/end of a coherent batch of commands. Drivers may use this
-	// to flush incidental encoder state (e.g. a still-open blit encoder used for
-	// housekeeping copies) so subsequent commands start fresh. Default no-op.
-	virtual void command_group_begin(CommandBufferID p_cmd_buffer) {}
-	virtual void command_group_end(CommandBufferID p_cmd_buffer) {}
-
 	/****************/
 	/**** DEBUG *****/
 	/****************/
 	virtual void command_insert_breadcrumb(CommandBufferID p_cmd_buffer, uint32_t p_data) = 0;
+
+	// Returns the underlying native command buffer handle (e.g. ID3D12GraphicsCommandList* or VkCommandBuffer).
+	virtual void *command_buffer_get_native_handle(CommandBufferID p_cmd_buffer) { return nullptr; }
 
 	/********************/
 	/**** SUBMISSION ****/
@@ -910,11 +952,9 @@ public:
 		API_TRAIT_TEXTURE_TRANSFER_ALIGNMENT,
 		API_TRAIT_TEXTURE_DATA_ROW_PITCH_STEP,
 		API_TRAIT_SECONDARY_VIEWPORT_SCISSOR,
-		API_TRAIT_BUFFER_CLEARS_WITH_COPY_ENGINE,
-		API_TRAIT_TEXTURE_CLEARS_WITH_COPY_ENGINE,
+		API_TRAIT_CLEARS_WITH_COPY_ENGINE,
 		API_TRAIT_USE_GENERAL_IN_COPY_QUEUES,
 		API_TRAIT_BUFFERS_REQUIRE_TRANSITIONS,
-		API_TRAIT_TEXTURES_REQUIRE_LAYOUT_TRANSITIONS,
 		API_TRAIT_TEXTURE_OUTPUTS_REQUIRE_CLEARS,
 		API_TRAIT_ACCELERATION_STRUCTURE_INSTANCE_SIZE,
 		API_TRAIT_SHADER_GROUP_HANDLE_SIZE,

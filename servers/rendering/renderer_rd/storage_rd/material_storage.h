@@ -105,7 +105,6 @@ public:
 		//to be used internally by update_parameters, in the most common configuration of material parameters
 		bool update_parameters_uniform_set(const HashMap<StringName, Variant> &p_parameters, bool p_uniform_dirty, bool p_textures_dirty, const HashMap<StringName, ShaderLanguage::ShaderNode::Uniform> &p_uniforms, const uint32_t *p_uniform_offsets, const Vector<ShaderCompiler::GeneratedCode::Texture> &p_texture_uniforms, const HashMap<StringName, HashMap<int, RID>> &p_default_texture_params, uint32_t p_ubo_size, RID &r_uniform_set, RID p_shader, uint32_t p_shader_uniform_set, bool p_use_linear_color, bool p_3d_material);
 		void free_parameters_uniform_set(RID p_uniform_set);
-		RID material_feedback_rid;
 
 	private:
 		friend class MaterialStorage;
@@ -301,6 +300,8 @@ private:
 		int32_t priority = 0;
 		RID next_pass;
 		SelfList<Material> update_element;
+
+		uint16_t rt_invalidation_counter = 0; // Bumped on parameter / shader changes, invalidates raytracing material caches.
 
 		Dependency dependency;
 
@@ -512,6 +513,14 @@ public:
 	void material_set_data_request_function(ShaderType p_shader_type, MaterialDataRequestFunction p_function);
 	MaterialDataRequestFunction material_get_data_request_function(ShaderType p_shader_type);
 
+	_FORCE_INLINE_ uint16_t material_get_rt_invalidation_counter(RID p_material) const {
+		Material *material = material_owner.get_or_null(p_material);
+		return material ? material->rt_invalidation_counter : 0;
+	}
+
+	// Source code of the material's shader (empty if none); used by the raytracing scene to classify materials.
+	String material_get_shader_code(RID p_material) const;
+
 	_FORCE_INLINE_ uint32_t material_get_shader_id(RID p_material) {
 		Material *material = material_owner.get_or_null(p_material);
 		return material->shader_id;
@@ -524,10 +533,6 @@ public:
 		} else {
 			return material->data;
 		}
-	}
-
-	_FORCE_INLINE_ uint32_t num_materials() const {
-		return material_owner.get_rid_count();
 	}
 };
 

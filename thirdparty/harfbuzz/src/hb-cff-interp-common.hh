@@ -220,32 +220,16 @@ inline unsigned int OpCode_Size (op_code_t op) { return Is_OpCode_ESC (op) ? 2: 
 struct number_t
 {
   void set_int (int v)       { value = v; }
-  bool to_int (int *v) const
-  {
-    if (unlikely (!(value >= INT_MIN && value <= INT_MAX)))
-    {
-      *v = 0;
-      return false;
-    }
-    *v = (int) value;
-    return true;
-  }
-  int to_int () const
-  {
-    int v;
-    if (likely (to_int (&v))) return v;
-    return value < 0 ? INT_MIN : value > 0 ? INT_MAX : 0;
-  }
+  int to_int () const        { return value; }
 
   void set_fixed (int32_t v) { value = v / 65536.0; }
-  int32_t to_fixed () const
-  { return (int32_t) hb_clamp (value * 65536.0, (double) INT32_MIN, (double) INT32_MAX); }
+  int32_t to_fixed () const  { return value * 65536.0; }
 
   void set_real (double v)   { value = v; }
   double to_real () const    { return value; }
 
   bool in_int_range () const
-  { return value >= INT16_MIN && value <= INT16_MAX && (double) (int16_t) value == value; }
+  { return ((double) (int16_t) to_int () == value); }
 
   bool operator >  (const number_t &n) const { return value > n.to_real (); }
   bool operator <  (const number_t &n) const { return n > *this; }
@@ -462,13 +446,7 @@ struct arg_stack_t : cff_stack_t<ARG, 513>
 
   ARG& pop_num () { return this->pop (); }
 
-  int pop_int ()
-  {
-    int v;
-    if (unlikely (!this->pop ().to_int (&v)))
-      S::set_error ();
-    return v;
-  }
+  int pop_int ()  { return this->pop ().to_int (); }
 
   unsigned int pop_uint ()
   {

@@ -125,7 +125,9 @@ protected:
 		Type type = TYPE_INPUT;
 
 		virtual ~ENode() {
-			memdelete(next);
+			if (next) {
+				memdelete(next);
+			}
 		}
 	};
 

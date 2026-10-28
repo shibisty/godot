@@ -37,14 +37,13 @@
 #include "uassert.h"
 
 U_CAPI char16_t* U_EXPORT2
-u_strFromUTF32WithSub(char16_t* dest U_LIFETIME_BOUND,
-                      int32_t destCapacity,
-                      int32_t* pDestLength,
-                      const UChar32* src,
-                      int32_t srcLength,
-                      UChar32 subchar,
-                      int32_t* pNumSubstitutions,
-                      UErrorCode* pErrorCode) {
+u_strFromUTF32WithSub(char16_t *dest,
+               int32_t destCapacity,
+               int32_t *pDestLength,
+               const UChar32 *src,
+               int32_t srcLength,
+               UChar32 subchar, int32_t *pNumSubstitutions,
+               UErrorCode *pErrorCode) {
     const UChar32 *srcLimit;
     UChar32 ch;
     char16_t *destLimit;
@@ -138,12 +137,12 @@ u_strFromUTF32WithSub(char16_t* dest U_LIFETIME_BOUND,
 }
 
 U_CAPI char16_t* U_EXPORT2
-u_strFromUTF32(char16_t* dest U_LIFETIME_BOUND,
-               int32_t destCapacity,
-               int32_t* pDestLength,
-               const UChar32* src,
+u_strFromUTF32(char16_t *dest,
+               int32_t destCapacity, 
+               int32_t *pDestLength,
+               const UChar32 *src,
                int32_t srcLength,
-               UErrorCode* pErrorCode) {
+               UErrorCode *pErrorCode) {
     return u_strFromUTF32WithSub(
             dest, destCapacity, pDestLength,
             src, srcLength,
@@ -151,15 +150,14 @@ u_strFromUTF32(char16_t* dest U_LIFETIME_BOUND,
             pErrorCode);
 }
 
-U_CAPI UChar32* U_EXPORT2
-u_strToUTF32WithSub(UChar32* dest U_LIFETIME_BOUND,
-                    int32_t destCapacity,
-                    int32_t* pDestLength,
-                    const char16_t* src,
-                    int32_t srcLength,
-                    UChar32 subchar,
-                    int32_t* pNumSubstitutions,
-                    UErrorCode* pErrorCode) {
+U_CAPI UChar32* U_EXPORT2 
+u_strToUTF32WithSub(UChar32 *dest,
+             int32_t destCapacity,
+             int32_t *pDestLength,
+             const char16_t *src,
+             int32_t srcLength,
+             UChar32 subchar, int32_t *pNumSubstitutions,
+             UErrorCode *pErrorCode) {
     const char16_t *srcLimit;
     UChar32 ch;
     char16_t ch2;
@@ -244,13 +242,13 @@ u_strToUTF32WithSub(UChar32* dest U_LIFETIME_BOUND,
     return dest;
 }
 
-U_CAPI UChar32* U_EXPORT2
-u_strToUTF32(UChar32* dest U_LIFETIME_BOUND,
+U_CAPI UChar32* U_EXPORT2 
+u_strToUTF32(UChar32 *dest, 
              int32_t destCapacity,
-             int32_t* pDestLength,
-             const char16_t* src,
+             int32_t *pDestLength,
+             const char16_t *src,
              int32_t srcLength,
-             UErrorCode* pErrorCode) {
+             UErrorCode *pErrorCode) {
     return u_strToUTF32WithSub(
             dest, destCapacity, pDestLength,
             src, srcLength,
@@ -259,14 +257,13 @@ u_strToUTF32(UChar32* dest U_LIFETIME_BOUND,
 }
 
 U_CAPI char16_t* U_EXPORT2
-u_strFromUTF8WithSub(char16_t* dest U_LIFETIME_BOUND,
-                     int32_t destCapacity,
-                     int32_t* pDestLength,
-                     const char* src,
-                     int32_t srcLength,
-                     UChar32 subchar,
-                     int32_t* pNumSubstitutions,
-                     UErrorCode* pErrorCode) {
+u_strFromUTF8WithSub(char16_t *dest,
+              int32_t destCapacity,
+              int32_t *pDestLength,
+              const char* src,
+              int32_t srcLength,
+              UChar32 subchar, int32_t *pNumSubstitutions,
+              UErrorCode *pErrorCode){
     /* args check */
     if(U_FAILURE(*pErrorCode)) {
         return nullptr;
@@ -540,12 +537,12 @@ u_strFromUTF8WithSub(char16_t* dest U_LIFETIME_BOUND,
 }
 
 U_CAPI char16_t* U_EXPORT2
-u_strFromUTF8(char16_t* dest U_LIFETIME_BOUND,
+u_strFromUTF8(char16_t *dest,
               int32_t destCapacity,
-              int32_t* pDestLength,
+              int32_t *pDestLength,
               const char* src,
               int32_t srcLength,
-              UErrorCode* pErrorCode) {
+              UErrorCode *pErrorCode){
     return u_strFromUTF8WithSub(
             dest, destCapacity, pDestLength,
             src, srcLength,
@@ -553,13 +550,13 @@ u_strFromUTF8(char16_t* dest U_LIFETIME_BOUND,
             pErrorCode);
 }
 
-U_CAPI char16_t* U_EXPORT2
-u_strFromUTF8Lenient(char16_t* dest U_LIFETIME_BOUND,
+U_CAPI char16_t * U_EXPORT2
+u_strFromUTF8Lenient(char16_t *dest,
                      int32_t destCapacity,
-                     int32_t* pDestLength,
-                     const char* src,
+                     int32_t *pDestLength,
+                     const char *src,
                      int32_t srcLength,
-                     UErrorCode* pErrorCode) {
+                     UErrorCode *pErrorCode) {
     char16_t *pDest = dest;
     UChar32 ch;
     int32_t reqLength = 0;
@@ -791,15 +788,15 @@ _appendUTF8(uint8_t *pDest, UChar32 c) {
     return pDest;
 }
 
-U_CAPI char* U_EXPORT2
-u_strToUTF8WithSub(char* dest U_LIFETIME_BOUND,
-                   int32_t destCapacity,
-                   int32_t* pDestLength,
-                   const char16_t* pSrc,
-                   int32_t srcLength,
-                   UChar32 subchar,
-                   int32_t* pNumSubstitutions,
-                   UErrorCode* pErrorCode) {
+   
+U_CAPI char* U_EXPORT2 
+u_strToUTF8WithSub(char *dest,
+            int32_t destCapacity,
+            int32_t *pDestLength,
+            const char16_t *pSrc,
+            int32_t srcLength,
+            UChar32 subchar, int32_t *pNumSubstitutions,
+            UErrorCode *pErrorCode){
     int32_t reqLength=0;
     uint32_t ch=0,ch2=0;
     uint8_t *pDest = (uint8_t *)dest;
@@ -1056,13 +1053,13 @@ u_strToUTF8WithSub(char* dest U_LIFETIME_BOUND,
     return dest;
 }
 
-U_CAPI char* U_EXPORT2
-u_strToUTF8(char* dest U_LIFETIME_BOUND,
+U_CAPI char* U_EXPORT2 
+u_strToUTF8(char *dest,
             int32_t destCapacity,
-            int32_t* pDestLength,
-            const char16_t* pSrc,
+            int32_t *pDestLength,
+            const char16_t *pSrc,
             int32_t srcLength,
-            UErrorCode* pErrorCode) {
+            UErrorCode *pErrorCode){
     return u_strToUTF8WithSub(
             dest, destCapacity, pDestLength,
             pSrc, srcLength,
@@ -1071,14 +1068,14 @@ u_strToUTF8(char* dest U_LIFETIME_BOUND,
 }
 
 U_CAPI char16_t* U_EXPORT2
-u_strFromJavaModifiedUTF8WithSub(char16_t* dest U_LIFETIME_BOUND,
-                                 int32_t destCapacity,
-                                 int32_t* pDestLength,
-                                 const char* src,
-                                 int32_t srcLength,
-                                 UChar32 subchar,
-                                 int32_t* pNumSubstitutions,
-                                 UErrorCode* pErrorCode) {
+u_strFromJavaModifiedUTF8WithSub(
+        char16_t *dest,
+        int32_t destCapacity,
+        int32_t *pDestLength,
+        const char *src,
+        int32_t srcLength,
+        UChar32 subchar, int32_t *pNumSubstitutions,
+        UErrorCode *pErrorCode) {
     /* args check */
     if(U_FAILURE(*pErrorCode)) {
         return nullptr;
@@ -1312,13 +1309,14 @@ u_strFromJavaModifiedUTF8WithSub(char16_t* dest U_LIFETIME_BOUND,
     return dest;
 }
 
-U_CAPI char* U_EXPORT2
-u_strToJavaModifiedUTF8(char* dest U_LIFETIME_BOUND,
-                        int32_t destCapacity,
-                        int32_t* pDestLength,
-                        const char16_t* src,
-                        int32_t srcLength,
-                        UErrorCode* pErrorCode) {
+U_CAPI char* U_EXPORT2 
+u_strToJavaModifiedUTF8(
+        char *dest,
+        int32_t destCapacity,
+        int32_t *pDestLength,
+        const char16_t *src,
+        int32_t srcLength,
+        UErrorCode *pErrorCode) {
     int32_t reqLength=0;
     uint32_t ch=0;
     const char16_t *pSrcLimit;

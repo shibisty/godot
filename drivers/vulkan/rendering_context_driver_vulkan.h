@@ -102,11 +102,16 @@ private:
 	HashMap<CharString, bool> requested_instance_extensions;
 	HashSet<CharString> enabled_instance_extension_names;
 	TightLocalVector<Device> driver_devices;
+	TightLocalVector<DeviceInfo> driver_device_infos; // Mariner E8.
 	TightLocalVector<VkPhysicalDevice> physical_devices;
 	TightLocalVector<DeviceQueueFamilies> device_queue_families;
 	VkDebugUtilsMessengerEXT debug_messenger = VK_NULL_HANDLE;
 	VkDebugReportCallbackEXT debug_report = VK_NULL_HANDLE;
 	Functions functions;
+	// Mariner E8: Vulkan is loaded through an interposer (Streamline); the loader's own entry point for local devices.
+	// (Not behind USE_VOLK: the class layout must not depend on a define that only the driver sources see.)
+	bool interposer_in_use = false;
+	PFN_vkGetInstanceProcAddr loader_get_instance_proc_addr = nullptr;
 
 	Error _initialize_vulkan_version();
 	void _register_requested_instance_extension(const CharString &p_extension_name, bool p_required);
@@ -132,6 +137,7 @@ public:
 	virtual Error initialize() override;
 	virtual const Device &device_get(uint32_t p_device_index) const override;
 	virtual uint32_t device_get_count() const override;
+	virtual bool device_get_info(uint32_t p_device_index, DeviceInfo &r_info) const override;
 	virtual bool device_supports_present(uint32_t p_device_index, SurfaceID p_surface) const override;
 	virtual RenderingDeviceDriver *driver_create() override;
 	virtual void driver_free(RenderingDeviceDriver *p_driver) override;
@@ -179,8 +185,27 @@ public:
 	VkQueueFamilyProperties queue_family_get(uint32_t p_device_index, uint32_t p_queue_family_index) const;
 	bool queue_family_supports_present(VkPhysicalDevice p_physical_device, uint32_t p_queue_family_index, SurfaceID p_surface) const;
 	const Functions &functions_get() const;
+	// Mariner E8: Vulkan was loaded through an interposer (Streamline).
+	bool is_interposer_in_use() const { return interposer_in_use; }
 
 	static VkAllocationCallbacks *get_allocation_callbacks(VkObjectType p_type);
+
+	// Mariner E8. A Vulkan interposer (NVIDIA Streamline's sl.interposer.dll, through which volk loads Vulkan when
+	// DLSS is available) supports a single VkDevice: its vkCreateDevice re-initializes its plugins for the new
+	// device, and its wrappers of some device functions (vkCmdBindPipeline, vkCreateImage, ...) call the dispatch
+	// table of the last created device. When an interposer is in use, the volk pointers of those functions are
+	// replaced by shims that send local devices (another GPU or the same one) straight to the Vulkan loader, keyed
+	// by the loader dispatch key of the handle; the main device keeps going through the interposer.
+	class InterposerBypass {
+	public:
+		static bool is_installed();
+		static void set_next_device_bypassed(bool p_bypassed); // Thread-local: applies to the next vkCreateDevice.
+		static bool is_device_bypassed(VkDevice p_device);
+		static uint32_t get_bypassed_device_count();
+		static uint32_t get_shimmed_function_count(); // Functions the interposer wraps (differs from the loader).
+	};
+	// Tests: treat this vkGetInstanceProcAddr as an interposer in the next initialize() (as with Streamline; needs volk).
+	static void set_interposer_for_testing(PFN_vkGetInstanceProcAddr p_get_instance_proc_addr);
 
 #if defined(VK_TRACK_DRIVER_MEMORY) || defined(VK_TRACK_DEVICE_MEMORY)
 	enum VkTrackedObjectType {

@@ -54,7 +54,6 @@ protected:
 
 private:
 	bool is_openxr_mode() const;
-	bool is_spatial_container_enabled() const;
 };
 
 class OpenXREditorPlugin : public EditorPlugin {

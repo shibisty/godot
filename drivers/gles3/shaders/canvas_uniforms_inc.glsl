@@ -28,10 +28,9 @@
 #define BATCH_FLAGS_DEFAULT_NORMAL_MAP_USED uint(1 << 9)
 #define BATCH_FLAGS_DEFAULT_SPECULAR_MAP_USED uint(1 << 10)
 
-uniform highp sampler2D global_shader_parameters_texture; //texunit:-8
-
-#define GLOBAL_SHADER_UNIFORM_TEXTURE_WIDTH_MASK ((1 << GLOBAL_SHADER_UNIFORM_TEXTURE_WIDTH_SHIFT) - 1)
-#define global_shader_uniforms(m_index) texelFetch(global_shader_parameters_texture, ivec2(int(m_index) & GLOBAL_SHADER_UNIFORM_TEXTURE_WIDTH_MASK, int(m_index) >> GLOBAL_SHADER_UNIFORM_TEXTURE_WIDTH_SHIFT), 0)
+layout(std140) uniform GlobalShaderUniformData { //ubo:1
+	vec4 global_shader_uniforms[MAX_GLOBAL_SHADER_UNIFORMS];
+};
 
 layout(std140) uniform CanvasData { //ubo:0
 	mat4 canvas_transform;
@@ -82,7 +81,7 @@ struct Light {
 	vec4 atlas_rect;
 };
 
-layout(std140) uniform LightData { //ubo:1
+layout(std140) uniform LightData { //ubo:2
 	Light light_array[MAX_LIGHTS];
 };
 #endif // DISABLE_LIGHTING

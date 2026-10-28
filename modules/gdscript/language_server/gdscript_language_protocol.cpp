@@ -35,7 +35,6 @@
 #include "core/config/project_settings.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
-#include "core/object/editor_language.h"
 #include "core/os/os.h"
 #include "editor/doc/doc_tools.h"
 #include "editor/doc/editor_help.h"
@@ -125,7 +124,10 @@ Error GDScriptLanguageProtocol::LSPeer::send_data() {
 	while (!res_queue.is_empty()) {
 		CharString c_res = res_queue[0];
 		if (res_sent < c_res.size()) {
-			RETURN_IF_ERROR(connection->put_partial_data((const uint8_t *)c_res.get_data() + res_sent, c_res.size() - res_sent - 1, sent));
+			Error err = connection->put_partial_data((const uint8_t *)c_res.get_data() + res_sent, c_res.size() - res_sent - 1, sent);
+			if (err != OK) {
+				return err;
+			}
 			res_sent += sent;
 		}
 		// Response sent
@@ -226,15 +228,41 @@ Variant GDScriptLanguageProtocol::initialize(const Dictionary &p_params) {
 		}
 
 		if (ProjectSettings::get_singleton()->localize_path(root) != "res://") {
-			// Show a general warning, which works for all clients.
 			LSP::ShowMessageParams params{
 				LSP::MessageType::Warning,
 				"The GDScript Language Server might not work correctly with other projects than the one opened in Godot."
 			};
 			notify_client("window/showMessage", params.to_json());
+		}
+	}
 
-			// Send gdscript_client/changeWorkspace to prompt client side handling, where supported. (Currently known users: VSCode extension, Rider extension).
-			notify_client("gdscript_client/changeWorkspace", Dictionary({ { "path", ProjectSettings::get_singleton()->get_resource_path() } }));
+	String root_uri = p_params["rootUri"];
+	String root = p_params.get("rootPath", "");
+	bool is_same_workspace;
+#ifndef WINDOWS_ENABLED
+	is_same_workspace = root.to_lower() == workspace->root.to_lower();
+#else
+	is_same_workspace = root.replace_char('\\', '/').to_lower() == workspace->root.to_lower();
+#endif
+
+	if (root_uri.length() && is_same_workspace) {
+		workspace->root_uri = root_uri;
+	} else {
+		String r_root = workspace->root;
+		r_root = r_root.lstrip("/");
+		workspace->root_uri = "file:///" + r_root;
+
+		Dictionary params;
+		params["path"] = workspace->root;
+		Dictionary request = make_notification("gdscript_client/changeWorkspace", params);
+
+		ERR_FAIL_COND_V_MSG(!clients.has(latest_client_id), ret.to_json(),
+				vformat("GDScriptLanguageProtocol: Can't initialize invalid peer '%d'.", latest_client_id));
+		Ref<LSPeer> peer = clients.get(latest_client_id);
+		if (peer.is_valid()) {
+			String msg = Variant(request).to_json_string();
+			msg = format_output(msg);
+			(*peer)->res_queue.push_back(msg.utf8());
 		}
 	}
 
@@ -247,13 +275,6 @@ Variant GDScriptLanguageProtocol::initialize(const Dictionary &p_params) {
 	Dictionary capabilities = p_params["capabilities"];
 	client->behavior.use_snippets_for_brace_completion = get_deep(capabilities, false,
 			"textDocument", "completion", "completionItem", "snippetSupport");
-
-	Array allowed_tags = get_deep(capabilities, Array(), "general", "markdown", "allowedTags");
-	for (const Variant &tag : allowed_tags) {
-		if (tag.is_string()) {
-			client->behavior.markdown_allowed_html_tags.insert(tag);
-		}
-	}
 
 	return ret.to_json();
 }
@@ -354,7 +375,7 @@ void GDScriptLanguageProtocol::notify_client(const String &p_method, const Varia
 	peer->res_queue.push_back(msg.utf8());
 }
 
-void GDScriptLanguageProtocol::request_client(const String &p_method, const Variant &p_params, int p_client_id, const Callable &p_response_handler) {
+void GDScriptLanguageProtocol::request_client(const String &p_method, const Variant &p_params, int p_client_id) {
 #ifdef TESTS_ENABLED
 	if (clients.is_empty()) {
 		return;
@@ -369,7 +390,6 @@ void GDScriptLanguageProtocol::request_client(const String &p_method, const Vari
 	ERR_FAIL_COND(peer.is_null());
 
 	Dictionary message = make_request(p_method, p_params, next_server_id);
-	set_response_handler(next_client_id, p_response_handler);
 	next_server_id++;
 	String msg = Variant(message).to_json_string();
 	msg = format_output(msg);
@@ -444,12 +464,6 @@ ExtendGDScriptParser *GDScriptLanguageProtocol::get_parse_result(const String &p
 		return client->parse_script(p_path);
 	}
 	return *cached_parser;
-}
-
-const HashSet<String> &GDScriptLanguageProtocol::get_client_markdown_allowed_html_tags() const {
-	static const HashSet<String> default_tags = {};
-	LSP_CLIENT_V(default_tags);
-	return client->behavior.markdown_allowed_html_tags;
 }
 
 void GDScriptLanguageProtocol::lsp_did_open(const Dictionary &p_params) {
@@ -529,14 +543,14 @@ Array GDScriptLanguageProtocol::lsp_completion(const Dictionary &p_params) {
 	params.load(p_params);
 	Dictionary request_data = params.to_json();
 
-	List<EditorLanguage::CompletionOption> options;
+	List<ScriptLanguage::CodeCompletionOption> options;
 	get_workspace()->completion(params, &options);
 
 	if (!options.is_empty()) {
 		int i = 0;
 		arr.resize(options.size());
 
-		for (const EditorLanguage::CompletionOption &option : options) {
+		for (const ScriptLanguage::CodeCompletionOption &option : options) {
 			LSP::CompletionItem item;
 			item.label = option.display;
 			item.data = request_data;
@@ -561,39 +575,41 @@ Array GDScriptLanguageProtocol::lsp_completion(const Dictionary &p_params) {
 			}
 
 			switch (option.kind) {
-				case EditorLanguage::CompletionKind::ENUM:
+				case ScriptLanguage::CODE_COMPLETION_KIND_ENUM:
 					item.kind = LSP::CompletionItemKind::Enum;
 					break;
-				case EditorLanguage::CompletionKind::CLASS:
+				case ScriptLanguage::CODE_COMPLETION_KIND_CLASS:
 					item.kind = LSP::CompletionItemKind::Class;
 					break;
-				case EditorLanguage::CompletionKind::MEMBER_VARIABLE:
+				case ScriptLanguage::CODE_COMPLETION_KIND_MEMBER:
 					item.kind = LSP::CompletionItemKind::Property;
 					break;
-				case EditorLanguage::CompletionKind::FUNCTION:
+				case ScriptLanguage::CODE_COMPLETION_KIND_FUNCTION:
 					item.kind = LSP::CompletionItemKind::Method;
 					break;
-				case EditorLanguage::CompletionKind::SIGNAL:
+				case ScriptLanguage::CODE_COMPLETION_KIND_SIGNAL:
 					item.kind = LSP::CompletionItemKind::Event;
 					break;
-				case EditorLanguage::CompletionKind::CONSTANT:
+				case ScriptLanguage::CODE_COMPLETION_KIND_CONSTANT:
 					item.kind = LSP::CompletionItemKind::Constant;
 					break;
-				case EditorLanguage::CompletionKind::VARIABLE:
+				case ScriptLanguage::CODE_COMPLETION_KIND_VARIABLE:
 					item.kind = LSP::CompletionItemKind::Variable;
 					break;
-				case EditorLanguage::CompletionKind::FILE_PATH:
+				case ScriptLanguage::CODE_COMPLETION_KIND_FILE_PATH:
 					item.kind = LSP::CompletionItemKind::File;
 					break;
-				case EditorLanguage::CompletionKind::NODE_PATH:
+				case ScriptLanguage::CODE_COMPLETION_KIND_NODE_PATH:
 					item.kind = LSP::CompletionItemKind::Snippet;
 					break;
-				case EditorLanguage::CompletionKind::PLAIN_TEXT:
+				case ScriptLanguage::CODE_COMPLETION_KIND_PLAIN_TEXT:
 					item.kind = LSP::CompletionItemKind::Text;
 					break;
-				case EditorLanguage::CompletionKind::KEYWORD:
+				case ScriptLanguage::CODE_COMPLETION_KIND_KEYWORD:
 					item.kind = LSP::CompletionItemKind::Keyword;
 					break;
+				case ScriptLanguage::CODE_COMPLETION_KIND_MAX: {
+				}
 			}
 
 			arr[i] = item.to_json();
@@ -671,7 +687,10 @@ GDScriptLanguageProtocol::GDScriptLanguageProtocol() {
 	SET_DOCUMENT_METHOD(rename);
 	SET_DOCUMENT_METHOD(prepareRename);
 	SET_DOCUMENT_METHOD(references);
+	SET_DOCUMENT_METHOD(foldingRange);
+	SET_DOCUMENT_METHOD(codeLens);
 	SET_DOCUMENT_METHOD(documentLink);
+	SET_DOCUMENT_METHOD(colorPresentation);
 	SET_DOCUMENT_METHOD(hover);
 	SET_DOCUMENT_METHOD(definition);
 	SET_DOCUMENT_METHOD(declaration);
@@ -683,6 +702,8 @@ GDScriptLanguageProtocol::GDScriptLanguageProtocol() {
 
 	set_method("initialize", callable_mp(this, &GDScriptLanguageProtocol::initialize));
 	set_method("initialized", callable_mp(this, &GDScriptLanguageProtocol::initialized));
+
+	workspace->root = ProjectSettings::get_singleton()->get_resource_path();
 }
 
 #undef SET_DOCUMENT_METHOD

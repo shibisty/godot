@@ -35,7 +35,7 @@
 #include "editor/editor_string_names.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/themes/editor_scale.h"
-#include "scene/resources/audio/audio_stream_wav.h"
+#include "scene/resources/audio_stream_wav.h"
 #include "servers/rendering/rendering_server.h"
 
 // AudioStreamEditor
@@ -75,20 +75,15 @@ void AudioStreamEditor::_notification(int p_what) {
 }
 
 void AudioStreamEditor::_draw_preview() {
-	if (stream.is_null() || stream->get_length() <= 0.0) {
-		return;
-	}
-
 	Size2 size = get_size();
 	int width = size.width;
 	if (width <= 0) {
 		return; // No points to draw.
 	}
 
-	Ref<AudioStreamPreview> preview = AudioStreamPreviewGenerator::get_singleton()->generate_preview(stream);
-
 	Rect2 rect = _preview->get_rect();
 
+	Ref<AudioStreamPreview> preview = AudioStreamPreviewGenerator::get_singleton()->generate_preview(stream);
 	float preview_len = preview->get_length();
 
 	Vector<Vector2> points;
@@ -163,11 +158,6 @@ void AudioStreamEditor::_draw_indicator() {
 
 	Rect2 rect = _preview->get_rect();
 	float len = stream->get_length();
-	if (len <= 0.0f) {
-		_current_label->set_text(String::num(_current, 2).pad_decimals(2) + " /");
-		return;
-	}
-
 	float ofs_x = _current / len * rect.size.width;
 	const Color col = get_theme_color(SNAME("accent_color"), EditorStringName(Editor));
 	Ref<Texture2D> icon = get_editor_theme_icon(SNAME("TimelineIndicator"));
@@ -219,13 +209,8 @@ void AudioStreamEditor::set_stream(const Ref<AudioStream> &p_stream) {
 	_player->set_stream(stream);
 	_current = 0;
 
-	const double length = stream->get_length();
-
-	if (length > 0.0) {
-		_duration_label->set_text(String::num(length, 2).pad_decimals(2) + "s");
-	} else {
-		_duration_label->set_text(TTR("Dynamic"));
-	}
+	String text = String::num(stream->get_length(), 2).pad_decimals(2) + "s";
+	_duration_label->set_text(text);
 
 	queue_redraw();
 }
@@ -281,16 +266,25 @@ AudioStreamEditor::AudioStreamEditor() {
 	hbox->add_child(_duration_label);
 }
 
+// EditorInspectorPluginAudioStream
+
+bool EditorInspectorPluginAudioStream::can_handle(Object *p_object) {
+	return Object::cast_to<AudioStreamWAV>(p_object) != nullptr;
+}
+
 void EditorInspectorPluginAudioStream::parse_begin(Object *p_object) {
 	AudioStream *stream = Object::cast_to<AudioStream>(p_object);
 
-	AudioStreamEditor *editor = memnew(AudioStreamEditor);
+	editor = memnew(AudioStreamEditor);
 	editor->set_stream(Ref<AudioStream>(stream));
+
 	add_custom_control(editor);
 }
 
-// EditorInspectorPluginAudioStream
+// AudioStreamEditorPlugin
 
-bool EditorInspectorPluginAudioStreamWAV::can_handle(Object *p_object) {
-	return Object::cast_to<AudioStreamWAV>(p_object) != nullptr;
+AudioStreamEditorPlugin::AudioStreamEditorPlugin() {
+	Ref<EditorInspectorPluginAudioStream> plugin;
+	plugin.instantiate();
+	add_inspector_plugin(plugin);
 }

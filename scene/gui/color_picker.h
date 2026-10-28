@@ -348,10 +348,6 @@ private:
 		Ref<StyleBox> mode_button_pressed;
 		Ref<StyleBox> mode_button_hover;
 		Ref<StyleBox> mode_button_hover_pressed;
-
-		Ref<AudioStream> pressed_sound;
-		Ref<AudioStream> drag_started_sound;
-		Ref<AudioStream> drag_ended_sound;
 	} theme_cache;
 
 	void _copy_normalized_to_hsv_okhsl();

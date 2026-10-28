@@ -37,7 +37,6 @@
 
 #include "core/io/file_access.h"
 #include "core/io/resource_loader.h"
-#include "core/templates/rb_set.h"
 #include "core/templates/vector.h"
 
 GDScriptParserRef::Status GDScriptParserRef::get_status() const {
@@ -130,8 +129,13 @@ void GDScriptParserRef::clear() {
 
 	clearing = false;
 
-	memdelete(lanalyzer);
-	memdelete(lparser);
+	if (lanalyzer != nullptr) {
+		memdelete(lanalyzer);
+	}
+
+	if (lparser != nullptr) {
+		memdelete(lparser);
+	}
 }
 
 GDScriptParserRef::~GDScriptParserRef() {
@@ -444,7 +448,7 @@ Error GDScriptCache::finish_compiling(const String &p_owner) {
 
 void GDScriptCache::add_static_script(Ref<GDScript> p_script) {
 	ERR_FAIL_COND_MSG(p_script.is_null(), "Trying to cache empty script as static.");
-	ERR_FAIL_COND_MSG(!p_script->is_script_valid(), "Trying to cache non-compiled script as static.");
+	ERR_FAIL_COND_MSG(!p_script->is_valid(), "Trying to cache non-compiled script as static.");
 	singleton->static_gdscript_cache[p_script->get_fully_qualified_name()] = p_script;
 }
 

@@ -72,8 +72,7 @@ struct DirectionalLightData {
 	float shadow_opacity;
 	float fade_from;
 	float fade_to;
-	uint sscs_index;
-	uint pad;
+	uvec2 pad;
 	uint bake_mode;
 	float volumetric_fog_energy;
 	vec4 shadow_bias;

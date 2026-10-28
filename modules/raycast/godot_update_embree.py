@@ -5,8 +5,7 @@ import shutil
 import stat
 import subprocess
 import sys
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Callable
 
 git_tag = "v4.4.0"
 

@@ -71,7 +71,6 @@ private:
 
 	bool use_angle_limitation = false;
 	bool symmetry_limitation = true;
-	bool use_rest_for_limitation = false;
 
 	float primary_limit_angle = Math::TAU;
 	float primary_damp_threshold = 1.0f;
@@ -92,8 +91,6 @@ private:
 	// For time-based interpolation.
 	Quaternion from_q;
 	Quaternion prev_q;
-	Quaternion from_twist;
-	Quaternion prev_twist;
 
 	float remaining = 0;
 	float time_step = 1.0;
@@ -158,8 +155,6 @@ public:
 	bool is_using_angle_limitation() const;
 	void set_symmetry_limitation(bool p_enabled);
 	bool is_limitation_symmetry() const;
-	void set_use_rest_for_limitation(bool p_enabled);
-	bool is_using_rest_for_limitation() const;
 
 	void set_primary_limit_angle(float p_angle);
 	float get_primary_limit_angle() const;

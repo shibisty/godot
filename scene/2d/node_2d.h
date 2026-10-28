@@ -57,7 +57,7 @@ protected:
 public:
 	static constexpr AncestralClass static_ancestral_class = AncestralClass::NODE_2D;
 
-#ifdef DEBUG_ENABLED
+#ifdef TOOLS_ENABLED
 	virtual Dictionary _edit_get_state() const override;
 	virtual void _edit_set_state(const Dictionary &p_state) override;
 
@@ -72,8 +72,7 @@ public:
 	virtual bool _edit_use_rotation() const override;
 
 	virtual void _edit_set_rect(const Rect2 &p_edit_rect) override;
-#endif // DEBUG_ENABLED
-
+#endif
 	virtual void reparent(RequiredParam<Node> p_parent, bool p_keep_global_transform = true) override;
 
 	void set_position(const Point2 &p_pos);
@@ -112,8 +111,8 @@ public:
 	void look_at(const Vector2 &p_pos);
 	real_t get_angle_to(const Vector2 &p_pos) const;
 
-	Point2 to_local(const Point2 &p_global) const;
-	Point2 to_global(const Point2 &p_local) const;
+	Point2 to_local(Point2 p_global) const;
+	Point2 to_global(Point2 p_local) const;
 
 	Transform2D get_relative_transform_to_parent(RequiredParam<const Node> p_parent) const;
 

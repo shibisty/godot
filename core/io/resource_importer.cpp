@@ -602,7 +602,10 @@ void ResourceImporter::_bind_methods() {
 Error ResourceFormatImporterSaver::set_uid(const String &p_path, ResourceUID::ID p_uid) {
 	Ref<ConfigFile> cf;
 	cf.instantiate();
-	RETURN_IF_ERROR(cf->load(p_path + ".import"));
+	Error err = cf->load(p_path + ".import");
+	if (err != OK) {
+		return err;
+	}
 	cf->set_value("remap", "uid", ResourceUID::get_singleton()->id_to_text(p_uid));
 	cf->save(p_path + ".import");
 

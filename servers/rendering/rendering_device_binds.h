@@ -283,6 +283,8 @@ protected:
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_closest_hit"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_CLOSEST_HIT);
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_miss"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_MISS);
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_intersection"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_INTERSECTION);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_task"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_TASK);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_mesh"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_MESH);
 		ADD_GROUP("Syntax", "source_");
 		ADD_PROPERTY(PropertyInfo(Variant::INT, "language", PROPERTY_HINT_RANGE, "GLSL,HLSL"), "set_language", "get_language");
 	}
@@ -347,6 +349,8 @@ protected:
 		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_closest_hit"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_CLOSEST_HIT);
 		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_miss"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_MISS);
 		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_intersection"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_INTERSECTION);
+		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_task"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_TASK);
+		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_mesh"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_MESH);
 		ADD_GROUP("Compile Error", "compile_error_");
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_vertex"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_VERTEX);
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_fragment"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_FRAGMENT);
@@ -358,6 +362,8 @@ protected:
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_closest_hit"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_CLOSEST_HIT);
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_miss"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_MISS);
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_intersection"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_INTERSECTION);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_task"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_TASK);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_mesh"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_MESH);
 	}
 };
 
@@ -415,20 +421,15 @@ public:
 				for (int i = 0; i < RD::SHADER_STAGE_MAX; i++) {
 					String error = E.value->get_stage_compile_error(RD::ShaderStage(i));
 					if (!error.is_empty()) {
-						static const char *stage_str[RD::SHADER_STAGE_MAX] = {
-							"vertex",
-							"fragment",
-							"tesselation_control",
-							"tesselation_evaluation",
-							"compute"
-						};
-
-						print_error("Error parsing shader '" + p_file + "', version '" + String(E.key) + "', stage '" + stage_str[i] + "':\n\n" + error);
+						print_error("Error parsing shader '" + p_file + "', version '" + String(E.key) + "', stage '" + SHADER_FILE_STAGE_SECTIONS[i] + "':\n\n" + error);
 					}
 				}
 			}
 		}
 	}
+
+	// Section names of a shader file (`#[vertex]`, ..., `#[task]`, `#[mesh]`), indexed by RD::ShaderStage.
+	static const char *SHADER_FILE_STAGE_SECTIONS[RD::SHADER_STAGE_MAX];
 
 	typedef String (*OpenIncludeFunction)(const String &, void *userdata);
 	Error parse_versions_from_text(const String &p_text, const String p_defines = String(), OpenIncludeFunction p_include_func = nullptr, void *p_include_func_userdata = nullptr);

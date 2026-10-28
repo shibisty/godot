@@ -47,29 +47,7 @@ typedef HRESULT (WINAPI *t_DWriteCreateFactory)(
   IUnknown            **factory
 );
 
-template <typename Type, typename ...Ts>
-static Type *
-hb_directwrite_object_create (Ts&&... args)
-{
-  Type *obj = (Type *) hb_calloc (1, sizeof (Type));
-  if (unlikely (!obj))
-    return nullptr;
-
-  return new (obj) Type (std::forward<Ts> (args)...);
-}
-
-template <typename Type>
-static void
-hb_directwrite_object_destroy (Type *obj)
-{
-  if (!obj)
-    return;
-
-  obj->~Type ();
-  hb_free (obj);
-}
-
-class DWriteFontFileLoader final : public IDWriteFontFileLoader
+class DWriteFontFileLoader : public IDWriteFontFileLoader
 {
 private:
   hb_reference_count_t mRefCount;
@@ -113,7 +91,7 @@ public:
     assert (refCount >= 0);
     if (refCount)
       return refCount;
-    hb_directwrite_object_destroy (this);
+    delete this;
     return 0;
   }
 
@@ -134,14 +112,14 @@ public:
     return S_OK;
   }
 
-  ~DWriteFontFileLoader()
+  virtual ~DWriteFontFileLoader()
   {
     for (auto v : mFontStreams.values ())
       v->Release ();
   }
 };
 
-class DWriteFontFileStream final : public IDWriteFontFileStream
+class DWriteFontFileStream : public IDWriteFontFileStream
 {
 private:
   hb_reference_count_t mRefCount;
@@ -167,7 +145,7 @@ public:
     assert (refCount >= 0);
     if (refCount)
       return refCount;
-    hb_directwrite_object_destroy (this);
+    delete this;
     return 0;
   }
 
@@ -203,7 +181,7 @@ public:
   virtual HRESULT STDMETHODCALLTYPE
   GetLastWriteTime (OUT UINT64* lastWriteTime) { return E_NOTIMPL; }
 
-  ~DWriteFontFileStream();
+  virtual ~DWriteFontFileStream();
 };
 
 struct hb_directwrite_global_t
@@ -216,11 +194,8 @@ struct hb_directwrite_global_t
     if (unlikely (hr != S_OK))
       return;
 
-    fontFileLoader = hb_directwrite_object_create<DWriteFontFileLoader> ();
-    if (unlikely (!fontFileLoader))
-      return;
-    if (unlikely (FAILED (dwriteFactory->RegisterFontFileLoader (fontFileLoader))))
-      return;
+    fontFileLoader = new DWriteFontFileLoader ();
+    dwriteFactory->RegisterFontFileLoader (fontFileLoader);
 
     success = true;
   }
@@ -233,8 +208,8 @@ struct hb_directwrite_global_t
   }
 
   bool success = false;
-  IDWriteFactory *dwriteFactory = nullptr;
-  DWriteFontFileLoader *fontFileLoader = nullptr;
+  IDWriteFactory *dwriteFactory;
+  DWriteFontFileLoader *fontFileLoader;
 };
 
 

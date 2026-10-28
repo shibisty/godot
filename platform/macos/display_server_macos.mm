@@ -511,7 +511,7 @@ void DisplayServerMacOS::_process_key_events() {
 	for (int i = 0; i < key_event_pos; i++) {
 		const KeyEvent &ke = key_event_buffer[i];
 		if (ke.raw) {
-			// No composite characters, pass events as is.
+			// Non IME input - no composite characters, pass events as is.
 			k.instantiate();
 
 			k->set_window_id(ke.window_id);
@@ -749,7 +749,7 @@ void DisplayServerMacOS::update_mouse_pos(DisplayServerMacOS::WindowData &p_wd, 
 
 void DisplayServerMacOS::pop_last_key_event() {
 	// Does not pop last key event when it is an IME key event.
-	if (key_event_pos > 0 && !key_event_buffer[key_event_pos - 1].ime) {
+	if (key_event_pos > 0 && key_event_buffer[key_event_pos - 1].raw) {
 		key_event_pos--;
 	}
 }
@@ -1529,84 +1529,6 @@ Rect2i DisplayServerMacOS::screen_get_usable_rect(int p_screen) const {
 		Size2i size = Size2i(nsrect.size.width, nsrect.size.height) * scale;
 
 		return Rect2i(position, size);
-	}
-
-	return Rect2i();
-}
-
-TypedArray<Rect2> DisplayServerMacOS::get_display_cutouts(int p_screen) const {
-	_THREAD_SAFE_METHOD_
-
-	p_screen = _get_screen_index(p_screen);
-	int screen_count = get_screen_count();
-	TypedArray<Rect2> ret = TypedArray<Rect2>();
-
-	ERR_FAIL_INDEX_V(p_screen, screen_count, ret);
-
-	NSArray *screenArray = [NSScreen screens];
-	if ((NSUInteger)p_screen < [screenArray count]) {
-		const float scale = screen_get_max_scale();
-		NSRect nsrect = [[screenArray objectAtIndex:p_screen] frame];
-		NSEdgeInsets safeAreaInsets = [[screenArray objectAtIndex:p_screen] safeAreaInsets];
-
-		float inset_left = safeAreaInsets.left * scale;
-		float inset_top = safeAreaInsets.top * scale;
-		float inset_right = safeAreaInsets.right * scale;
-		float inset_bottom = safeAreaInsets.bottom * scale;
-
-		float screen_width = nsrect.size.width * scale;
-		float screen_height = nsrect.size.height * scale;
-
-		if (inset_left > 0) {
-			Rect2 rect = Rect2(0.0, 0.0, inset_left, screen_height);
-			ret.push_back(rect);
-		}
-
-		if (inset_top > 0) {
-			Rect2 rect = Rect2(0.0, 0.0, screen_width, inset_top);
-			ret.push_back(rect);
-		}
-
-		if (inset_bottom > 0) {
-			Rect2 rect = Rect2(0.0, screen_height - inset_bottom, screen_width, inset_bottom);
-			ret.push_back(rect);
-		}
-
-		if (inset_right > 0) {
-			Rect2 rect = Rect2(screen_width - inset_right, 0.0, inset_right, screen_width);
-			ret.push_back(rect);
-		}
-	}
-
-	return ret;
-}
-
-Rect2i DisplayServerMacOS::get_display_safe_area(int p_screen) const {
-	_THREAD_SAFE_METHOD_
-
-	p_screen = _get_screen_index(p_screen);
-	int screen_count = get_screen_count();
-	ERR_FAIL_INDEX_V(p_screen, screen_count, Rect2i());
-
-	NSArray *screenArray = [NSScreen screens];
-	if ((NSUInteger)p_screen < [screenArray count]) {
-		const float scale = screen_get_max_scale();
-		NSRect nsrect = [[screenArray objectAtIndex:p_screen] frame];
-		NSEdgeInsets safeAreaInsets = [[screenArray objectAtIndex:p_screen] safeAreaInsets];
-
-		int inset_left = safeAreaInsets.left * scale;
-		int inset_top = safeAreaInsets.top * scale;
-		int inset_right = safeAreaInsets.right * scale;
-		int inset_bottom = safeAreaInsets.bottom * scale;
-
-		int screen_width = nsrect.size.width * scale;
-		int screen_height = nsrect.size.height * scale;
-
-		return Rect2i(
-				inset_left,
-				inset_top,
-				screen_width - (inset_left + inset_right),
-				screen_height - (inset_top + inset_bottom));
 	}
 
 	return Rect2i();
@@ -2969,8 +2891,13 @@ void DisplayServerMacOS::window_get_edr_values(DisplayServerEnums::WindowID p_wi
 		*v = val; \
 	}
 
-	SET_VAL(r_max_potential_edr_value, screen.maximumPotentialExtendedDynamicRangeColorComponentValue);
-	SET_VAL(r_max_edr_value, screen.maximumExtendedDynamicRangeColorComponentValue);
+	if (@available(macOS 10.15, *)) {
+		SET_VAL(r_max_potential_edr_value, screen.maximumPotentialExtendedDynamicRangeColorComponentValue);
+		SET_VAL(r_max_edr_value, screen.maximumExtendedDynamicRangeColorComponentValue);
+	} else {
+		SET_VAL(r_max_potential_edr_value, 1.0);
+		SET_VAL(r_max_edr_value, 1.0);
+	}
 
 #undef SET_VAL
 }

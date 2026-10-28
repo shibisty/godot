@@ -35,8 +35,6 @@
 #include "scene/3d/camera_3d.h"
 #include "scene/main/scene_tree.h"
 #include "scene/resources/3d/shape_3d.h"
-#include "servers/physics_3d/direct_states/physics_direct_space_state_3d.h"
-#include "servers/physics_3d/physics_server_3d.h"
 
 void SpringArm3D::_notification(int p_what) {
 	switch (p_what) {
@@ -88,7 +86,7 @@ real_t SpringArm3D::get_length() const {
 }
 
 void SpringArm3D::set_length(real_t p_length) {
-	if (is_inside_tree() && (Engine::get_singleton()->is_editor_hint() || PhysicsServer3D::get_singleton()->debug_is_enabled())) {
+	if (is_inside_tree() && (Engine::get_singleton()->is_editor_hint() || get_tree()->is_debugging_collisions_hint())) {
 		update_gizmos();
 	}
 
@@ -159,7 +157,7 @@ void SpringArm3D::process_spring() {
 			Transform3D base_transform = camera->get_global_transform();
 			base_transform.origin = get_global_transform().origin;
 
-			PS3DT::ShapeParameters shape_params;
+			PhysicsDirectSpaceState3D::ShapeParameters shape_params;
 			shape_params.shape_rid = camera->get_pyramid_shape_rid();
 			shape_params.transform = base_transform;
 			shape_params.motion = motion;
@@ -168,13 +166,13 @@ void SpringArm3D::process_spring() {
 
 			get_world_3d()->get_direct_space_state()->cast_motion(shape_params, motion_delta, motion_delta_unsafe);
 		} else {
-			PS3DT::RayParameters ray_params;
+			PhysicsDirectSpaceState3D::RayParameters ray_params;
 			ray_params.from = get_global_transform().origin;
 			ray_params.to = get_global_transform().origin + motion;
 			ray_params.exclude = excluded_objects;
 			ray_params.collision_mask = mask;
 
-			PS3DT::RayResult r;
+			PhysicsDirectSpaceState3D::RayResult r;
 			bool intersected = get_world_3d()->get_direct_space_state()->intersect_ray(ray_params, r);
 			if (intersected) {
 				real_t dist = get_global_transform().origin.distance_to(r.position);
@@ -183,7 +181,7 @@ void SpringArm3D::process_spring() {
 			}
 		}
 	} else {
-		PS3DT::ShapeParameters shape_params;
+		PhysicsDirectSpaceState3D::ShapeParameters shape_params;
 		shape_params.shape_rid = shape->get_rid();
 		shape_params.transform = get_global_transform();
 		shape_params.motion = motion;

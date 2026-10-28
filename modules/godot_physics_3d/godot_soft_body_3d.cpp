@@ -33,7 +33,6 @@
 #include "godot_space_3d.h"
 
 #include "core/math/geometry_3d.h"
-#include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/rendering/rendering_server.h"
 
 // Based on Bullet soft body.
@@ -63,46 +62,46 @@ GodotSoftBody3D::GodotSoftBody3D() :
 void GodotSoftBody3D::_shapes_changed() {
 }
 
-void GodotSoftBody3D::set_state(PS3DE::BodyState p_state, const Variant &p_variant) {
+void GodotSoftBody3D::set_state(PhysicsServer3D::BodyState p_state, const Variant &p_variant) {
 	switch (p_state) {
-		case PS3DE::BODY_STATE_TRANSFORM: {
+		case PhysicsServer3D::BODY_STATE_TRANSFORM: {
 			_set_transform(p_variant);
 			_set_inv_transform(get_transform().inverse());
 
 			apply_nodes_transform(get_transform());
 
 		} break;
-		case PS3DE::BODY_STATE_LINEAR_VELOCITY: {
+		case PhysicsServer3D::BODY_STATE_LINEAR_VELOCITY: {
 			// Not supported.
 			ERR_FAIL_MSG("Linear velocity is not supported for Soft bodies.");
 		} break;
-		case PS3DE::BODY_STATE_ANGULAR_VELOCITY: {
+		case PhysicsServer3D::BODY_STATE_ANGULAR_VELOCITY: {
 			ERR_FAIL_MSG("Angular velocity is not supported for Soft bodies.");
 		} break;
-		case PS3DE::BODY_STATE_SLEEPING: {
+		case PhysicsServer3D::BODY_STATE_SLEEPING: {
 			ERR_FAIL_MSG("Sleeping state is not supported for Soft bodies.");
 		} break;
-		case PS3DE::BODY_STATE_CAN_SLEEP: {
+		case PhysicsServer3D::BODY_STATE_CAN_SLEEP: {
 			ERR_FAIL_MSG("Sleeping state is not supported for Soft bodies.");
 		} break;
 	}
 }
 
-Variant GodotSoftBody3D::get_state(PS3DE::BodyState p_state) const {
+Variant GodotSoftBody3D::get_state(PhysicsServer3D::BodyState p_state) const {
 	switch (p_state) {
-		case PS3DE::BODY_STATE_TRANSFORM: {
+		case PhysicsServer3D::BODY_STATE_TRANSFORM: {
 			return get_transform();
 		} break;
-		case PS3DE::BODY_STATE_LINEAR_VELOCITY: {
+		case PhysicsServer3D::BODY_STATE_LINEAR_VELOCITY: {
 			ERR_FAIL_V_MSG(Vector3(), "Linear velocity is not supported for Soft bodies.");
 		} break;
-		case PS3DE::BODY_STATE_ANGULAR_VELOCITY: {
+		case PhysicsServer3D::BODY_STATE_ANGULAR_VELOCITY: {
 			ERR_FAIL_V_MSG(Vector3(), "Angular velocity is not supported for Soft bodies.");
 		} break;
-		case PS3DE::BODY_STATE_SLEEPING: {
+		case PhysicsServer3D::BODY_STATE_SLEEPING: {
 			ERR_FAIL_V_MSG(false, "Sleeping state is not supported for Soft bodies.");
 		} break;
-		case PS3DE::BODY_STATE_CAN_SLEEP: {
+		case PhysicsServer3D::BODY_STATE_CAN_SLEEP: {
 			ERR_FAIL_V_MSG(false, "Sleeping state is not supported for Soft bodies.");
 		} break;
 	}
@@ -1020,20 +1019,20 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 		const AreaCMP *aa = &areas[0];
 		for (int i = ac - 1; i >= 0; i--) {
 			if (!gravity_done) {
-				PS3DE::AreaSpaceOverrideMode area_gravity_mode = (PS3DE::AreaSpaceOverrideMode)(int)aa[i].area->get_param(PS3DE::AREA_PARAM_GRAVITY_OVERRIDE_MODE);
-				if (area_gravity_mode != PS3DE::AREA_SPACE_OVERRIDE_DISABLED) {
+				PhysicsServer3D::AreaSpaceOverrideMode area_gravity_mode = (PhysicsServer3D::AreaSpaceOverrideMode)(int)aa[i].area->get_param(PhysicsServer3D::AREA_PARAM_GRAVITY_OVERRIDE_MODE);
+				if (area_gravity_mode != PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED) {
 					Vector3 area_gravity;
 					aa[i].area->compute_gravity(get_transform().get_origin(), area_gravity);
 					switch (area_gravity_mode) {
-						case PS3DE::AREA_SPACE_OVERRIDE_COMBINE:
-						case PS3DE::AREA_SPACE_OVERRIDE_COMBINE_REPLACE: {
+						case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE:
+						case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE_REPLACE: {
 							gravity += area_gravity;
-							gravity_done = area_gravity_mode == PS3DE::AREA_SPACE_OVERRIDE_COMBINE_REPLACE;
+							gravity_done = area_gravity_mode == PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE_REPLACE;
 						} break;
-						case PS3DE::AREA_SPACE_OVERRIDE_REPLACE:
-						case PS3DE::AREA_SPACE_OVERRIDE_REPLACE_COMBINE: {
+						case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE:
+						case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE_COMBINE: {
 							gravity = area_gravity;
-							gravity_done = area_gravity_mode == PS3DE::AREA_SPACE_OVERRIDE_REPLACE;
+							gravity_done = area_gravity_mode == PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE;
 						} break;
 						default: {
 						}

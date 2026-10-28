@@ -44,7 +44,9 @@ void UndoRedo::Operation::delete_reference() {
 		ref.unref();
 	} else {
 		Object *obj = ObjectDB::get_instance(object);
-		memdelete(obj);
+		if (obj) {
+			memdelete(obj);
+		}
 	}
 }
 
@@ -343,22 +345,22 @@ void UndoRedo::commit_action(bool p_execute) {
 	}
 }
 
-void UndoRedo::_process_operation_list(List<Operation>::Element *r_elements, bool p_execute) {
+void UndoRedo::_process_operation_list(List<Operation>::Element *E, bool p_execute) {
 	const int PREALLOCATE_ARGS_COUNT = 16;
 
 	LocalVector<const Variant *> args;
 	args.reserve(PREALLOCATE_ARGS_COUNT);
 
-	for (; r_elements; r_elements = r_elements->next()) {
-		Operation &op = r_elements->get();
+	for (; E; E = E->next()) {
+		Operation &op = E->get();
+
 		Object *obj = ObjectDB::get_instance(op.object);
+		if (!obj) { //may have been deleted and this is fine
+			continue;
+		}
 
 		switch (op.type) {
 			case Operation::TYPE_METHOD: {
-				if (!op.callable.is_valid()) {
-					continue;
-				}
-
 				if (p_execute) {
 					Callable::CallError ce;
 					Variant ret;
@@ -374,7 +376,7 @@ void UndoRedo::_process_operation_list(List<Operation>::Element *r_elements, boo
 #endif
 				}
 
-				if (method_callback && obj) {
+				if (method_callback) {
 					Vector<Variant> binds;
 					if (op.callable.is_custom()) {
 						CallableCustomBind *ccb = dynamic_cast<CallableCustomBind *>(op.callable.get_custom());
@@ -397,9 +399,6 @@ void UndoRedo::_process_operation_list(List<Operation>::Element *r_elements, boo
 				}
 			} break;
 			case Operation::TYPE_PROPERTY: {
-				if (!obj) { // May have been deleted and this is fine.
-					continue;
-				}
 				if (p_execute) {
 					obj->set(op.name, op.value);
 #ifdef TOOLS_ENABLED
@@ -415,7 +414,7 @@ void UndoRedo::_process_operation_list(List<Operation>::Element *r_elements, boo
 				}
 			} break;
 			case Operation::TYPE_REFERENCE: {
-				// Do nothing.
+				//do nothing
 			} break;
 		}
 	}

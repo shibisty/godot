@@ -135,9 +135,7 @@ struct hb_bit_page_t
   }
 
   void add (hb_codepoint_t g) { elt (g) |= mask (g); dirty (); }
-  void add_bits (hb_codepoint_t g, uint64_t bits) { elt (g) |= bits; dirty (); }
   void del (hb_codepoint_t g) { elt (g) &= ~mask (g); dirty (); }
-  void del_bits (hb_codepoint_t g, uint64_t bits) { elt (g) &= ~bits; dirty (); }
   void set (hb_codepoint_t g, bool value) { if (value) add (g); else del (g); }
   bool get (hb_codepoint_t g) const { return elt (g) & mask (g); }
   bool may_have (hb_codepoint_t g) const { return get (g); }
@@ -152,7 +150,7 @@ struct hb_bit_page_t
     elt_t *lb = &elt (b);
     if (la == lb)
       *la |= (mask (b) << 1) - mask(a);
-    else if (likely (la < lb))
+    else
     {
       *la |= ~(mask (a) - 1llu);
       la++;
@@ -161,8 +159,6 @@ struct hb_bit_page_t
 
       *lb |= ((mask (b) << 1) - 1llu);
     }
-    else
-      return;
     dirty ();
   }
   void del_range (hb_codepoint_t a, hb_codepoint_t b)
@@ -171,7 +167,7 @@ struct hb_bit_page_t
     elt_t *lb = &elt (b);
     if (la == lb)
       *la &= ~((mask (b) << 1llu) - mask(a));
-    else if (likely (la < lb))
+    else
     {
       *la &= mask (a) - 1;
       la++;
@@ -180,8 +176,6 @@ struct hb_bit_page_t
 
       *lb &= ~((mask (b) << 1) - 1llu);
     }
-    else
-      return;
     dirty ();
   }
   void set_range (hb_codepoint_t a, hb_codepoint_t b, bool v)

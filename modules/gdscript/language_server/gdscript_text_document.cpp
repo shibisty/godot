@@ -57,7 +57,10 @@ void GDScriptTextDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("rename", "params"), &GDScriptTextDocument::rename);
 	ClassDB::bind_method(D_METHOD("prepareRename", "params"), &GDScriptTextDocument::prepareRename);
 	ClassDB::bind_method(D_METHOD("references", "params"), &GDScriptTextDocument::references);
+	ClassDB::bind_method(D_METHOD("foldingRange", "params"), &GDScriptTextDocument::foldingRange);
+	ClassDB::bind_method(D_METHOD("codeLens", "params"), &GDScriptTextDocument::codeLens);
 	ClassDB::bind_method(D_METHOD("documentLink", "params"), &GDScriptTextDocument::documentLink);
+	ClassDB::bind_method(D_METHOD("colorPresentation", "params"), &GDScriptTextDocument::colorPresentation);
 	ClassDB::bind_method(D_METHOD("hover", "params"), &GDScriptTextDocument::hover);
 	ClassDB::bind_method(D_METHOD("definition", "params"), &GDScriptTextDocument::definition);
 	ClassDB::bind_method(D_METHOD("declaration", "params"), &GDScriptTextDocument::declaration);
@@ -93,12 +96,13 @@ void GDScriptTextDocument::didSave(const Variant &p_param) {
 	Dictionary dict = p_param;
 	LSP::TextDocumentIdentifier doc;
 	doc.load(dict["textDocument"]);
+	String text = dict["text"];
 
 	String path = GDScriptLanguageProtocol::get_singleton()->get_workspace()->get_file_path(doc.uri);
 	Ref<GDScript> scr = ResourceLoader::load(path);
 	if (scr.is_valid() && (scr->load_source_code(path) == OK)) {
 		if (scr->is_tool()) {
-			scr->get_language()->reload_tool_script(scr);
+			scr->get_language()->reload_tool_script(scr, true);
 		} else {
 			scr->reload(true);
 		}
@@ -240,8 +244,7 @@ Dictionary GDScriptTextDocument::resolve(const Dictionary &p_params) {
 	}
 
 	if (symbol) {
-		const HashSet<String> &allowed_tags = GDScriptLanguageProtocol::get_singleton()->get_client_markdown_allowed_html_tags();
-		item.documentation = symbol->render(allowed_tags);
+		item.documentation = symbol->render();
 	}
 
 	if (item.kind == LSP::CompletionItemKind::Event) {
@@ -263,6 +266,14 @@ Dictionary GDScriptTextDocument::resolve(const Dictionary &p_params) {
 	return item.to_json(true);
 }
 
+Array GDScriptTextDocument::foldingRange(const Dictionary &p_params) {
+	return Array();
+}
+
+Array GDScriptTextDocument::codeLens(const Dictionary &p_params) {
+	return Array();
+}
+
 Array GDScriptTextDocument::documentLink(const Dictionary &p_params) {
 	Array ret;
 
@@ -277,6 +288,10 @@ Array GDScriptTextDocument::documentLink(const Dictionary &p_params) {
 	return ret;
 }
 
+Array GDScriptTextDocument::colorPresentation(const Dictionary &p_params) {
+	return Array();
+}
+
 Variant GDScriptTextDocument::hover(const Dictionary &p_params) {
 	LSP::TextDocumentPositionParams params;
 	params.load(p_params);
@@ -284,8 +299,7 @@ Variant GDScriptTextDocument::hover(const Dictionary &p_params) {
 	const LSP::DocumentSymbol *symbol = GDScriptLanguageProtocol::get_singleton()->get_workspace()->resolve_symbol(params);
 	if (symbol) {
 		LSP::Hover hover;
-		const HashSet<String> &allowed_tags = GDScriptLanguageProtocol::get_singleton()->get_client_markdown_allowed_html_tags();
-		hover.contents = symbol->render(allowed_tags);
+		hover.contents = symbol->render();
 		hover.range.start = params.position;
 		hover.range.end = params.position;
 		return hover.to_json();
@@ -295,10 +309,9 @@ Variant GDScriptTextDocument::hover(const Dictionary &p_params) {
 		Array contents;
 		List<const LSP::DocumentSymbol *> list;
 		GDScriptLanguageProtocol::get_singleton()->resolve_related_symbols(params, list);
-		const HashSet<String> &allowed_tags = GDScriptLanguageProtocol::get_singleton()->get_client_markdown_allowed_html_tags();
 		for (const LSP::DocumentSymbol *&E : list) {
 			if (const LSP::DocumentSymbol *s = E) {
-				contents.push_back(s->render(allowed_tags).value);
+				contents.push_back(s->render().value);
 			}
 		}
 		ret["contents"] = contents;
@@ -342,7 +355,7 @@ Variant GDScriptTextDocument::declaration(const Dictionary &p_params) {
 				case LSP::SymbolKind::Function:
 					id = "class_method:" + symbol->native_class + ":" + symbol->name;
 					break;
-				default: // Deprecated.
+				default:
 					id = "class_global:" + symbol->native_class + ":" + symbol->name;
 					break;
 			}

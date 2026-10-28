@@ -140,8 +140,6 @@ public:
 	void clear_shadowmask_textures();
 	bool has_shadowmask_textures();
 
-	void update_specular_intensity(float p_intensity);
-
 	virtual RID get_rid() const override;
 	LightmapGIData();
 	~LightmapGIData();
@@ -179,7 +177,6 @@ public:
 		BAKE_ERROR_TEXTURE_SIZE_TOO_SMALL,
 		BAKE_ERROR_LIGHTMAP_TOO_SMALL,
 		BAKE_ERROR_ATLAS_TOO_SMALL,
-		BAKE_ERROR_TEXTURE_EXCEEDS_DEVICE_LIMIT,
 	};
 
 	enum EnvironmentMode {
@@ -211,7 +208,6 @@ private:
 	LightmapGIData::ShadowmaskMode shadowmask_mode = LightmapGIData::SHADOWMASK_MODE_NONE;
 	GenerateProbes gen_probes = GENERATE_PROBES_SUBDIV_8;
 	Ref<CameraAttributes> camera_attributes;
-	float specular_intensity = 0.0f;
 
 	Ref<LightmapGIData> light_data;
 	Node *last_owner = nullptr;
@@ -270,7 +266,9 @@ private:
 		GenProbesOctree *children[8] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
 		~GenProbesOctree() {
 			for (int i = 0; i < 8; i++) {
-				memdelete(children[i]);
+				if (children[i] != nullptr) {
+					memdelete(children[i]);
+				}
 			}
 		}
 	};
@@ -352,9 +350,6 @@ public:
 
 	void set_camera_attributes(const Ref<CameraAttributes> &p_camera_attributes);
 	Ref<CameraAttributes> get_camera_attributes() const;
-
-	float get_specular_intensity() const;
-	void set_specular_intensity(float p_strength);
 
 	AABB get_aabb() const override;
 

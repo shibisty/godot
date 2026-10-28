@@ -43,7 +43,9 @@ void unregister_plugins_singletons() {
 	for (const KeyValue<String, JNISingleton *> &E : jni_singletons) {
 		Engine::get_singleton()->remove_singleton(E.key);
 
-		memdelete(E.value);
+		if (E.value) {
+			memdelete(E.value);
+		}
 	}
 	jni_singletons.clear();
 }

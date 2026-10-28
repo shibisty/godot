@@ -60,10 +60,10 @@ static bool _clipRect(RenderMethod* renderer, const Point* pts, const Matrix& m,
         return ((b1 == b2) && (b2 == b3) && (b3 == b4));
     };
 
-    if (!pointInConvexQuad({float(before.xMin), float(before.yMin)}, c)) return false;
-    if (!pointInConvexQuad({float(before.xMax), float(before.yMin)}, c)) return false;
-    if (!pointInConvexQuad({float(before.xMax), float(before.yMax)}, c)) return false;
-    if (!pointInConvexQuad({float(before.xMin), float(before.yMax)}, c)) return false;
+    if (!pointInConvexQuad({float(before.min.x), float(before.min.y)}, c)) return false;
+    if (!pointInConvexQuad({float(before.max.x), float(before.min.y)}, c)) return false;
+    if (!pointInConvexQuad({float(before.max.x), float(before.max.y)}, c)) return false;
+    if (!pointInConvexQuad({float(before.min.x), float(before.max.y)}, c)) return false;
 
     //same viewport
     return true;
@@ -110,13 +110,13 @@ static bool _compFastTrack(RenderMethod* renderer, Paint* cmpTarget, const Matri
             if (v1.x > v2.x) std::swap(v1.x, v2.x);
             if (v1.y > v2.y) std::swap(v1.y, v2.y);
 
-            after.xMin = static_cast<int32_t>(nearbyint(v1.x));
-            after.yMin = static_cast<int32_t>(nearbyint(v1.y));
-            after.xMax = static_cast<int32_t>(nearbyint(v2.x));
-            after.yMax = static_cast<int32_t>(nearbyint(v2.y));
+            after.min.x = static_cast<int32_t>(nearbyint(v1.x));
+            after.min.y = static_cast<int32_t>(nearbyint(v1.y));
+            after.max.x = static_cast<int32_t>(nearbyint(v2.x));
+            after.max.y = static_cast<int32_t>(nearbyint(v2.y));
 
-            if (after.xMax < after.xMin) after.xMax = after.xMin;
-            if (after.yMax < after.yMin) after.yMax = after.yMin;
+            if (after.max.x < after.min.x) after.max.x = after.min.x;
+            if (after.max.y < after.min.y) after.max.y = after.min.y;
 
             after.intersect(before);
             renderer->viewport(after);
@@ -134,9 +134,10 @@ RenderRegion Paint::Impl::bounds()
     return ret;
 }
 
-AccessorIterator* Paint::Impl::iterator()
+
+Iterator* Paint::Impl::iterator()
 {
-    AccessorIterator* ret;
+    Iterator* ret;
     PAINT_METHOD(ret, iterator());
     return ret;
 }
@@ -213,6 +214,7 @@ RenderData Paint::Impl::update(RenderMethod* renderer, const Matrix& pm, Array<R
     if (renderFlag & RenderUpdateFlag::Transform) tr.update();
 
     /* 1. Composition Pre Processing */
+    RenderData trd = nullptr;                 //composite target render data
     RenderRegion viewport;
     auto compFastTrack = false;
 
@@ -237,7 +239,9 @@ RenderData Paint::Impl::update(RenderMethod* renderer, const Matrix& pm, Array<R
                 }
             }
         }
-        if (!compFastTrack) PAINT(target)->update(renderer, pm, clips, 255, flag, false);
+        if (!compFastTrack) {
+            trd = PAINT(target)->update(renderer, pm, clips, 255, flag, false);
+        }
     }
 
     /* 2. Clipping */
@@ -250,8 +254,8 @@ RenderData Paint::Impl::update(RenderMethod* renderer, const Matrix& pm, Array<R
             compFastTrack = true;
         } else {
             mark(RenderUpdateFlag::Clip);
-            Array<RenderData> noClip;
-            clips.push(pclip->update(renderer, pm, noClip, 255, flag, true));
+            trd = pclip->update(renderer, pm, clips, 255, flag, true);
+            clips.push(trd);
         }
     }
 
@@ -276,12 +280,12 @@ bool Paint::Impl::bounds(Point* pt4, const Matrix* pm, bool obb)
     return ret;
 }
 
-bool Paint::Impl::intersects(const RenderRegion& region, bool visibleOnly)
+
+bool Paint::Impl::intersects(const RenderRegion& region)
 {
-    if (visibleOnly && hidden) return false;
     if (renderer) {
         bool ret;
-        PAINT_METHOD(ret, intersects(region, visibleOnly));
+        PAINT_METHOD(ret, intersects(region));
         return ret;
     }
     return false;
@@ -366,15 +370,11 @@ Result Paint::bounds(Point* pt4) noexcept
     return Result::InsufficientCondition;
 }
 
+
 bool Paint::intersects(int32_t x, int32_t y, int32_t w, int32_t h) noexcept
 {
-    return intersects(x, y, w, h, false);
-}
-
-bool Paint::intersects(int32_t x, int32_t y, int32_t w, int32_t h, bool visibleOnly) noexcept
-{
     if (w <= 0 || h <= 0) return false;
-    return pImpl->intersects({x, y, x + w, y + h}, visibleOnly);
+    return pImpl->intersects({{x, y}, {x + w, y + h}});
 }
 
 

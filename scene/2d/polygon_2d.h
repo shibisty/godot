@@ -85,14 +85,16 @@ protected:
 	static void _bind_methods();
 
 public:
-#ifdef DEBUG_ENABLED
+#ifdef TOOLS_ENABLED
 	virtual Dictionary _edit_get_state() const override;
 	virtual void _edit_set_state(const Dictionary &p_state) override;
 
 	virtual void _edit_set_pivot(const Point2 &p_pivot) override;
 	virtual Point2 _edit_get_pivot() const override;
 	virtual bool _edit_use_pivot() const override;
+#endif // TOOLS_ENABLED
 
+#ifdef DEBUG_ENABLED
 	virtual Rect2 _edit_get_rect() const override;
 	virtual bool _edit_use_rect() const override;
 
@@ -144,7 +146,7 @@ public:
 	void add_bone(const NodePath &p_path = NodePath(), const Vector<float> &p_weights = Vector<float>());
 	int get_bone_count() const;
 	NodePath get_bone_path(int p_index) const;
-	const Vector<float> &get_bone_weights(int p_index) const _LIFETIME_BOUND_;
+	Vector<float> get_bone_weights(int p_index) const;
 	void erase_bone(int p_idx);
 	void clear_bones();
 	void set_bone_weights(int p_index, const Vector<float> &p_weights);

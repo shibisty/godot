@@ -80,6 +80,10 @@ public:
 	virtual void begin_frame(double frame_step) = 0;
 
 	virtual void blit_render_targets_to_screen(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen *p_render_targets, int p_amount) = 0;
+	// Mariner E3: DLSS Frame Generation HUD-less colour. Called right after the 3D scene of a frame generation viewport
+	// is final, before its 2D canvases are drawn; p_blit is the blit that will put the viewport on screen. Renderers
+	// without frame generation ignore it.
+	virtual void frame_generation_capture_hudless(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen &p_blit) {}
 
 	virtual bool is_opengl() = 0;
 	virtual void gl_end_frame(bool p_swap_buffers) = 0;

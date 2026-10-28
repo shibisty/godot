@@ -48,7 +48,7 @@ namespace LSP {
 typedef String DocumentUri;
 
 /** Format BBCode documentation from DocData to markdown */
-static String marked_documentation(const String &p_bbcode, const HashSet<String> &p_allowed_html_tags);
+static String marked_documentation(const String &p_bbcode);
 
 /**
  * Text documents are identified using a URI. On the protocol level, URIs are passed as strings.
@@ -514,6 +514,22 @@ struct SignatureHelpOptions {
 };
 
 /**
+ * Code Lens options.
+ */
+struct CodeLensOptions {
+	/**
+	 * Code lens has a resolve provider as well.
+	 */
+	bool resolveProvider = false;
+
+	Dictionary to_json() {
+		Dictionary dict;
+		dict["resolveProvider"] = resolveProvider;
+		return dict;
+	}
+};
+
+/**
  * Rename options
  */
 struct RenameOptions {
@@ -574,6 +590,24 @@ struct SaveOptions {
 		Dictionary dict;
 		dict["includeText"] = includeText;
 		return dict;
+	}
+};
+
+/**
+ * Color provider options.
+ */
+struct ColorProviderOptions {
+	Dictionary to_json() {
+		return Dictionary();
+	}
+};
+
+/**
+ * Folding range provider options.
+ */
+struct FoldingRangeProviderOptions {
+	Dictionary to_json() {
+		return Dictionary();
 	}
 };
 
@@ -774,7 +808,7 @@ struct Diagnostic {
 	/**
 	 * The diagnostic's code, which might appear in the user interface.
 	 */
-	String code;
+	int code = 0;
 
 	/**
 	 * A human-readable string describing the source of this
@@ -1272,13 +1306,13 @@ struct DocumentSymbol {
 		return dict;
 	}
 
-	_FORCE_INLINE_ MarkupContent render(const HashSet<String> &p_allowed_html_tags) const {
+	_FORCE_INLINE_ MarkupContent render() const {
 		MarkupContent markdown;
 		if (detail.length()) {
 			markdown.value = "\t" + detail + "\n\n";
 		}
 		if (documentation.length()) {
-			markdown.value += marked_documentation(documentation, p_allowed_html_tags) + "\n\n";
+			markdown.value += marked_documentation(documentation) + "\n\n";
 		}
 		if (script_path.length()) {
 			markdown.value += "Defined in [" + script_path + "](" + uri + ")";
@@ -1749,6 +1783,11 @@ struct ServerCapabilities {
 	bool codeActionProvider = false;
 
 	/**
+	 * The server provides code lens.
+	 */
+	CodeLensOptions codeLensProvider;
+
+	/**
 	 * The server provides document formatting.
 	 */
 	bool documentFormattingProvider = false;
@@ -1776,6 +1815,20 @@ struct ServerCapabilities {
 	DocumentLinkOptions documentLinkProvider;
 
 	/**
+	 * The server provides color provider support.
+	 *
+	 * Since 3.6.0
+	 */
+	ColorProviderOptions colorProvider;
+
+	/**
+	 * The server provides folding provider support.
+	 *
+	 * Since 3.10.0
+	 */
+	FoldingRangeProviderOptions foldingRangeProvider;
+
+	/**
 	 * The server provides go to declaration support.
 	 *
 	 * Since 3.14.0
@@ -1794,9 +1847,12 @@ struct ServerCapabilities {
 		signatureHelpProvider.triggerCharacters.push_back(",");
 		signatureHelpProvider.triggerCharacters.push_back("(");
 		dict["signatureHelpProvider"] = signatureHelpProvider.to_json();
+		//dict["codeLensProvider"] = codeLensProvider.to_json();
 		dict["documentOnTypeFormattingProvider"] = documentOnTypeFormattingProvider.to_json();
 		dict["renameProvider"] = renameProvider.to_json();
 		dict["documentLinkProvider"] = documentLinkProvider.to_json();
+		dict["colorProvider"] = false; // colorProvider.to_json();
+		dict["foldingRangeProvider"] = false; //foldingRangeProvider.to_json();
 		dict["executeCommandProvider"] = executeCommandProvider.to_json();
 		dict["hoverProvider"] = hoverProvider;
 		dict["definitionProvider"] = definitionProvider;
@@ -1860,8 +1916,7 @@ struct GodotCapabilities {
 };
 
 /** Format BBCode documentation from DocData to markdown */
-static String marked_documentation(const String &p_bbcode, const HashSet<String> &p_allowed_html_tags) {
-	bool span_allowed = p_allowed_html_tags.has("span");
+static String marked_documentation(const String &p_bbcode) {
 	String markdown = p_bbcode.strip_edges();
 
 	Vector<String> lines = markdown.split("\n");
@@ -1922,7 +1977,7 @@ static String marked_documentation(const String &p_bbcode, const HashSet<String>
 			in_codeblock_tag = false;
 		}
 
-		if (!in_codeblock_tag && !in_codeblocks_gdscript_tag) {
+		if (!in_codeblock_tag) {
 			line = line.strip_edges();
 			line = line.replace("[br]", "\n\n");
 
@@ -1941,6 +1996,7 @@ static String marked_documentation(const String &p_bbcode, const HashSet<String>
 			line = line.replace("[center]", "");
 			line = line.replace("[/center]", "");
 			line = line.replace("[/font]", "");
+			line = line.replace("[/color]", "");
 			line = line.replace("[/img]", "");
 
 			// Convert remaining simple bracketed class names to backticks and literal brackets.
@@ -2013,35 +2069,6 @@ static String marked_documentation(const String &p_bbcode, const HashSet<String>
 				pos += replacement.length();
 			}
 
-			// Convert [color] BBCode to <span>, if the client is capable of rendering it, strip it otherwise.
-			pos = 0;
-			while ((pos = line.find("[color=", pos)) != -1) {
-				constexpr int COLOR_OPEN_TAG_LENGTH = 7; // Length of "[color=".
-				constexpr int COLOR_CLOSE_TAG_LENGTH = 8; // Length of "[/color]".
-
-				int color_end = line.find_char(']', pos);
-				int close_start = line.find("[/color]", color_end);
-				if (color_end == -1 || close_start == -1) {
-					break;
-				}
-				String text = line.substr(color_end + 1, close_start - color_end - 1);
-				String replacement;
-				if (span_allowed) {
-					const String color = line.substr(pos + COLOR_OPEN_TAG_LENGTH, color_end - pos - COLOR_OPEN_TAG_LENGTH).strip_edges();
-					if (Color::html_is_valid(color)) {
-						replacement = "<span style=\"color:" + color + "\">" + text + "</span>";
-					} else if (int named_color_index = Color::find_named_color(color); named_color_index != -1) {
-						replacement = "<span style=\"color:#" + Color::get_named_color(named_color_index).to_html(false) + "\">" + text + "</span>";
-					}
-				}
-				// If no span replacement was produced (client can't render spans, or invalid color), just keep the inner text.
-				if (replacement.is_empty()) {
-					replacement = text;
-				}
-				line = line.substr(0, pos) + replacement + line.substr(close_start + COLOR_CLOSE_TAG_LENGTH);
-				pos += replacement.length();
-			}
-
 			// Replace the various link types with inline code ([class MyNode] to `MyNode`).
 			// Uses a while loop because there can occasionally be multiple links of the same type in a single line.
 			const Vector<String> link_start_patterns = {
@@ -2063,10 +2090,10 @@ static String marked_documentation(const String &p_bbcode, const HashSet<String>
 				}
 			}
 
-			// Remove tags with attributes like [font=Arial], as they don't have a direct Markdown
+			// Remove tags with attributes like [color=red], as they don't have a direct Markdown
 			// equivalent supported by external tools.
 			const String attribute_tags[] = {
-				"font", "img"
+				"color", "font", "img"
 			};
 			for (const String &tag_name : attribute_tags) {
 				int tag_pos = 0;

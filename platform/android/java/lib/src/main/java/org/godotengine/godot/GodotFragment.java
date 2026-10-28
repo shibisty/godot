@@ -286,13 +286,6 @@ public class GodotFragment extends Fragment implements GodotHost {
 	}
 
 	@Override
-	public void showEditorGameDock() {
-		if (parentHost != null) {
-			parentHost.showEditorGameDock();
-		}
-	}
-
-	@Override
 	public void onDistractionFreeModeChanged(Boolean enabled) {
 		if (parentHost != null) {
 			parentHost.onDistractionFreeModeChanged(enabled);

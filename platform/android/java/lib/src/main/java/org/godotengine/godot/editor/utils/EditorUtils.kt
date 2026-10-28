@@ -40,5 +40,5 @@ object EditorUtils {
 	external fun runScene(scene: String, sceneArgs: Array<String>)
 
 	@JvmStatic
-	external fun orientationChanged(isPortrait: Boolean)
+	external fun toggleTitleBar(visible: Boolean)
 }

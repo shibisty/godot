@@ -21,8 +21,7 @@ public:
 	/// Create a tapered cylinder centered around the origin with bottom at (0, -inHalfHeightOfTaperedCylinder, 0) with radius inBottomRadius and top at (0, inHalfHeightOfTaperedCylinder, 0) with radius inTopRadius
 							TaperedCylinderShapeSettings(float inHalfHeightOfTaperedCylinder, float inTopRadius, float inBottomRadius, float inConvexRadius = cDefaultConvexRadius, const PhysicsMaterial *inMaterial = nullptr);
 
-	/// Create a shape according to the settings specified by this object.
-	/// Note that this will return a CylinderShape if top and bottom radii are equal.
+	// See: ShapeSettings
 	virtual ShapeResult		Create() const override;
 
 	float					mHalfHeight = 0.0f;

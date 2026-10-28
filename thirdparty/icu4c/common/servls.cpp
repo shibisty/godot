@@ -159,7 +159,7 @@ private:
     int32_t _pos;
 
 private:
-    ServiceEnumeration(const ICULocaleService* service U_LIFETIME_BOUND, UErrorCode& status)
+    ServiceEnumeration(const ICULocaleService* service, UErrorCode &status)
         : _service(service)
         , _timestamp(service->getTimestamp())
         , _ids(uprv_deleteUObject, nullptr, status)
@@ -190,7 +190,7 @@ private:
     }
 
 public:
-    static ServiceEnumeration* create(const ICULocaleService* service U_LIFETIME_BOUND) {
+    static ServiceEnumeration* create(const ICULocaleService* service) {
         UErrorCode status = U_ZERO_ERROR;
         ServiceEnumeration* result = new ServiceEnumeration(service, status);
         if (U_SUCCESS(status)) {
@@ -226,7 +226,7 @@ public:
         return upToDate(status) ? _ids.size() : 0;
     }
 
-    virtual const UnicodeString* snext(UErrorCode& status) U_LIFETIME_BOUND override {
+    virtual const UnicodeString* snext(UErrorCode& status) override {
         if (upToDate(status) && (_pos < _ids.size())) {
             return static_cast<const UnicodeString*>(_ids[_pos++]);
         }
@@ -254,7 +254,7 @@ ServiceEnumeration::~ServiceEnumeration() {}
 UOBJECT_DEFINE_RTTI_IMPLEMENTATION(ServiceEnumeration)
 
 StringEnumeration*
-ICULocaleService::getAvailableLocales() const U_LIFETIME_BOUND
+ICULocaleService::getAvailableLocales() const
 {
     return ServiceEnumeration::create(this);
 }

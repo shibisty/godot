@@ -99,9 +99,6 @@ Dictionary GDScriptSyntaxHighlighter::_get_line_syntax_highlighting_impl(int p_l
 	const int line_length = str.length();
 	Color prev_color;
 
-	bool code_region_start_checked = false;
-	bool code_region_not_at_start = false;
-
 	if (in_region != -1 && line_length == 0) {
 		color_region_cache[p_line] = in_region;
 	}
@@ -132,22 +129,22 @@ Dictionary GDScriptSyntaxHighlighter::_get_line_syntax_highlighting_impl(int p_l
 				// Check if we are in entering a region.
 				if (in_region == -1) {
 					const bool r_prefix = from > 0 && str[from - 1] == 'r';
-					for (uint32_t c = 0; c < color_regions.size(); c++) {
-						const GDScriptSyntaxHighlighter::ColorRegion &c_color_region = color_regions[c];
+					for (int c = 0; c < color_regions.size(); c++) {
 						// Check there is enough room.
 						int chars_left = line_length - from;
-						int start_key_length = c_color_region.start_key.length();
+						int start_key_length = color_regions[c].start_key.length();
+						int end_key_length = color_regions[c].end_key.length();
 						if (chars_left < start_key_length) {
 							continue;
 						}
 
-						if (c_color_region.is_string && c_color_region.r_prefix != r_prefix) {
+						if (color_regions[c].is_string && color_regions[c].r_prefix != r_prefix) {
 							continue;
 						}
 
 						// Search the line.
 						bool match = true;
-						const char32_t *start_key = c_color_region.start_key.get_data();
+						const char32_t *start_key = color_regions[c].start_key.get_data();
 						for (int k = 0; k < start_key_length; k++) {
 							if (start_key[k] != str[from + k]) {
 								match = false;
@@ -155,15 +152,11 @@ Dictionary GDScriptSyntaxHighlighter::_get_line_syntax_highlighting_impl(int p_l
 							}
 						}
 						// "#region" and "#endregion" only highlighted if they're the first region on the line.
-						if (c_color_region.type == ColorRegion::TYPE_CODE_REGION) {
-							if (!code_region_start_checked) {
-								const Vector<String> str_stripped_split = str.strip_edges(true, false).split_spaces(1);
-								code_region_not_at_start = !str_stripped_split.is_empty() &&
-										str_stripped_split[0] != "#region" &&
-										str_stripped_split[0] != "#endregion";
-								code_region_start_checked = true;
-							}
-							if (code_region_not_at_start) {
+						if (color_regions[c].type == ColorRegion::TYPE_CODE_REGION) {
+							Vector<String> str_stripped_split = str.strip_edges().split_spaces(1);
+							if (!str_stripped_split.is_empty() &&
+									str_stripped_split[0] != "#region" &&
+									str_stripped_split[0] != "#endregion") {
 								match = false;
 							}
 						}
@@ -173,9 +166,8 @@ Dictionary GDScriptSyntaxHighlighter::_get_line_syntax_highlighting_impl(int p_l
 						in_region = c;
 						from += start_key_length;
 
-						int end_key_length = c_color_region.end_key.length();
 						// Check if it's the whole line.
-						if (end_key_length == 0 || c_color_region.line_only || from + end_key_length > line_length) {
+						if (end_key_length == 0 || color_regions[c].line_only || from + end_key_length > line_length) {
 							// Don't skip comments, for highlighting markers.
 							if (color_regions[in_region].is_comment) {
 								break;
@@ -187,11 +179,11 @@ Dictionary GDScriptSyntaxHighlighter::_get_line_syntax_highlighting_impl(int p_l
 								}
 							}
 							prev_color = color_regions[in_region].color;
-							highlighter_info["color"] = c_color_region.color;
+							highlighter_info["color"] = color_regions[c].color;
 							color_map[j] = highlighter_info;
 
 							j = line_length;
-							if (!c_color_region.line_only) {
+							if (!color_regions[c].line_only) {
 								color_region_cache[p_line] = c;
 							}
 						}
@@ -371,6 +363,7 @@ Dictionary GDScriptSyntaxHighlighter::_get_line_syntax_highlighting_impl(int p_l
 					prev_is_binary_op = false;
 					continue;
 				}
+				color_map.sort(); // Prevents e.g. escape sequences from being overridden by string placeholders.
 			}
 		}
 
@@ -580,7 +573,7 @@ Dictionary GDScriptSyntaxHighlighter::_get_line_syntax_highlighting_impl(int p_l
 						in_declaration_param_dicts -= 1;
 						break;
 				}
-			} else if (str[j] == '(' && (is_after_func_signal_declaration || prev_text == GDScriptTokenizer::get_token_name(GDScriptTokenizer::Token::FUNC))) {
+			} else if ((is_after_func_signal_declaration || prev_text == GDScriptTokenizer::get_token_name(GDScriptTokenizer::Token::FUNC)) && str[j] == '(') {
 				in_declaration_params = 1;
 				in_declaration_param_dicts = 0;
 			}
@@ -744,7 +737,6 @@ Dictionary GDScriptSyntaxHighlighter::_get_line_syntax_highlighting_impl(int p_l
 			color_map[j] = highlighter_info;
 		}
 	}
-	color_map.sort(); // Prevents e.g. escape sequences from being overridden by string placeholders.
 	return color_map;
 }
 
@@ -807,15 +799,19 @@ void GDScriptSyntaxHighlighter::_update_cache() {
 
 	const GDScriptLanguage *gdscript = GDScriptLanguage::get_singleton();
 
-	/* Variant types. */
+	/* Core types. */
 	const Color basetype_color = EDITOR_GET("text_editor/theme/highlighting/base_type_color");
-	for (int type = 0; type < Variant::Type::VARIANT_MAX; type++) {
-		if (type != Variant::Type::NIL && type != Variant::Type::OBJECT) {
-			class_names[Variant::get_type_name((Variant::Type)type)] = basetype_color;
-		}
+	List<String> core_types;
+	gdscript->get_core_type_words(&core_types);
+	for (const String &E : core_types) {
+		class_names[StringName(E)] = basetype_color;
 	}
 	class_names[SNAME("Variant")] = basetype_color;
 	class_names[SNAME("void")] = basetype_color;
+	// `get_core_type_words()` doesn't return primitive types.
+	class_names[SNAME("bool")] = basetype_color;
+	class_names[SNAME("int")] = basetype_color;
+	class_names[SNAME("float")] = basetype_color;
 
 	/* Reserved words. */
 	const Color keyword_color = EDITOR_GET("text_editor/theme/highlighting/keyword_color");
@@ -951,7 +947,7 @@ void GDScriptSyntaxHighlighter::_update_cache() {
 			HashMap<StringName, Variant> scr_constant_list;
 			scr_class->get_constants(&scr_constant_list);
 			for (const KeyValue<StringName, Variant> &E : scr_constant_list) {
-				member_keywords[E.key.string()] = member_variable_color;
+				member_keywords[E.key.operator String()] = member_variable_color;
 			}
 			scr_class = scr_class->get_base_script();
 		}

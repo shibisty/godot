@@ -385,27 +385,32 @@ bool CameraFeedApple::activate_feed() {
 	}
 
 	// Start camera capture, check permission.
-	AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
-	if (status == AVAuthorizationStatusAuthorized) {
+	if (@available(macOS 10.14, iOS 14.0, visionOS 1.0, *)) {
+		AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+		if (status == AVAuthorizationStatusAuthorized) {
+			capture_session = [[MyCaptureSession alloc] initForFeed:this andDevice:device];
+			return capture_session != nullptr;
+		} else if (status == AVAuthorizationStatusNotDetermined) {
+			// Request permission asynchronously.
+			[AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo
+									 completionHandler:^(BOOL granted) {
+										 if (granted) {
+											 capture_session = [[MyCaptureSession alloc] initForFeed:this andDevice:device];
+										 }
+									 }];
+			return false;
+		} else if (status == AVAuthorizationStatusDenied) {
+			print_line("Camera permission denied by user.");
+			return false;
+		} else if (status == AVAuthorizationStatusRestricted) {
+			print_line("Camera access restricted.");
+			return false;
+		}
+		return false;
+	} else {
 		capture_session = [[MyCaptureSession alloc] initForFeed:this andDevice:device];
 		return capture_session != nullptr;
-	} else if (status == AVAuthorizationStatusNotDetermined) {
-		// Request permission asynchronously.
-		[AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo
-								 completionHandler:^(BOOL granted) {
-									 if (granted) {
-										 capture_session = [[MyCaptureSession alloc] initForFeed:this andDevice:device];
-									 }
-								 }];
-		return false;
-	} else if (status == AVAuthorizationStatusDenied) {
-		print_line("Camera permission denied by user.");
-		return false;
-	} else if (status == AVAuthorizationStatusRestricted) {
-		print_line("Camera access restricted.");
-		return false;
 	}
-	return false;
 }
 
 void CameraFeedApple::deactivate_feed() {
@@ -479,15 +484,21 @@ void CameraApple::update_feeds() {
 		devices = session.devices;
 	}
 #else // APPLE_EMBEDDED_ENABLED
-	AVCaptureDeviceDiscoverySession *session;
-	if (@available(macOS 14.0, *)) {
-		session = [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:[NSArray arrayWithObjects:AVCaptureDeviceTypeExternal, AVCaptureDeviceTypeBuiltInWideAngleCamera, AVCaptureDeviceTypeContinuityCamera, nil] mediaType:AVMediaTypeVideo position:AVCaptureDevicePositionUnspecified];
+#if defined(__x86_64__)
+	if (@available(macOS 10.15, *)) {
+#endif // __x86_64__
+		AVCaptureDeviceDiscoverySession *session;
+		if (@available(macOS 14.0, *)) {
+			session = [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:[NSArray arrayWithObjects:AVCaptureDeviceTypeExternal, AVCaptureDeviceTypeBuiltInWideAngleCamera, AVCaptureDeviceTypeContinuityCamera, nil] mediaType:AVMediaTypeVideo position:AVCaptureDevicePositionUnspecified];
+		} else {
+			session = [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:[NSArray arrayWithObjects:AVCaptureDeviceTypeExternalUnknown, AVCaptureDeviceTypeBuiltInWideAngleCamera, nil] mediaType:AVMediaTypeVideo position:AVCaptureDevicePositionUnspecified];
+		}
+		devices = session.devices;
+#if defined(__x86_64__)
 	} else {
-#if MAC_OS_X_VERSION_MIN_REQUIRED < 140000
-		session = [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:[NSArray arrayWithObjects:AVCaptureDeviceTypeExternalUnknown, AVCaptureDeviceTypeBuiltInWideAngleCamera, nil] mediaType:AVMediaTypeVideo position:AVCaptureDevicePositionUnspecified];
-#endif
+		devices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
 	}
-	devices = session.devices;
+#endif // __x86_64__
 #endif // APPLE_EMBEDDED_ENABLED
 
 	// Deactivate feeds that are gone before removing them.

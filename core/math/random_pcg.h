@@ -37,15 +37,15 @@
 #include <cmath> // ldexp
 
 #if defined(__GNUC__)
-#define CLZ32(m_x) __builtin_clz(m_x)
+#define CLZ32(x) __builtin_clz(x)
 #elif defined(_MSC_VER)
 #include <intrin.h>
-static int __bsr_clz32(uint32_t p_x) {
+static int __bsr_clz32(uint32_t x) {
 	unsigned long index;
-	_BitScanReverse(&index, p_x);
+	_BitScanReverse(&index, x);
 	return 31 - index;
 }
-#define CLZ32(m_x) __bsr_clz32(m_x)
+#define CLZ32(x) __bsr_clz32(x)
 #endif
 
 template <typename T>
@@ -75,8 +75,8 @@ public:
 	_FORCE_INLINE_ uint32_t rand() {
 		return pcg32_random_r(&pcg);
 	}
-	_FORCE_INLINE_ uint32_t rand(uint32_t p_bounds) {
-		return pcg32_boundedrand_r(&pcg, p_bounds);
+	_FORCE_INLINE_ uint32_t rand(uint32_t bounds) {
+		return pcg32_boundedrand_r(&pcg, bounds);
 	}
 
 	int64_t rand_weighted(const Vector<float> &p_weights);

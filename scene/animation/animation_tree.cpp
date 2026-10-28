@@ -61,9 +61,6 @@ Variant AnimationNode::get_parameter_default_value(const StringName &p_parameter
 	if (p_parameter == current_length || p_parameter == current_position || p_parameter == current_delta) {
 		return 0.0;
 	}
-	if (p_parameter == observer) {
-		return Ref<AnimationNodeObserver>();
-	}
 	GDVIRTUAL_CALL(_get_parameter_default_value, p_parameter, ret);
 	return ret;
 }

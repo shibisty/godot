@@ -156,7 +156,10 @@ Error FileAccessPatched::get_error() const {
 	}
 
 	if (patched_file.is_valid()) {
-		RETURN_IF_ERROR(patched_file->get_error());
+		Error inner_error = patched_file->get_error();
+		if (inner_error != OK) {
+			return inner_error;
+		}
 	}
 
 	return last_error;

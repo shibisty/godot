@@ -350,7 +350,6 @@ void EGLManager::release_current() {
 	GLDisplay &current_display = displays[current_window->gldisplay_id];
 
 	eglMakeCurrent(current_display.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-	current_window = nullptr;
 }
 
 void EGLManager::swap_buffers() {

@@ -1,3 +1,5 @@
+GH-78266
+--------
 Validate extension JSON: API was removed: classes/FontFile/properties/fallbacks
 Validate extension JSON: API was removed: classes/FontVariation/properties/fallbacks
 Validate extension JSON: API was removed: classes/SystemFont/properties/fallbacks
