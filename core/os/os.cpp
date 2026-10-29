@@ -478,6 +478,12 @@ bool OS::has_feature(const String &p_feature) {
 		return _writing_movie;
 	}
 
+	// Mariner fork: present in every build of this engine (editor, templates, any BUILD_NAME), so games and
+	// project setting overrides (`setting.mariner`) can rely on the fork's extensions without checking the build name.
+	if (p_feature == "mariner") {
+		return true;
+	}
+
 #ifdef DEBUG_ENABLED
 	if (p_feature == "debug") {
 		return true;
