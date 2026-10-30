@@ -236,6 +236,18 @@ TEST_CASE("[Mariner][E6] Render graph: barriers on the compute-only queue") {
 	CHECK(uint32_t(RDG::async_compute_sanitize_access(mixed)) == uint32_t(RDD::BARRIER_ACCESS_SHADER_READ_BIT));
 	const Access transfer = Access(RDD::BARRIER_ACCESS_COPY_READ_BIT | RDD::BARRIER_ACCESS_COPY_WRITE_BIT | RDD::BARRIER_ACCESS_UNIFORM_READ_BIT | RDD::BARRIER_ACCESS_INDIRECT_COMMAND_READ_BIT | RDD::BARRIER_ACCESS_MEMORY_READ_BIT | RDD::BARRIER_ACCESS_MEMORY_WRITE_BIT);
 	CHECK(uint32_t(RDG::async_compute_sanitize_access(transfer)) == uint32_t(transfer));
+
+	// First use in the async graph: TOP_OF_PIPE plus the access of the last use elsewhere (a copy) - the stage mask
+	// must support that access (VUID-vkCmdPipelineBarrier-pImageMemoryBarriers-02819).
+	const Stages top_compute = Stages(RDD::PIPELINE_STAGE_TOP_OF_PIPE_BIT | RDD::PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+	CHECK(uint32_t(RDG::async_compute_stages_for_access(top_compute, RDD::BARRIER_ACCESS_COPY_WRITE_BIT)) == (uint32_t(top_compute) | uint32_t(RDD::PIPELINE_STAGE_COPY_BIT)));
+	CHECK(uint32_t(RDG::async_compute_stages_for_access(Stages(RDD::PIPELINE_STAGE_TOP_OF_PIPE_BIT), RDD::BARRIER_ACCESS_SHADER_WRITE_BIT)) == uint32_t(RDD::PIPELINE_STAGE_TOP_OF_PIPE_BIT | RDD::PIPELINE_STAGE_COMPUTE_SHADER_BIT));
+	CHECK(uint32_t(RDG::async_compute_stages_for_access(Stages(RDD::PIPELINE_STAGE_TOP_OF_PIPE_BIT), RDD::BARRIER_ACCESS_STORAGE_CLEAR_BIT)) == uint32_t(RDD::PIPELINE_STAGE_TOP_OF_PIPE_BIT | RDD::PIPELINE_STAGE_CLEAR_STORAGE_BIT));
+	CHECK(uint32_t(RDG::async_compute_stages_for_access(Stages(RDD::PIPELINE_STAGE_TOP_OF_PIPE_BIT), RDD::BARRIER_ACCESS_MEMORY_WRITE_BIT)) == uint32_t(RDD::PIPELINE_STAGE_TOP_OF_PIPE_BIT | RDD::PIPELINE_STAGE_ALL_COMMANDS_BIT));
+	// Stages that already cover the access stay as they are.
+	CHECK(uint32_t(RDG::async_compute_stages_for_access(compute, RDD::BARRIER_ACCESS_COPY_READ_BIT | RDD::BARRIER_ACCESS_SHADER_READ_BIT)) == uint32_t(compute));
+	CHECK(uint32_t(RDG::async_compute_stages_for_access(Stages(RDD::PIPELINE_STAGE_ALL_COMMANDS_BIT), RDD::BARRIER_ACCESS_COPY_WRITE_BIT)) == uint32_t(RDD::PIPELINE_STAGE_ALL_COMMANDS_BIT));
+	CHECK(uint32_t(RDG::async_compute_stages_for_access(Stages(RDD::PIPELINE_STAGE_TOP_OF_PIPE_BIT), 0)) == uint32_t(RDD::PIPELINE_STAGE_TOP_OF_PIPE_BIT));
 }
 
 TEST_CASE("[Mariner][E6] Render graph: resource trackers know which queue used them this frame") {

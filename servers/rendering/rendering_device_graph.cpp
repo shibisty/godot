@@ -1484,6 +1484,26 @@ void RenderingDeviceGraph::_group_barriers_for_render_commands(RDD::CommandBuffe
 			barrier.dst_access = async_compute_sanitize_access(barrier.dst_access);
 		}
 #endif
+		// The first use of a resource in this graph has no previous command here (TOP_OF_PIPE), but its access
+		// mask comes from the last use anywhere (e.g. a copy). Every access needs a stage that supports it.
+		uint32_t src_access = uint32_t(barrier_group.memory_barrier.src_access);
+		uint32_t dst_access = uint32_t(barrier_group.memory_barrier.dst_access);
+		for (const RDD::TextureBarrier &barrier : barrier_group.normalization_barriers) {
+			src_access |= uint32_t(barrier.src_access);
+			dst_access |= uint32_t(barrier.dst_access);
+		}
+		for (const RDD::TextureBarrier &barrier : barrier_group.transition_barriers) {
+			src_access |= uint32_t(barrier.src_access);
+			dst_access |= uint32_t(barrier.dst_access);
+		}
+#if USE_BUFFER_BARRIERS
+		for (const RDD::BufferBarrier &barrier : barrier_group.buffer_barriers) {
+			src_access |= uint32_t(barrier.src_access);
+			dst_access |= uint32_t(barrier.dst_access);
+		}
+#endif
+		barrier_group.src_stages = async_compute_stages_for_access(barrier_group.src_stages, src_access);
+		barrier_group.dst_stages = async_compute_stages_for_access(barrier_group.dst_stages, dst_access);
 	}
 
 	const VectorView<RDD::MemoryAccessBarrier> memory_barriers = !is_memory_barrier_empty ? barrier_group.memory_barrier : VectorView<RDD::MemoryAccessBarrier>();
@@ -2955,6 +2975,29 @@ BitField<RDD::PipelineStageBits> RenderingDeviceGraph::async_compute_sanitize_st
 
 	// ALL_COMMANDS (all stages of this queue) keeps the dependency chain with the semaphore wait of the submission.
 	return BitField<RDD::PipelineStageBits>((stages & compute_queue_stages) | RDD::PIPELINE_STAGE_ALL_COMMANDS_BIT);
+}
+
+BitField<RDD::PipelineStageBits> RenderingDeviceGraph::async_compute_stages_for_access(BitField<RDD::PipelineStageBits> p_stages, uint32_t p_access) {
+	uint32_t stages = uint32_t(p_stages);
+	if (stages & RDD::PIPELINE_STAGE_ALL_COMMANDS_BIT) {
+		return p_stages;
+	}
+	if (p_access & (RDD::BARRIER_ACCESS_COPY_READ_BIT | RDD::BARRIER_ACCESS_COPY_WRITE_BIT)) {
+		stages |= RDD::PIPELINE_STAGE_COPY_BIT;
+	}
+	if (p_access & RDD::BARRIER_ACCESS_STORAGE_CLEAR_BIT) {
+		stages |= RDD::PIPELINE_STAGE_CLEAR_STORAGE_BIT;
+	}
+	if (p_access & (RDD::BARRIER_ACCESS_UNIFORM_READ_BIT | RDD::BARRIER_ACCESS_SHADER_READ_BIT | RDD::BARRIER_ACCESS_SHADER_WRITE_BIT)) {
+		stages |= RDD::PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+	}
+	if (p_access & RDD::BARRIER_ACCESS_INDIRECT_COMMAND_READ_BIT) {
+		stages |= RDD::PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+	}
+	if (p_access & (RDD::BARRIER_ACCESS_HOST_READ_BIT | RDD::BARRIER_ACCESS_HOST_WRITE_BIT | RDD::BARRIER_ACCESS_MEMORY_READ_BIT | RDD::BARRIER_ACCESS_MEMORY_WRITE_BIT)) {
+		stages |= RDD::PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	}
+	return BitField<RDD::PipelineStageBits>(stages);
 }
 
 BitField<RDD::BarrierAccessBits> RenderingDeviceGraph::async_compute_sanitize_access(BitField<RDD::BarrierAccessBits> p_access) {

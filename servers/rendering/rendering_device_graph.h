@@ -1004,6 +1004,7 @@ public:
 	// queue that used the resource before) is replaced by ALL_COMMANDS / dropped: the queue semaphore wait already
 	// orders and makes visible the main queue's work.
 	static BitField<RDD::PipelineStageBits> async_compute_sanitize_stages(BitField<RDD::PipelineStageBits> p_stages);
+	static BitField<RDD::PipelineStageBits> async_compute_stages_for_access(BitField<RDD::PipelineStageBits> p_stages, uint32_t p_access);
 	static BitField<RDD::BarrierAccessBits> async_compute_sanitize_access(BitField<RDD::BarrierAccessBits> p_access);
 	void set_async_compute_queue(bool p_enable) { async_compute_queue = p_enable; }
 	bool is_async_compute_queue() const { return async_compute_queue; }
