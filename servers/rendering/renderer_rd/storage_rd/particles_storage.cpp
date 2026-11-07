@@ -189,6 +189,9 @@ void process() {
 }
 
 ParticlesStorage::~ParticlesStorage() {
+	if (screen_collision.texture.is_valid()) {
+		RD::get_singleton()->free_rid(screen_collision.texture); // Mariner E22.
+	}
 	for (int i = 0; i <= ParticlesShader::MAX_USERDATAS; i++) {
 		for (int j = 0; j < ParticlesShader::COPY_MODE_MAX; j++) {
 			particles_shader.copy_pipelines[i][j].free();
@@ -240,6 +243,9 @@ void ParticlesStorage::particles_free(RID p_rid) {
 	particles->dependency.deleted_notify(p_rid);
 	particles->update_list.remove_from_list();
 
+	if (particles->screen_space_collision && screen_collision_users > 0) {
+		screen_collision_users--; // Mariner E22.
+	}
 	_particles_free_data(particles);
 	particles_owner.free(p_rid);
 }
@@ -485,6 +491,50 @@ void ParticlesStorage::particles_set_collision_base_size(RID p_particles, real_t
 	ERR_FAIL_NULL(particles);
 
 	particles->collision_base_size = p_size;
+}
+
+void ParticlesStorage::particles_set_screen_space_collision(RID p_particles, bool p_enable) {
+	Particles *particles = particles_owner.get_or_null(p_particles);
+	ERR_FAIL_NULL(particles);
+	if (particles->screen_space_collision == p_enable) {
+		return;
+	}
+	particles->screen_space_collision = p_enable;
+	if (p_enable) {
+		screen_collision_users++;
+	} else if (screen_collision_users > 0) {
+		screen_collision_users--;
+	}
+}
+
+RID ParticlesStorage::screen_collision_begin(uint64_t p_frame, uint64_t p_area, const Size2i &p_size) {
+	// Mariner E22: within a frame, a larger view replaces a smaller one (the game view over a minimap).
+	if (screen_collision.frame == p_frame && p_area <= screen_collision.area) {
+		return RID();
+	}
+	if (screen_collision.texture.is_null() || screen_collision.size != p_size) {
+		if (screen_collision.texture.is_valid()) {
+			RD::get_singleton()->free_rid(screen_collision.texture);
+		}
+		RD::TextureFormat tf;
+		tf.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
+		tf.width = MAX(p_size.width, 1);
+		tf.height = MAX(p_size.height, 1);
+		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
+		screen_collision.texture = RD::get_singleton()->texture_create(tf, RD::TextureView());
+		RD::get_singleton()->set_resource_name(screen_collision.texture, "Particles screen collision");
+		screen_collision.size = p_size;
+		screen_collision.valid = false;
+	}
+	screen_collision.frame = p_frame;
+	screen_collision.area = p_area;
+	return screen_collision.texture;
+}
+
+void ParticlesStorage::screen_collision_end(const Projection &p_view_projection, const Vector3 &p_camera_position) {
+	screen_collision.view_projection = p_view_projection;
+	screen_collision.camera_position = p_camera_position;
+	screen_collision.valid = true;
 }
 
 void ParticlesStorage::particles_set_transform_align(RID p_particles, RSE::ParticlesTransformAlign p_transform_align) {
@@ -1073,7 +1123,26 @@ void ParticlesStorage::_particles_process(Particles *p_particles, double p_delta
 			}
 		}
 
+		// Mariner E22: the depth of the frame as one more collider (world space particles only: the texture's normals
+		// and the camera are in world space).
+		RID collision_screen_texture;
+		if (p_particles->screen_space_collision && screen_collision.valid && !p_particles->use_local_coords && frame_params.collider_count < ParticlesFrameParams::MAX_COLLIDERS) {
+			ParticlesFrameParams::Collider &col = frame_params.colliders[frame_params.collider_count];
+			RendererRD::MaterialStorage::store_camera(screen_collision.view_projection, col.transform);
+			col.type = ParticlesFrameParams::COLLISION_TYPE_SCREEN_DEPTH;
+			col.extents[0] = screen_collision.camera_position.x;
+			col.extents[1] = screen_collision.camera_position.y;
+			col.extents[2] = screen_collision.camera_position.z;
+			col.texture_index = 0;
+			col.scale = 1.0;
+			frame_params.collider_count++;
+			collision_screen_texture = screen_collision.texture;
+		}
+
 		bool different = false;
+		if (collision_screen_texture != p_particles->collision_screen_texture) {
+			different = true;
+		}
 		if (collision_3d_textures_used == p_particles->collision_3d_textures_used) {
 			for (int i = 0; i < ParticlesFrameParams::MAX_3D_TEXTURES; i++) {
 				if (p_particles->collision_3d_textures[i] != collision_3d_textures[i]) {
@@ -1127,8 +1196,16 @@ void ParticlesStorage::_particles_process(Particles *p_particles, double p_delta
 				}
 				uniforms.push_back(u);
 			}
+			{
+				RD::Uniform u;
+				u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+				u.binding = 2;
+				u.append_id(collision_screen_texture.is_valid() ? collision_screen_texture : texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_BLACK));
+				uniforms.push_back(u);
+			}
 			p_particles->collision_textures_uniform_set = RD::get_singleton()->uniform_set_create(uniforms, particles_shader.default_shader_rd, 2);
 			p_particles->collision_heightmap_texture = collision_heightmap_texture;
+			p_particles->collision_screen_texture = collision_screen_texture;
 		}
 	}
 

@@ -33,6 +33,7 @@
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/effects/tonemap.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/tonemap_mobile.glsl.gen.h"
+#include "servers/rendering/storage/environment_storage.h"
 
 namespace RendererRD {
 
@@ -75,6 +76,9 @@ private:
 		TONEMAP_FLAG_USE_FXAA = (1 << 4),
 		TONEMAP_FLAG_USE_8_BIT_DEBANDING = (1 << 5),
 		TONEMAP_FLAG_CONVERT_TO_SRGB = (1 << 6),
+		TONEMAP_FLAG_USE_LENS_DISTORTION = (1 << 7), // Mariner E23.
+		TONEMAP_FLAG_USE_FILM_GRAIN = (1 << 8),
+		TONEMAP_FLAG_USE_COLOR_GRADING = (1 << 9), // Mariner F3.
 	};
 
 	enum FlagsMobile {
@@ -98,7 +102,8 @@ private:
 		TONEMAP_MOBILE_FLAG_GLOW_MODE_SOFTLIGHT = (1 << 15),
 		TONEMAP_MOBILE_FLAG_GLOW_MODE_REPLACE = (1 << 16),
 		TONEMAP_MOBILE_FLAG_GLOW_MODE_MIX = (1 << 17),
-		TONEMAP_MOBILE_ADRENO_BUG = (1 << 18), // Needs to be last so we force the pipeline cache to specify specializations for all variants.
+		TONEMAP_MOBILE_FLAG_TONEMAPPER_GT7 = (1 << 18), // Mariner E23.
+		TONEMAP_MOBILE_ADRENO_BUG = (1 << 19), // Needs to be last so we force the pipeline cache to specify specializations for all variants.
 	};
 
 	struct TonemapPushConstant {
@@ -122,6 +127,8 @@ private:
 		float luminance_multiplier; //  4 - 96
 
 		float tonemapper_params[4]; //  16 - 112
+
+		float image_effects[4]; //  16 - 128, Mariner E23: chromatic aberration, lens distortion, grain, grain seed + size.
 	};
 
 	struct TonemapPushConstantMobile {
@@ -145,6 +152,20 @@ private:
 	 * better to do using the raster pipeline rather than
 	 * compute, as that framebuffer might be in different formats
 	 */
+	// Mariner F3: color grading parameters (std140), set 3 binding 1 of the Forward+ tonemap shader.
+	struct ColorGradingUBO {
+		float white_balance[12]; // mat3 as three vec4 columns.
+		float shadows[4];
+		float midtones[4];
+		float highlights[4];
+		float tonal_ranges[4];
+		float slope[4]; // w: saturation.
+		float offset[4]; // w: 1 = gamut mapping.
+		float power[4];
+	};
+	static_assert(sizeof(ColorGradingUBO) == 160);
+	RID color_grading_buffer;
+
 	struct Tonemap {
 		TonemapPushConstant push_constant;
 		TonemapShaderRD shader;
@@ -207,7 +228,21 @@ public:
 		bool bilinear_filtering = true;
 
 		bool convert_to_srgb = false;
+
+		// Mariner E23 (Forward+ only, single view): lens and film effects of the camera attributes.
+		float chromatic_aberration = 0.0;
+		float lens_distortion = 0.0;
+		float film_grain = 0.0;
+		float film_grain_size = 1.5;
+		uint32_t frame = 0;
+
+		// Mariner F3 (Forward+): color grading of the environment.
+		RendererEnvironmentStorage::ColorGrading color_grading;
 	};
+
+	// Mariner F3: chromatic adaptation (CAT02 von Kries) from a white point on the Planckian locus at p_temperature
+	// Kelvin (moved along its normal by p_tint) to the one at 6500 K, in linear Rec. 709. 6500 K and tint 0 give identity.
+	static Basis white_balance_matrix(float p_temperature, float p_tint);
 
 	void tonemapper(RID p_source_color, RID p_dst_framebuffer, const TonemapSettings &p_settings);
 	void tonemapper_mobile(RID p_source_color, RID p_dst_framebuffer, const TonemapSettings &p_settings);

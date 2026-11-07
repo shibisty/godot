@@ -33,6 +33,7 @@
 #include "servers/display/display_server_enums.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/rendering_server_types.h"
+#include "servers/rendering/storage/render_scene_buffers.h"
 
 class RendererCanvasRender;
 class RendererSceneRender;
@@ -84,6 +85,13 @@ public:
 	// is final, before its 2D canvases are drawn; p_blit is the blit that will put the viewport on screen. Renderers
 	// without frame generation ignore it.
 	virtual void frame_generation_capture_hudless(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen &p_blit) {}
+	// Mariner E24b: AMD FSR 3 frame generation, same moment as above, for a viewport in the FSR 3.1 scaling mode (its
+	// render buffers hold the upscaler's surfaces of this frame). blit_render_targets_to_screen() then interpolates and
+	// presents the generated frame first.
+	virtual void fsr3_frame_generation_capture(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen &p_blit, const Ref<RenderSceneBuffers> &p_render_buffers) {}
+	// Generated frames presented so far on the screen (tests, statistics).
+	virtual uint64_t fsr3_frame_generation_get_presented_count(DisplayServerEnums::WindowID p_screen) const { return 0; }
+	virtual RID fsr3_frame_generation_get_output_texture(DisplayServerEnums::WindowID p_screen) const { return RID(); }
 
 	virtual bool is_opengl() = 0;
 	virtual void gl_end_frame(bool p_swap_buffers) = 0;

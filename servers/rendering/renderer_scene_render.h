@@ -33,6 +33,7 @@
 #include "core/math/projection.h"
 #include "core/templates/paged_array.h"
 #include "servers/rendering/renderer_geometry_instance.h"
+#include "servers/rendering/renderer_scene_occlusion_cull.h"
 #include "servers/rendering/rendering_server_types.h"
 #include "servers/rendering/storage/compositor_storage.h"
 #include "servers/rendering/storage/environment_storage.h"
@@ -265,6 +266,18 @@ public:
 	// Path tracing (Mariner E5c)
 	void environment_set_pathtracing(RID p_env, bool p_enable, int p_debug_mode, int p_samples_per_pixel, int p_max_bounces, RSE::PathtracingDenoiser p_denoiser);
 	void environment_set_pathtracing_accumulation(RID p_env, bool p_accumulate, int p_max_samples, float p_firefly_clamp);
+	void environment_set_ddgi(RID p_env, bool p_enable, const Vector3i &p_probe_count, float p_probe_spacing, int p_rays_per_probe, float p_hysteresis, float p_energy, float p_bias, float p_specular_occlusion);
+	bool environment_get_ddgi_enabled(RID p_env) const;
+	void environment_set_ddgi_channels(RID p_env, float p_sky_energy, float p_lights_energy);
+	void environment_set_ddgi_sea(RID p_env, bool p_enable, float p_level, const Color &p_color);
+	void environment_set_ssao_gtao(RID p_env, bool p_enable, bool p_bent_normals, float p_thickness);
+	void environment_set_restir(RID p_env, bool p_enable, int p_candidates, int p_spatial_samples, bool p_temporal, bool p_denoise); // Mariner E20.
+	bool environment_get_ssao_gtao(RID p_env) const;
+	bool environment_get_ssao_bent_normals(RID p_env) const;
+	float environment_get_ssao_gtao_thickness(RID p_env) const;
+	void environment_set_color_grading(RID p_env, bool p_enable, float p_temperature, float p_tint, const Color &p_shadows, const Color &p_midtones, const Color &p_highlights, const Vector4 &p_tonal_ranges, const Vector3 &p_slope, const Vector3 &p_offset, const Vector3 &p_power, float p_saturation, bool p_gamut_mapping); // Mariner F3.
+	RendererEnvironmentStorage::ColorGrading environment_get_color_grading(RID p_env) const;
+	void environment_set_ddgi_update(RID p_env, int p_probes_per_frame, bool p_relocation);
 	bool environment_get_pathtracing_enabled(RID p_env) const;
 	int environment_get_pathtracing_debug_mode(RID p_env) const;
 	int environment_get_pathtracing_samples_per_pixel(RID p_env) const;
@@ -275,6 +288,15 @@ public:
 	float environment_get_pathtracing_firefly_clamp(RID p_env) const;
 	// Whether the renderer has a path tracer for this device (Forward+, ray query, raytracing scene buffers).
 	virtual bool pathtracing_is_supported() const { return false; }
+
+	// Mariner E10: directional shadow cache (Forward+). Statistics of the last frame: "enabled", "cascades",
+	// "hits" (static depth copied from the cache), "refreshes" (static depth drawn into the cache), "uncached"
+	// (drawn as without the cache), "static_instances" / "dynamic_instances" (draws of the last frame).
+	virtual void directional_shadow_cache_set_enabled(bool p_enabled) {}
+	virtual Dictionary directional_shadow_cache_get_stats() const { return Dictionary(); }
+	// Mariner E10b: the renderer draws and samples the directional object shadow (otherwise its casters stay in the
+	// cascades).
+	virtual bool directional_object_shadow_is_supported() const { return false; }
 
 	virtual Ref<Image> environment_bake_panorama(RID p_env, bool p_bake_irradiance, const Size2i &p_size) = 0;
 
@@ -298,6 +320,14 @@ public:
 		RID light;
 		int pass = 0;
 		PagedArray<RenderGeometryInstance *> instances;
+		// Mariner E10 (directional shadow cache, Forward+). With `cache` set, `instances` is split into the instances
+		// whose depth can be kept between frames (`static_instances`) and the rest (`dynamic_instances`);
+		// `static_hash` identifies the static set (instances and their versions). Renderers without a cache use
+		// `instances` as before.
+		bool cache = false;
+		uint64_t static_hash = 0;
+		PagedArray<RenderGeometryInstance *> static_instances;
+		PagedArray<RenderGeometryInstance *> dynamic_instances;
 	};
 
 	struct RenderSDFGIData {
@@ -346,6 +376,34 @@ public:
 	// Raytracing scene (TLAS) instances for the next render_scene() call; set by RendererSceneCull for viewports
 	// with the raytracing scene enabled, nullptr otherwise.
 	const PagedArray<RenderGeometryInstance *> *raytracing_instances = nullptr;
+	// Mariner E12: light instances (omni / spot) within the raytracing range, nullptr without a raytracing scene.
+	const PagedArray<RID> *raytracing_lights = nullptr;
+
+	// Mariner E25b: the occlusion depth pyramid the instances of the next render_scene() call were culled with (the
+	// occluder raster of the viewport or the reprojected depth of Viewport.use_hiz_occlusion_culling) and the camera it
+	// is tested with, for culling instances on the GPU (indirect multimeshes with view culling, GPU static batches);
+	// set by RendererSceneCull for camera renders, nullptr otherwise.
+	struct GPUOcclusionData {
+		const RendererSceneOcclusionCull::HZBuffer *buffer = nullptr;
+		Transform3D cam_transform;
+		Projection cam_projection;
+		float z_near = 0.0;
+		bool is_orthogonal = false;
+		bool jitter = false; // Occlusion timers (rendering/occlusion_culling/jitter_projection).
+	};
+	const GPUOcclusionData *gpu_occlusion = nullptr;
+
+	// Mariner E12 DG2: DDGI probe volume of the scenario in a moving frame (the ship), see
+	// RenderingServer.scenario_set_ddgi_volume(); set by RendererSceneCull for the next render_scene() call.
+	struct DDGIVolumeData {
+		bool enabled = false;
+		Transform3D transform; // Center and orientation (scale ignored).
+		Vector3 size = Vector3(10, 4, 10);
+		float probe_spacing = 1.0;
+		int rays_per_probe = 128;
+		int probes_per_frame = 0;
+	};
+	const DDGIVolumeData *ddgi_volume = nullptr;
 	// Whether the renderer can build a raytracing scene (Forward+, ray query support, project setting on).
 	virtual bool raytracing_scene_is_supported() const { return false; }
 	virtual void set_time(double p_time, double p_step) = 0;

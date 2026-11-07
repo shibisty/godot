@@ -42,6 +42,7 @@
 #include "servers/rendering/instance_uniforms.h"
 #include "servers/rendering/renderer_scene_occlusion_cull.h"
 #include "servers/rendering/renderer_scene_render.h"
+#include "servers/rendering/renderer_texture_streaming.h"
 #include "servers/rendering/rendering_method.h"
 #include "servers/rendering/rendering_server_globals.h"
 #include "servers/rendering/rendering_server_types.h"
@@ -276,6 +277,9 @@ public:
 			FLAG_VISIBILITY_DEPENDENCY_FADE_CHILDREN = (1 << 22),
 			FLAG_GEOM_PROJECTOR_SOFTSHADOW_DIRTY = (1 << 23),
 			FLAG_IGNORE_ALL_CULLING = (1 << 24),
+			FLAG_RAYTRACING_ONLY = (1 << 25), // Mariner E12 DG-F: not drawn, no shadows, only in the raytracing scene.
+			FLAG_RAYTRACING_DISABLED = (1 << 26), // Mariner E12 DG-F: not in the raytracing scene.
+			FLAG_SHADOW_TRANSLUCENT = (1 << 27), // Mariner E21: tints the directional light instead of shadowing it.
 		};
 
 		uint32_t flags = 0;
@@ -324,6 +328,42 @@ public:
 	PagedArrayPool<InstanceData> instance_data_page_pool;
 	PagedArrayPool<InstanceVisibilityData> instance_visibility_data_page_pool;
 
+	// Mariner E25a: GPU static batches. Geometry instances with GeometryInstance3D.gpu_static (a mesh without skeleton,
+	// blend shapes, instance shader parameters, visibility ranges, transparency, lightmap or mirroring) are not culled
+	// and drawn one by one: those that share everything that is drawn per instance (mesh, materials, layers, shadow and
+	// GI settings) go into one indirect multimesh of the scenario, which the renderer culls on the GPU per camera
+	// (E25a) and per shadow pass (E14b). The CPU work per frame is per batch, not per instance.
+	struct GPUStaticBatch;
+	struct GPUStaticKey {
+		RID mesh;
+		RID material_override;
+		RID material_overlay;
+		Vector<RID> materials;
+		uint32_t layer_mask = 0;
+		RSE::ShadowCastingSetting cast_shadows = RSE::SHADOW_CASTING_SETTING_ON;
+		RSE::ShadowCacheMode shadow_cache_mode = RSE::SHADOW_CACHE_MODE_AUTO;
+		RSE::RaytracingMode raytracing_mode = RSE::RAYTRACING_MODE_DEFAULT;
+		float raytracing_opacity = 1.0;
+		float lod_bias = 1.0;
+		float sorting_offset = 0.0;
+		bool use_aabb_center = true;
+		bool baked_light = false;
+		bool dynamic_gi = false;
+		bool ignore_occlusion_culling = false;
+		bool shadow_translucent = false;
+		// Mariner E25c: visibility range (fade disabled), culled per instance on the GPU.
+		float visibility_range_begin = 0.0;
+		float visibility_range_end = 0.0;
+		float visibility_range_begin_margin = 0.0;
+		float visibility_range_end_margin = 0.0;
+
+		bool operator==(const GPUStaticKey &p_other) const;
+		uint32_t hash() const;
+	};
+	struct GPUStaticKeyHasher {
+		static _FORCE_INLINE_ uint32_t hash(const GPUStaticKey &p_key) { return p_key.hash(); }
+	};
+
 	struct Scenario {
 		enum IndexerType {
 			INDEXER_GEOMETRY, //for geometry
@@ -332,6 +372,10 @@ public:
 		};
 
 		DynamicBVH indexers[INDEXER_MAX];
+
+		// Mariner E25a: instances drawn by GPU static batches, for queries only (picking, instances_cull_*).
+		DynamicBVH gpu_static_indexer;
+		HashMap<GPUStaticKey, GPUStaticBatch *, GPUStaticKeyHasher> gpu_static_batches;
 
 		RID self;
 
@@ -342,6 +386,7 @@ public:
 		RID compositor;
 		RID reflection_probe_shadow_atlas;
 		RID reflection_atlas;
+		RendererSceneRender::DDGIVolumeData ddgi_volume; // Mariner E12 DG2.
 		uint64_t used_viewport_visibility_bits;
 		HashMap<RID, uint64_t> viewport_visibility_masks;
 
@@ -374,6 +419,7 @@ public:
 
 	virtual void scenario_set_environment(RID p_scenario, RID p_environment);
 	virtual void scenario_set_camera_attributes(RID p_scenario, RID p_attributes);
+	virtual void scenario_set_ddgi_volume(RID p_scenario, bool p_enable, const Transform3D &p_transform, const Vector3 &p_size, float p_probe_spacing, int p_rays_per_probe, int p_probes_per_frame);
 	virtual void scenario_set_fallback_environment(RID p_scenario, RID p_environment);
 	virtual void scenario_set_compositor(RID p_scenario, RID p_compositor);
 	virtual void scenario_set_reflection_atlas_size(RID p_scenario, int p_reflection_size, int p_reflection_count);
@@ -480,6 +526,22 @@ public:
 		uint64_t last_frame_pass;
 
 		uint64_t version; // changes to this, and changes to base increase version
+
+		// Mariner E10 (directional shadow cache): frame of the last version change, the mode, and whether the
+		// instance changes its own depth without a version change (skinning, blend shapes, TIME in the vertex
+		// shader or with discard, GPU-written multimesh, particles).
+		uint64_t version_frame = 0;
+		RSE::ShadowCacheMode shadow_cache_mode = RSE::SHADOW_CACHE_MODE_AUTO;
+		bool shadow_cache_dynamic = false;
+		// Mariner E12 DG-F: raytracing scene membership and the share of rays the instance stops.
+		RSE::RaytracingMode raytracing_mode = RSE::RAYTRACING_MODE_DEFAULT;
+		bool shadow_translucent = false; // Mariner E21.
+		float raytracing_opacity = 1.0;
+		// Mariner E25a: asked to be drawn by a GPU static batch; the batch and slot it is in (null: drawn on its own).
+		bool gpu_static = false;
+		GPUStaticBatch *gpu_batch = nullptr;
+		uint32_t gpu_slot = 0;
+		DynamicBVH::ID gpu_query_id; // In Scenario::gpu_static_indexer.
 
 		InstanceBaseData *base_data = nullptr;
 
@@ -705,6 +767,12 @@ public:
 		uint32_t max_sdfgi_cascade = 2;
 		uint32_t cull_mask = 0xFFFFFFFF;
 
+		// Mariner E10: directional shadow cache - the light orientation the shadow cascades are drawn with. It follows
+		// the light only when it turned by more than the cache threshold (a slowly moving sun keeps the cache).
+		Basis shadow_cache_basis;
+		bool shadow_cache_basis_valid = false;
+		real_t shadow_cache_radius[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES] = {}; // Last radius per cascade.
+
 	private:
 		// Instead of a single dirty flag, we maintain a count
 		// so that we can detect lights that are being made dirty
@@ -895,9 +963,25 @@ public:
 		PagedArray<RID> fog_volumes;
 		// Raytracing scene (TLAS) instances: frustum-visible plus those within the raytracing range.
 		PagedArray<RenderGeometryInstance *> rt_geometry_instances;
+		PagedArray<RID> rt_light_instances; // Mariner E12: omni / spot lights within the raytracing range.
+		PagedArray<Instance *> streaming_instances; // Mariner E17: visible geometry that reports texture demand.
 
 		struct DirectionalShadow {
 			PagedArray<RenderGeometryInstance *> cascade_geometry_instances[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
+			// Mariner E10: with the shadow cache, the same instances split into static and dynamic, and an
+			// order-independent hash of the static set (sum and xor of mixed instance/version values).
+			PagedArray<RenderGeometryInstance *> cascade_static_instances[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
+			PagedArray<RenderGeometryInstance *> cascade_dynamic_instances[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
+			uint64_t cascade_static_hash_sum[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES] = {};
+			uint64_t cascade_static_hash_xor[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES] = {};
+			// Mariner E10b: casters of the object shadow and their bounds.
+			PagedArray<RenderGeometryInstance *> object_instances;
+			AABB object_aabb;
+			bool object_aabb_valid = false;
+			// Mariner E21: translucent casters (in a cascade) and their bounds.
+			PagedArray<RenderGeometryInstance *> translucent_instances;
+			AABB translucent_aabb;
+			bool translucent_aabb_valid = false;
 		} directional_shadows[RendererSceneRender::MAX_DIRECTIONAL_LIGHTS];
 
 		PagedArray<RenderGeometryInstance *> sdfgi_region_geometry_instances[SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE];
@@ -914,10 +998,22 @@ public:
 			mesh_instances.clear();
 			fog_volumes.clear();
 			rt_geometry_instances.clear();
+			rt_light_instances.clear();
+			streaming_instances.clear();
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].clear();
+					directional_shadows[i].cascade_static_instances[j].clear();
+					directional_shadows[i].cascade_dynamic_instances[j].clear();
+					directional_shadows[i].cascade_static_hash_sum[j] = 0;
+					directional_shadows[i].cascade_static_hash_xor[j] = 0;
 				}
+				directional_shadows[i].object_instances.clear();
+				directional_shadows[i].object_aabb = AABB();
+				directional_shadows[i].object_aabb_valid = false;
+				directional_shadows[i].translucent_instances.clear();
+				directional_shadows[i].translucent_aabb = AABB();
+				directional_shadows[i].translucent_aabb_valid = false;
 			}
 
 			for (int i = 0; i < SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE; i++) {
@@ -940,10 +1036,16 @@ public:
 			mesh_instances.reset();
 			fog_volumes.reset();
 			rt_geometry_instances.reset();
+			rt_light_instances.reset();
+			streaming_instances.reset();
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].reset();
+					directional_shadows[i].cascade_static_instances[j].reset();
+					directional_shadows[i].cascade_dynamic_instances[j].reset();
 				}
+				directional_shadows[i].object_instances.reset();
+				directional_shadows[i].translucent_instances.reset();
 			}
 
 			for (int i = 0; i < SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE; i++) {
@@ -966,10 +1068,34 @@ public:
 			mesh_instances.merge_unordered(p_cull_result.mesh_instances);
 			fog_volumes.merge_unordered(p_cull_result.fog_volumes);
 			rt_geometry_instances.merge_unordered(p_cull_result.rt_geometry_instances);
+			rt_light_instances.merge_unordered(p_cull_result.rt_light_instances);
+			streaming_instances.merge_unordered(p_cull_result.streaming_instances);
 
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].merge_unordered(p_cull_result.directional_shadows[i].cascade_geometry_instances[j]);
+					directional_shadows[i].cascade_static_instances[j].merge_unordered(p_cull_result.directional_shadows[i].cascade_static_instances[j]);
+					directional_shadows[i].cascade_dynamic_instances[j].merge_unordered(p_cull_result.directional_shadows[i].cascade_dynamic_instances[j]);
+					directional_shadows[i].cascade_static_hash_sum[j] += p_cull_result.directional_shadows[i].cascade_static_hash_sum[j];
+					directional_shadows[i].cascade_static_hash_xor[j] ^= p_cull_result.directional_shadows[i].cascade_static_hash_xor[j];
+				}
+				directional_shadows[i].object_instances.merge_unordered(p_cull_result.directional_shadows[i].object_instances);
+				directional_shadows[i].translucent_instances.merge_unordered(p_cull_result.directional_shadows[i].translucent_instances);
+				if (p_cull_result.directional_shadows[i].translucent_aabb_valid) {
+					if (directional_shadows[i].translucent_aabb_valid) {
+						directional_shadows[i].translucent_aabb.merge_with(p_cull_result.directional_shadows[i].translucent_aabb);
+					} else {
+						directional_shadows[i].translucent_aabb = p_cull_result.directional_shadows[i].translucent_aabb;
+						directional_shadows[i].translucent_aabb_valid = true;
+					}
+				}
+				if (p_cull_result.directional_shadows[i].object_aabb_valid) {
+					if (directional_shadows[i].object_aabb_valid) {
+						directional_shadows[i].object_aabb.merge_with(p_cull_result.directional_shadows[i].object_aabb);
+					} else {
+						directional_shadows[i].object_aabb = p_cull_result.directional_shadows[i].object_aabb;
+						directional_shadows[i].object_aabb_valid = true;
+					}
 				}
 			}
 
@@ -993,10 +1119,16 @@ public:
 			mesh_instances.set_page_pool(p_rid_pool);
 			fog_volumes.set_page_pool(p_rid_pool);
 			rt_geometry_instances.set_page_pool(p_geometry_instance_pool);
+			rt_light_instances.set_page_pool(p_rid_pool);
+			streaming_instances.set_page_pool(p_instance_pool);
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].set_page_pool(p_geometry_instance_pool);
+					directional_shadows[i].cascade_static_instances[j].set_page_pool(p_geometry_instance_pool);
+					directional_shadows[i].cascade_dynamic_instances[j].set_page_pool(p_geometry_instance_pool);
 				}
+				directional_shadows[i].object_instances.set_page_pool(p_geometry_instance_pool);
+				directional_shadows[i].translucent_instances.set_page_pool(p_geometry_instance_pool);
 			}
 
 			for (int i = 0; i < SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE; i++) {
@@ -1063,6 +1195,37 @@ public:
 
 	virtual void instance_geometry_set_flag(RID p_instance, RSE::InstanceFlags p_flags, bool p_enabled);
 	virtual void instance_geometry_set_cast_shadows_setting(RID p_instance, RSE::ShadowCastingSetting p_shadow_casting_setting);
+	virtual void instance_geometry_set_shadow_cache_mode(RID p_instance, RSE::ShadowCacheMode p_mode); // Mariner E10.
+	static void _update_instance_data_raytracing_flags(const Instance *p_instance, InstanceData &r_idata);
+	virtual void instance_geometry_set_raytracing(RID p_instance, RSE::RaytracingMode p_mode, float p_opacity); // Mariner E12 DG-F.
+	virtual void instance_geometry_set_shadow_translucent(RID p_instance, bool p_enabled); // Mariner E21.
+
+	// Mariner E25a.
+	struct GPUStaticBatch {
+		GPUStaticKey key;
+		Scenario *scenario = nullptr;
+		RID multimesh;
+		RID instance; // The batch's own instance in the scenario (base: multimesh).
+		LocalVector<Instance *> members;
+		uint32_t capacity = 0;
+		bool dirty = false;
+		bool queued = false;
+	};
+	mutable LocalVector<GPUStaticBatch *> gpu_static_dirty;
+	virtual void instance_geometry_set_gpu_static(RID p_instance, bool p_enabled);
+	virtual bool instance_geometry_is_gpu_static_active(RID p_instance) const;
+	virtual Dictionary scenario_get_gpu_static_info(RID p_scenario) const;
+	bool _gpu_static_eligible(const Instance *p_instance) const;
+	void _gpu_static_make_key(const Instance *p_instance, GPUStaticKey &r_key) const;
+	void _gpu_static_add(Instance *p_instance) const;
+	void _gpu_static_remove(Instance *p_instance) const;
+	void _gpu_static_mark_dirty(GPUStaticBatch *p_batch) const;
+	void _gpu_static_flush() const;
+	void _gpu_static_touch(Instance *p_instance) const;
+
+	// Mariner E10 helpers (public for tests).
+	static uint64_t shadow_cache_mix(uint64_t p_value);
+	static real_t shadow_cache_quantize_radius(real_t p_radius, real_t p_previous = 0.0);
 	virtual void instance_geometry_set_material_override(RID p_instance, RID p_material);
 	virtual void instance_geometry_set_material_overlay(RID p_instance, RID p_material);
 
@@ -1087,6 +1250,13 @@ public:
 
 	void _light_instance_setup_directional_shadow(int p_shadow_index, Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect);
 
+	// Mariner E10: directional shadow cache.
+	bool shadow_cache_enabled = false;
+	bool shadow_cache_render_enabled = false; // What the scene renderer was told last.
+	uint32_t shadow_cache_settle_frames = 30;
+	real_t shadow_cache_light_angle = Math::deg_to_rad(0.1);
+	void _update_instance_shadow_cache_class(Instance *p_instance) const;
+
 	_FORCE_INLINE_ bool _light_instance_update_shadow(Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect, RID p_shadow_atlas, Scenario *p_scenario, float p_screen_mesh_lod_threshold, uint32_t p_visible_layers = 0xFFFFFF);
 
 	RID _render_get_environment(RID p_camera, RID p_scenario);
@@ -1096,6 +1266,11 @@ public:
 		struct Shadow {
 			RID light_instance;
 			uint32_t caster_mask;
+			// Mariner E10b: object shadow layers (0 = none) and the first cascade they are left out of.
+			uint32_t object_layers = 0;
+			uint32_t object_from_cascade = 1;
+			int object_size = 2048;
+			Basis basis; // Orientation the cascades were set up with.
 			struct Cascade {
 				Frustum frustum;
 
@@ -1114,6 +1289,10 @@ public:
 		} shadows[RendererSceneRender::MAX_DIRECTIONAL_LIGHTS];
 
 		uint32_t shadow_count;
+
+		// Mariner E10: directional shadow cache for this frame.
+		bool shadow_cache = false;
+		uint64_t shadow_cache_frame = 0;
 
 		struct SDFGI {
 			//have arrays here because SDFGI functions expects this, plus regions can have areas
@@ -1159,6 +1338,7 @@ public:
 		const RendererSceneOcclusionCull::HZBuffer *occlusion_buffer;
 		const Projection *camera_matrix;
 		uint64_t visibility_viewport_mask;
+		bool texture_streaming = false; // Mariner E17.
 	};
 
 	void _scene_cull_threaded(uint32_t p_thread, CullData *cull_data);
@@ -1167,6 +1347,11 @@ public:
 	_FORCE_INLINE_ bool _visibility_parent_check(const CullData &p_cull_data, const InstanceData &p_instance_data);
 
 	bool _render_reflection_probe_step(Instance *p_instance, int p_step);
+
+	// Mariner E17: texture streaming demand of the visible geometry.
+	RendererTextureStreaming texture_streaming;
+	float texture_streaming_view_height = 0.0f;
+	void _texture_streaming_collect(const RendererSceneRender::CameraData *p_camera_data, const InstanceCullResult &p_cull_result);
 
 	void _render_scene(const RendererSceneRender::CameraData *p_camera_data, const Ref<RenderSceneBuffers> &p_render_buffers, RID p_environment, RID p_force_camera_attributes, RID p_compositor, uint32_t p_visible_layers, RID p_scenario, RID p_viewport, RID p_shadow_atlas, RID p_reflection_probe, int p_reflection_probe_pass, float p_screen_mesh_lod_threshold, float p_window_output_max_value, bool p_using_shadows = true, RenderingServerTypes::RenderInfo *r_render_info = nullptr);
 	void render_empty_scene(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_scenario, RID p_shadow_atlas, float p_window_output_max_value);
@@ -1389,8 +1574,19 @@ public:
 	// Path tracing (Mariner E5c)
 	PASS6(environment_set_pathtracing, RID, bool, int, int, int, RSE::PathtracingDenoiser)
 	PASS4(environment_set_pathtracing_accumulation, RID, bool, int, float)
+	PASS9(environment_set_ddgi, RID, bool, const Vector3i &, float, int, float, float, float, float)
+	PASS3(environment_set_ddgi_update, RID, int, bool)
+	PASS3(environment_set_ddgi_channels, RID, float, float)
+	PASS4(environment_set_ddgi_sea, RID, bool, float, const Color &)
+	PASS4(environment_set_ssao_gtao, RID, bool, bool, float)
+	PASS13(environment_set_color_grading, RID, bool, float, float, const Color &, const Color &, const Color &, const Vector4 &, const Vector3 &, const Vector3 &, const Vector3 &, float, bool)
+	PASS6(environment_set_restir, RID, bool, int, int, bool, bool)
 	PASS1RC(bool, environment_get_pathtracing_enabled, RID)
 	PASS0RC(bool, pathtracing_is_supported)
+
+	// Mariner E10.
+	virtual void directional_shadow_cache_set_enabled(bool p_enabled);
+	virtual Dictionary directional_shadow_cache_get_stats() const;
 
 	PASS3R(Ref<Image>, environment_bake_panorama, RID, bool, const Size2i &)
 

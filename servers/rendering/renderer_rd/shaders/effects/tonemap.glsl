@@ -62,6 +62,9 @@ layout(set = 3, binding = 0) uniform sampler3D source_color_correction;
 #define FLAG_USE_FXAA (1 << 4)
 #define FLAG_USE_8_BIT_DEBANDING (1 << 5)
 #define FLAG_CONVERT_TO_SRGB (1 << 6)
+#define FLAG_USE_LENS_DISTORTION (1 << 7) // Mariner E23: lens distortion and/or chromatic aberration.
+#define FLAG_USE_FILM_GRAIN (1 << 8) // Mariner E23.
+#define FLAG_USE_COLOR_GRADING (1 << 9) // Mariner F3.
 
 layout(push_constant, std430) uniform Params {
 	vec3 bcs;
@@ -84,8 +87,83 @@ layout(push_constant, std430) uniform Params {
 	float luminance_multiplier;
 
 	vec4 tonemapper_params;
+
+	// Mariner E23: x chromatic aberration, y lens distortion, z film grain, w grain seed (integer part) and grain size
+	// (fraction × 4, in pixels).
+	vec4 image_effects;
 }
 params;
+
+#include "tonemap_gt7_inc.glsl"
+
+// Mariner F3: color grading (see RendererEnvironmentStorage::ColorGrading). Own code after the published methods:
+// von Kries white balance in CAT02 (matrix built on the CPU), shadows / midtones / highlights weights as the log
+// color wheels of grading tools, the ASC CDL in ACEScct (Academy S-2016-001), and a hue-keeping gamut mapping.
+layout(set = 3, binding = 1, std140) uniform ColorGradingBlock {
+	mat3 white_balance;
+	vec4 shadows;
+	vec4 midtones;
+	vec4 highlights;
+	vec4 tonal_ranges; // Shadows fade out over x..y, highlights fade in over z..w.
+	vec4 slope; // w: saturation.
+	vec4 offset; // w: 1 = gamut mapping.
+	vec4 power;
+}
+grading;
+
+const vec3 GRADING_LUMINANCE = vec3(0.2126, 0.7152, 0.0722); // Rec. 709.
+
+vec3 linear_to_acescct(vec3 x) {
+	vec3 lo = 10.5402377416545 * x + 0.0729055341958355;
+	vec3 hi = (log2(max(x, vec3(1e-10))) + 9.72) / 17.52;
+	return mix(hi, lo, lessThanEqual(x, vec3(0.0078125)));
+}
+
+vec3 acescct_to_linear(vec3 y) {
+	vec3 lo = (y - 0.0729055341958355) / 10.5402377416545;
+	vec3 hi = exp2(min(y, vec3(1.468)) * 17.52 - 9.72); // 1.468: about 65000.
+	return mix(hi, lo, lessThanEqual(y, vec3(0.155251141552511)));
+}
+
+// p_color: scene-linear, exposed, before the tone mapper.
+vec3 apply_color_grading(vec3 p_color) {
+	vec3 c = max(grading.white_balance * p_color, vec3(0.0));
+
+	float y = dot(c, GRADING_LUMINANCE);
+	float s = 1.0 - smoothstep(grading.tonal_ranges.x, grading.tonal_ranges.y, y);
+	float h = smoothstep(grading.tonal_ranges.z, grading.tonal_ranges.w, y);
+	float m = max(1.0 - s - h, 0.0);
+	c *= grading.shadows.rgb * s + grading.midtones.rgb * m + grading.highlights.rgb * h;
+
+	vec3 v = linear_to_acescct(c);
+	v = v * grading.slope.rgb + grading.offset.rgb;
+	vec3 pv = pow(max(v, vec3(0.0)), grading.power.rgb);
+	v = mix(v, pv, greaterThan(v, vec3(0.0)));
+	c = acescct_to_linear(v);
+
+	y = dot(c, GRADING_LUMINANCE);
+	return max(vec3(y) + grading.slope.w * (c - vec3(y)), vec3(0.0));
+}
+
+// Brings a color into 0..p_limit without changing its hue: negative channels (from the white balance or saturation) are
+// moved towards the grey of the same luminance, and a channel above the limit scales the whole color down. Clipping
+// each channel instead shifts hues (an over-bright orange turns yellow).
+vec3 gamut_map(vec3 p_color, float p_limit) {
+	vec3 c = p_color;
+	float y = dot(c, GRADING_LUMINANCE);
+	if (y <= 0.0) {
+		return vec3(0.0);
+	}
+	float lowest = min(c.r, min(c.g, c.b));
+	if (lowest < 0.0) {
+		c = vec3(y) + (c - vec3(y)) * (y / (y - lowest));
+	}
+	float highest = max(c.r, max(c.g, c.b));
+	if (highest > p_limit) {
+		c *= p_limit / highest;
+	}
+	return c;
+}
 
 layout(location = 0) out vec4 frag_color;
 
@@ -242,6 +320,7 @@ vec3 srgb_to_linear(vec3 color) {
 #define TONEMAPPER_FILMIC 2
 #define TONEMAPPER_ACES 3
 #define TONEMAPPER_AGX 4
+#define TONEMAPPER_GT7 5
 
 vec3 apply_tonemapping(vec3 color) { // inputs are LINEAR
 	if (params.tonemapper == TONEMAPPER_LINEAR) {
@@ -258,6 +337,8 @@ vec3 apply_tonemapping(vec3 color) { // inputs are LINEAR
 		return tonemap_filmic(color);
 	} else if (params.tonemapper == TONEMAPPER_ACES) {
 		return tonemap_aces(color);
+	} else if (params.tonemapper == TONEMAPPER_GT7) {
+		return tonemap_gt7(color, params.tonemapper_params.x, params.tonemapper_params.y);
 	} else { // TONEMAPPER_AGX
 		return tonemap_agx(color);
 	}
@@ -851,11 +932,59 @@ vec3 screen_space_dither(vec2 frag_coord, float bit_alignment_diviser) {
 	return (dither.rgb - 0.5) / bit_alignment_diviser;
 }
 
+// Mariner E23: radial lens distortion (barrel for positive amounts, pincushion for negative). The radius is measured
+// with the aspect ratio of the view, 1.0 at the corners; barrel distortion zooms in so that the corners stay inside.
+// After the lens distortion of Spartan Engine (chromatic_aberration.hlsl, MIT); own aspect handling and zoom.
+vec2 lens_distort(vec2 uv) {
+	float aspect = params.pixel_size.y / params.pixel_size.x;
+	vec2 d = (uv - 0.5) * vec2(aspect, 1.0);
+	float r2 = dot(d, d) / (0.25 * (aspect * aspect + 1.0));
+	float k = params.image_effects.y;
+	float zoom = 1.0 / (1.0 + max(k, 0.0));
+	return 0.5 + (uv - 0.5) * (1.0 + k * r2) * zoom;
+}
+
+// Mariner E23: film grain. Animated value noise in cells of the grain size, roughly gaussian (sum of two), monochrome,
+// strongest in the mid tones like film. Own code.
+float grain_hash(vec2 p, float seed) {
+	vec3 p3 = fract(vec3(p.xyx) * 0.1031 + seed * 0.0137);
+	p3 += dot(p3, p3.yzx + 33.33);
+	return fract((p3.x + p3.y) * p3.z);
+}
+
+float grain_value_noise(vec2 p, float seed) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	float a = grain_hash(i, seed);
+	float b = grain_hash(i + vec2(1.0, 0.0), seed);
+	float c = grain_hash(i + vec2(0.0, 1.0), seed);
+	float d = grain_hash(i + vec2(1.0, 1.0), seed);
+	return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// p_color is perceptual (sRGB encoded).
+vec3 apply_film_grain(vec3 p_color, vec2 frag_coord) {
+	float seed = floor(params.image_effects.w);
+	float size = max(fract(params.image_effects.w) * 4.0, 1.0);
+	vec2 p = frag_coord / size;
+	float n = grain_value_noise(p, seed) + grain_value_noise(p + vec2(17.3, 41.9), seed + 7.0) - 1.0; // -1..1, peak at 0.
+	float luma = clamp(dot(p_color, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+	float response = 0.25 + 3.0 * luma * (1.0 - luma); // 0.25 in black and white, 1.0 in mid grey.
+	return p_color + n * params.image_effects.z * 0.12 * response;
+}
+
 void main() {
+	vec2 uv = uv_interp;
+#ifndef USE_MULTIVIEW
+	if (bool(params.flags & FLAG_USE_LENS_DISTORTION)) {
+		uv = lens_distort(uv_interp);
+	}
+#endif
 #ifdef USE_MULTIVIEW
-	vec4 color = textureLod(source_color, vec3(uv_interp, ViewIndex), 0.0f);
+	vec4 color = textureLod(source_color, vec3(uv, ViewIndex), 0.0f);
 #else
-	vec4 color = textureLod(source_color, uv_interp, 0.0f);
+	vec4 color = textureLod(source_color, uv, 0.0f);
 #endif
 	color.rgb *= params.luminance_multiplier;
 
@@ -872,13 +1001,23 @@ void main() {
 	// Single-pass FXAA and pre-tonemap glow.
 	if (bool(params.flags & FLAG_USE_FXAA)) {
 		// FXAA must be performed before glow to preserve the "bleed" effect of glow.
-		color.rgb = do_fxaa(color.rgb, exposure, uv_interp);
+		color.rgb = do_fxaa(color.rgb, exposure, uv);
 	}
 
+#ifndef USE_MULTIVIEW
+	if (bool(params.flags & FLAG_USE_LENS_DISTORTION) && params.image_effects.x > 0.0) {
+		// Mariner E23: chromatic aberration, red outwards and blue inwards in proportion to the distance from the center
+		// (as in Spartan Engine's chromatic_aberration.hlsl, MIT).
+		vec2 offset = (uv - 0.5) * params.image_effects.x * 0.02;
+		color.r = textureLod(source_color, uv + offset, 0.0f).r * params.luminance_multiplier * exposure;
+		color.b = textureLod(source_color, uv - offset, 0.0f).b * params.luminance_multiplier * exposure;
+	}
+#endif
+
 	if (bool(params.flags & FLAG_USE_GLOW) && params.glow_mode != GLOW_MODE_SOFTLIGHT) {
-		vec3 glow = gather_glow(source_glow, uv_interp) * params.glow_intensity;
+		vec3 glow = gather_glow(source_glow, uv) * params.glow_intensity;
 		if (params.glow_map_strength > 0.001) {
-			glow = mix(glow, texture(glow_map, uv_interp).rgb * glow, params.glow_map_strength);
+			glow = mix(glow, texture(glow_map, uv).rgb * glow, params.glow_map_strength);
 		}
 
 		if (params.glow_mode == GLOW_MODE_MIX) {
@@ -886,6 +1025,10 @@ void main() {
 		} else {
 			color.rgb = apply_glow(color.rgb, glow, params.white);
 		}
+	}
+
+	if (bool(params.flags & FLAG_USE_COLOR_GRADING)) {
+		color.rgb = apply_color_grading(color.rgb); // Mariner F3.
 	}
 
 	// Tonemap to lower dynamic range.
@@ -898,12 +1041,16 @@ void main() {
 		// Apply soft light after tonemapping to mitigate the issue of discontinuity
 		// at 1.0 and higher. This makes the issue only appear with HDR output that
 		// can exceed a 1.0 output value.
-		vec3 glow = gather_glow(source_glow, uv_interp) * params.glow_intensity;
+		vec3 glow = gather_glow(source_glow, uv) * params.glow_intensity;
 		if (params.glow_map_strength > 0.001) {
-			glow = mix(glow, texture(glow_map, uv_interp).rgb * glow, params.glow_map_strength);
+			glow = mix(glow, texture(glow_map, uv).rgb * glow, params.glow_map_strength);
 		}
 		glow = apply_tonemapping(glow);
 		color.rgb = apply_glow(color.rgb, glow, params.white);
+	}
+
+	if (bool(params.flags & FLAG_USE_COLOR_GRADING) && grading.offset.w > 0.5) {
+		color.rgb = gamut_map(color.rgb, params.output_max_value); // Mariner F3.
 	}
 
 	// Additional effects.
@@ -941,6 +1088,15 @@ void main() {
 		}
 	} else if (bool(params.flags & FLAG_CONVERT_TO_SRGB)) {
 		color.rgb = linear_to_srgb(color.rgb);
+	}
+
+	if (bool(params.flags & FLAG_USE_FILM_GRAIN)) {
+		// Mariner E23: grain is added to perceptual values.
+		if (bool(params.flags & FLAG_CONVERT_TO_SRGB)) {
+			color.rgb = apply_film_grain(color.rgb, gl_FragCoord.xy);
+		} else {
+			color.rgb = srgb_to_linear(apply_film_grain(linear_to_srgb(max(color.rgb, vec3(0.0))), gl_FragCoord.xy));
+		}
 	}
 
 	// Debanding should be done at the end of tonemapping, but before writing to the LDR buffer.

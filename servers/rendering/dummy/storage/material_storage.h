@@ -48,6 +48,7 @@ private:
 
 	struct DummyShader {
 		HashMap<StringName, ShaderLanguage::ShaderNode::Uniform> uniforms;
+		String code; // Mariner E16: kept, for shader_get_code() (tests, converting materials headless).
 	};
 
 	mutable RID_Owner<DummyShader> shader_owner;
@@ -65,7 +66,7 @@ private:
 public:
 	static MaterialStorage *get_singleton() { return singleton; }
 
-	MaterialStorage();
+	MaterialStorage(bool p_singleton = true); // Mariner E14a: false for test doubles (they must not replace the singleton).
 	~MaterialStorage();
 
 	/* GLOBAL SHADER UNIFORM API */
@@ -82,7 +83,7 @@ public:
 	virtual void global_shader_parameters_load_settings(bool p_load_textures = true) override;
 	virtual void global_shader_parameters_clear() override {}
 
-	virtual int32_t global_shader_parameters_instance_allocate(RID p_instance) override { return 0; }
+	virtual int32_t global_shader_parameters_instance_allocate(RID p_instance, uint32_t p_elements) override { return 0; }
 	virtual void global_shader_parameters_instance_free(RID p_instance) override {}
 	virtual void global_shader_parameters_instance_update(RID p_instance, int p_index, const Variant &p_value, int p_flags_count = 0) override {}
 
@@ -97,7 +98,10 @@ public:
 	virtual void shader_set_code(RID p_shader, const String &p_code) override;
 	virtual void shader_set_path_hint(RID p_shader, const String &p_code) override {}
 
-	virtual String shader_get_code(RID p_shader) const override { return ""; }
+	virtual String shader_get_code(RID p_shader) const override {
+		DummyShader *shader = shader_owner.get_or_null(p_shader);
+		return shader ? shader->code : String();
+	}
 	virtual void get_shader_parameter_list(RID p_shader, List<PropertyInfo> *p_param_list) const override;
 
 	virtual void shader_set_default_texture_parameter(RID p_shader, const StringName &p_name, RID p_texture, int p_index) override {}

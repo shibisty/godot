@@ -75,6 +75,7 @@ public:
 	bool material_uv2_mode = false;
 	float emissive_exposure_normalization = 0.0;
 	bool shadow_pass = false;
+	bool translucent_shadow_pass = false; // Mariner E21.
 
 	Size2 shadow_atlas_pixel_size;
 	Size2 directional_shadow_pixel_size;
@@ -111,6 +112,7 @@ private:
 		SCENE_DATA_FLAGS_USE_UV2_MATERIAL = 1 << 5,
 		SCENE_DATA_FLAGS_USE_PANCAKE_SHADOWS = 1 << 6,
 		SCENE_DATA_FLAGS_IN_SHADOW_PASS = 1 << 7, // Only used by Forward+ renderer.
+		SCENE_DATA_FLAGS_TRANSLUCENT_SHADOW_PASS = 1 << 8, // Mariner E21: the material pass writes the transmitted colour.
 		SCENE_DATA_FLAGS_MAX
 	};
 

@@ -111,6 +111,54 @@
 				[/codeblock]
 			</description>
 		</method>
+		<method name="camera_attributes_set_image_effects">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="chromatic_aberration" type="float" />
+			<param index="2" name="lens_distortion" type="float" />
+			<param index="3" name="film_grain" type="float" />
+			<param index="4" name="film_grain_size" type="float" />
+			<param index="5" name="sharpening" type="float" />
+			<description>
+				Sets the image effects of the camera attributes: chromatic aberration, lens distortion, film grain (strength and size in pixels) and contrast adaptive sharpening. See [member CameraAttributes.image_chromatic_aberration], [member CameraAttributes.image_lens_distortion], [member CameraAttributes.image_film_grain], [member CameraAttributes.image_film_grain_size] and [member CameraAttributes.image_sharpening].
+			</description>
+		</method>
+		<method name="camera_attributes_set_lens_dirt">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="texture" type="RID" />
+			<param index="2" name="intensity" type="float" />
+			<description>
+				Sets the lens dirt texture and its intensity, see [member CameraAttributes.lens_dirt_texture].
+			</description>
+		</method>
+		<method name="camera_attributes_set_lens_flare">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="intensity" type="float" />
+			<param index="3" name="threshold" type="float" />
+			<param index="4" name="ghosts" type="int" />
+			<param index="5" name="ghost_spacing" type="float" />
+			<param index="6" name="halo_width" type="float" />
+			<param index="7" name="chromatic" type="float" />
+			<param index="8" name="sun_streaks" type="float" />
+			<param index="9" name="streak_count" type="int" />
+			<description>
+				Sets the lens flare of the camera attributes, see [member CameraAttributes.lens_flare_enabled] and the other [code]lens_flare_*[/code] properties.
+			</description>
+		</method>
+		<method name="camera_attributes_set_motion_blur">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="intensity" type="float" />
+			<param index="3" name="camera_motion" type="float" />
+			<param index="4" name="max_length" type="float" />
+			<description>
+				Sets the motion blur of the camera attributes, see [member CameraAttributes.motion_blur_enabled], [member CameraAttributes.motion_blur_intensity], [member CameraAttributes.motion_blur_camera_motion] and [member CameraAttributes.motion_blur_max_length].
+			</description>
+		</method>
 		<method name="camera_create">
 			<return type="RID" />
 			<description>
@@ -1262,6 +1310,21 @@
 				Sets the [param size] of the directional light shadows in 3D. See also [member ProjectSettings.rendering/lights_and_shadows/directional_shadow/size]. This parameter is global and cannot be set on a per-viewport basis.
 			</description>
 		</method>
+		<method name="directional_shadow_cache_get_stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns statistics of the directional shadow cache (Forward+ only, see [method directional_shadow_cache_set_enabled]): [code]enabled[/code]; for the last complete frame [code]cascades[/code], [code]hits[/code] (static casters copied from the cache), [code]refreshes[/code] (static casters redrawn into the cache), [code]uncached[/code] (drawn without the cache), [code]static_instances[/code] (drawn into the cache), [code]dynamic_instances[/code] (drawn every frame), [code]memory[/code] (bytes of the cache texture); running totals [code]total_hits[/code] and [code]total_refreshes[/code] since the cache was enabled. Other renderers return an empty dictionary or [code]enabled[/code] only.
+				[b]Note:[/b] Mariner fork (patch E10).
+			</description>
+		</method>
+		<method name="directional_shadow_cache_set_enabled">
+			<return type="void" />
+			<param index="0" name="enabled" type="bool" />
+			<description>
+				Enables the directional shadow cache (Forward+): the static shadow casters of each cascade are drawn once into a second depth texture the size of the directional shadow atlas and copied into the atlas every frame; dynamic casters are drawn on top. A cascade is redrawn into the cache when its projection, the light orientation (see [member ProjectSettings.rendering/lights_and_shadows/directional_shadow/cache_light_angle_threshold]) or its set of static casters changes. Overrides [member ProjectSettings.rendering/lights_and_shadows/directional_shadow/cache]; takes effect at the next frame.
+				[b]Note:[/b] Mariner fork (patch E10).
+			</description>
+		</method>
 		<method name="directional_soft_shadow_filter_set_quality">
 			<return type="void" />
 			<param index="0" name="quality" type="int" enum="RenderingServer.ShadowQuality" />
@@ -1362,6 +1425,68 @@
 				Sets the maximum layer to use if using Canvas background mode.
 			</description>
 		</method>
+		<method name="environment_set_color_grading">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="temperature" type="float" />
+			<param index="3" name="tint" type="float" />
+			<param index="4" name="shadows" type="Color" />
+			<param index="5" name="midtones" type="Color" />
+			<param index="6" name="highlights" type="Color" />
+			<param index="7" name="tonal_ranges" type="Vector4" />
+			<param index="8" name="slope" type="Vector3" />
+			<param index="9" name="offset" type="Vector3" />
+			<param index="10" name="power" type="Vector3" />
+			<param index="11" name="saturation" type="float" />
+			<param index="12" name="gamut_mapping" type="bool" />
+			<description>
+				Sets the color grading of the environment (Mariner F3). See [member Environment.color_grading_enabled] and the other [code]color_grading_*[/code] properties of [Environment].
+			</description>
+		</method>
+		<method name="environment_set_ddgi">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="probe_count" type="Vector3i" />
+			<param index="3" name="probe_spacing" type="float" />
+			<param index="4" name="rays_per_probe" type="int" />
+			<param index="5" name="hysteresis" type="float" />
+			<param index="6" name="energy" type="float" />
+			<param index="7" name="bias" type="float" />
+			<param index="8" name="specular_occlusion" type="float" />
+			<description>
+				Sets the dynamic diffuse global illumination probes (DDGI) of the environment, see [member Environment.ddgi_enabled], [member Environment.ddgi_probe_count], [member Environment.ddgi_probe_spacing], [member Environment.ddgi_rays_per_probe], [member Environment.ddgi_hysteresis], [member Environment.ddgi_energy], [member Environment.ddgi_bias] and [member Environment.ddgi_specular_occlusion].
+			</description>
+		</method>
+		<method name="environment_set_ddgi_channels">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="sky_energy" type="float" />
+			<param index="2" name="lights_energy" type="float" />
+			<description>
+				Sets the multipliers of the DDGI sky and lights channels, see [member Environment.ddgi_sky_energy] and [member Environment.ddgi_lights_energy].
+			</description>
+		</method>
+		<method name="environment_set_ddgi_sea">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="level" type="float" />
+			<param index="3" name="color" type="Color" />
+			<description>
+				Sets the endless sea plane seen by the DDGI probe rays, see [member Environment.ddgi_sea_enabled], [member Environment.ddgi_sea_level] and [member Environment.ddgi_sea_color].
+			</description>
+		</method>
+		<method name="environment_set_ddgi_update">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="probes_per_frame" type="int" />
+			<param index="2" name="relocation" type="bool" />
+			<description>
+				Sets how the DDGI probes of the environment are updated, see [member Environment.ddgi_probes_per_frame] and [member Environment.ddgi_relocation].
+			</description>
+		</method>
 		<method name="environment_set_fog">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />
@@ -1428,6 +1553,18 @@
 			<param index="3" name="firefly_clamp" type="float" />
 			<description>
 				Sets the accumulation parameters of the environment's path tracer, see [member Environment.pathtracing_accumulate], [member Environment.pathtracing_max_samples] and [member Environment.pathtracing_firefly_clamp].
+			</description>
+		</method>
+		<method name="environment_set_restir">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="candidates" type="int" />
+			<param index="3" name="spatial_samples" type="int" />
+			<param index="4" name="temporal" type="bool" />
+			<param index="5" name="denoise" type="bool" />
+			<description>
+				Sets the ReSTIR DI parameters of the environment. See [member Environment.restir_enabled], [member Environment.restir_candidates], [member Environment.restir_spatial_samples], [member Environment.restir_temporal] and [member Environment.restir_denoise].
 			</description>
 		</method>
 		<method name="environment_set_sdfgi">
@@ -1506,6 +1643,16 @@
 			<param index="9" name="ao_channel_affect" type="float" />
 			<description>
 				Sets the variables to be used with the screen-space ambient occlusion (SSAO) post-process effect. See [Environment] for more details.
+			</description>
+		</method>
+		<method name="environment_set_ssao_gtao">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="bent_normals" type="bool" />
+			<param index="3" name="thickness" type="float" default="0.5" />
+			<description>
+				Uses GTAO with optional bent normals instead of the default SSAO; [param thickness] is [member Environment.ssao_gtao_thickness]. See [member Environment.ssao_gtao] and [member Environment.ssao_bent_normals].
 			</description>
 		</method>
 		<method name="environment_set_ssao_quality">
@@ -1683,6 +1830,20 @@
 			<return type="Color" />
 			<description>
 				Returns the default clear color which is used when a specific clear color has not been selected. See also [method set_default_clear_color].
+			</description>
+		</method>
+		<method name="get_frame_generation_output_texture" qualifiers="const">
+			<return type="RID" />
+			<param index="0" name="window_id" type="int" default="0" />
+			<description>
+				Returns the [RenderingDevice] texture of the last frame generated by AMD FSR 3 frame generation for the window [param window_id] ([member Viewport.frame_generation] with [constant Viewport.SCALING_3D_MODE_FSR3]), in [constant RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT] at the window size, or an empty [RID]. Its values are already in the window's encoding (sRGB-encoded for SDR windows). Meant for diagnostics and tests; it is overwritten every frame.
+			</description>
+		</method>
+		<method name="get_frame_generation_presented_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="window_id" type="int" default="0" />
+			<description>
+				Returns how many frames AMD FSR 3 frame generation has generated and presented on the window [param window_id] since it was enabled there (about one per rendered frame while it runs; [code]0[/code] when it is off or unsupported). Can be used to show whether frame generation is active.
 			</description>
 		</method>
 		<method name="get_frame_setup_time_cpu" qualifiers="const">
@@ -1929,6 +2090,14 @@
 				Returns a dictionary of per-instance shader uniform names of the per-instance shader uniform from the specified 3D geometry instance. The returned dictionary is in PropertyInfo format, with the keys [code]name[/code], [code]class_name[/code], [code]type[/code], [code]hint[/code], [code]hint_string[/code] and [code]usage[/code]. Equivalent to [method GeometryInstance3D.get_instance_shader_parameter].
 			</description>
 		</method>
+		<method name="instance_geometry_is_gpu_static_active" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="instance" type="RID" />
+			<description>
+				Returns [code]true[/code] if the instance is drawn by a GPU static batch. Equivalent to [method GeometryInstance3D.is_gpu_static_active].
+				[b]Note:[/b] Mariner fork (patch E25a).
+			</description>
+		</method>
 		<method name="instance_geometry_set_cast_shadows_setting">
 			<return type="void" />
 			<param index="0" name="instance" type="RID" />
@@ -1944,6 +2113,15 @@
 			<param index="2" name="enabled" type="bool" />
 			<description>
 				Sets the [param flag] for a given [param instance] to [param enabled].
+			</description>
+		</method>
+		<method name="instance_geometry_set_gpu_static">
+			<return type="void" />
+			<param index="0" name="instance" type="RID" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				If [param enabled], the instance is drawn by a GPU static batch of its scenario when eligible. Equivalent to [member GeometryInstance3D.gpu_static].
+				[b]Note:[/b] Mariner fork (patch E25a).
 			</description>
 		</method>
 		<method name="instance_geometry_set_lightmap">
@@ -1980,6 +2158,15 @@
 				Sets a material that will override the material for all surfaces on the mesh associated with this instance. Equivalent to [member GeometryInstance3D.material_override].
 			</description>
 		</method>
+		<method name="instance_geometry_set_raytracing">
+			<return type="void" />
+			<param index="0" name="instance" type="RID" />
+			<param index="1" name="mode" type="int" enum="RenderingServer.RaytracingMode" />
+			<param index="2" name="opacity" type="float" />
+			<description>
+				Sets how the instance takes part in raytracing scenes and the share of rays it stops, see [member GeometryInstance3D.raytracing_mode] and [member GeometryInstance3D.raytracing_opacity].
+			</description>
+		</method>
 		<method name="instance_geometry_set_shader_parameter">
 			<return type="void" />
 			<param index="0" name="instance" type="RID" />
@@ -1987,6 +2174,23 @@
 			<param index="2" name="value" type="Variant" />
 			<description>
 				Sets the per-instance shader uniform on the specified 3D geometry instance. Equivalent to [method GeometryInstance3D.set_instance_shader_parameter].
+			</description>
+		</method>
+		<method name="instance_geometry_set_shadow_cache_mode">
+			<return type="void" />
+			<param index="0" name="instance" type="RID" />
+			<param index="1" name="mode" type="int" enum="RenderingServer.ShadowCacheMode" />
+			<description>
+				Sets how the instance takes part in the directional shadow cache. Equivalent to [member GeometryInstance3D.shadow_cache_mode].
+				[b]Note:[/b] Mariner fork (patch E10).
+			</description>
+		</method>
+		<method name="instance_geometry_set_shadow_translucent">
+			<return type="void" />
+			<param index="0" name="instance" type="RID" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				If [param enabled], the instance tints the light of the first shadowed directional light instead of shadowing it. See [member GeometryInstance3D.shadow_translucent].
 			</description>
 		</method>
 		<method name="instance_geometry_set_transparency">
@@ -2176,6 +2380,35 @@
 				If [code]true[/code], this directional light will blend between shadow map splits resulting in a smoother transition between them. Equivalent to [member DirectionalLight3D.directional_shadow_blend_splits].
 			</description>
 		</method>
+		<method name="light_directional_set_contact_shadow">
+			<return type="void" />
+			<param index="0" name="light" type="RID" />
+			<param index="1" name="length" type="float" />
+			<description>
+				Sets the length in meters of the screen space contact shadow rays of a directional light (0 disables them). Equivalent to [member DirectionalLight3D.contact_shadow_length].
+				[b]Note:[/b] Mariner fork (patch E11).
+			</description>
+		</method>
+		<method name="light_directional_set_object_shadow">
+			<return type="void" />
+			<param index="0" name="light" type="RID" />
+			<param index="1" name="layers" type="int" />
+			<param index="2" name="size" type="int" />
+			<param index="3" name="from_cascade" type="int" />
+			<description>
+				Sets the object shadow of a directional light: instances on [param layers] cast their shadow into a separate map of [param size] texels fitted to them, and are left out of the cascades from [param from_cascade] on. Equivalent to [member DirectionalLight3D.object_shadow_layers], [member DirectionalLight3D.object_shadow_size] and [member DirectionalLight3D.object_shadow_from_cascade].
+				[b]Note:[/b] Mariner fork (patch E10b).
+			</description>
+		</method>
+		<method name="light_directional_set_restir_shadow_mode">
+			<return type="void" />
+			<param index="0" name="light" type="RID" />
+			<param index="1" name="mode" type="int" />
+			<description>
+				Sets how the ray traced shadow of a directional light with [method light_set_restir] is used: [code]0[/code] in place of the shadow maps, [code]1[/code] only where the shadow maps fade out and beyond. Equivalent to [member DirectionalLight3D.restir_shadow_mode].
+				[b]Note:[/b] Mariner fork (patch E20d).
+			</description>
+		</method>
 		<method name="light_directional_set_shadow_mode">
 			<return type="void" />
 			<param index="0" name="light" type="RID" />
@@ -2273,6 +2506,14 @@
 			<param index="1" name="texture" type="RID" />
 			<description>
 				Sets the projector texture to use for the specified 3D light. Equivalent to [member Light3D.light_projector].
+			</description>
+		</method>
+		<method name="light_set_restir">
+			<return type="void" />
+			<param index="0" name="light" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<description>
+				If [param enable] is [code]true[/code], the direct light of this omni or spot light comes from ReSTIR DI with ray traced shadows; a shadowed directional light gets ray traced shadows in the opaque pass. Equivalent to [member Light3D.light_restir].
 			</description>
 		</method>
 		<method name="light_set_reverse_cull_face_mode">
@@ -2827,6 +3068,21 @@
 				Returns the RID of the mesh that will be used in drawing this multimesh.
 			</description>
 		</method>
+		<method name="multimesh_get_shadow_command_buffer_rd_rid" qualifiers="const">
+			<return type="RID" />
+			<param index="0" name="multimesh" type="RID" />
+			<description>
+				Returns the [RenderingDevice] buffer of the shadow pass draw commands of an indirect multimesh with [method multimesh_set_indirect_shadow_culling] enabled: one section per shadow pass of the last batch of shadow passes (the cascades of a directional light in order, ...), each with [code]5[/code] [code]uint32[/code] per surface; the second is the instance count drawn in that pass. For statistics; the buffer is replaced when it grows. Mariner engine patch E14b.
+			</description>
+		</method>
+		<method name="multimesh_get_view_command_buffer_rd_rid" qualifiers="const">
+			<return type="RID" />
+			<param index="0" name="multimesh" type="RID" />
+			<description>
+				Returns the [RenderingDevice] buffer of the camera draw commands of an indirect multimesh with [method multimesh_set_indirect_view_culling] enabled: [code]5[/code] [code]uint32[/code] per surface for each geometry instance using the multimesh, the second being the instance count the last scene render drew. For statistics; the buffer is replaced when it grows.
+				[b]Note:[/b] Mariner fork (patch E25a).
+			</description>
+		</method>
 		<method name="multimesh_get_visible_instances" qualifiers="const">
 			<return type="int" />
 			<param index="0" name="multimesh" type="RID" />
@@ -2959,6 +3215,25 @@
 			<param index="1" name="aabb" type="AABB" />
 			<description>
 				Sets the custom AABB for this MultiMesh resource.
+			</description>
+		</method>
+		<method name="multimesh_set_indirect_shadow_culling">
+			<return type="void" />
+			<param index="0" name="multimesh" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<description>
+				If [code]true[/code], shadow passes (directional cascades, spot lights, faces of omni lights) draw only the instances of this indirect multimesh (allocated with [code]use_indirect[/code]) whose bounding sphere touches the pass, not all of them in every pass. Before the shadows are drawn, the renderer copies those instances into a section per pass, from the instances and the instance count (of the first surface's command) the generator wrote: a generator that culls for the camera needs no change, or it may write all casters within the shadow distance and let each cascade take its own. The bounding sphere is that of the mesh's AABB (its custom AABB if set: leave room for vertex animation such as wind) times the instance's largest scale. 3D transforms only. Mariner engine patch E14b.
+			</description>
+		</method>
+		<method name="multimesh_set_indirect_view_culling">
+			<return type="void" />
+			<param index="0" name="multimesh" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<description>
+				If [param enable], the instances of an indirect multimesh are culled on the GPU for the camera of each scene render: before the depth pre-pass a compute pass copies the instances whose bounding sphere is inside the camera's side planes into a section of their own with draw commands of their own, which the camera's passes (depth pre-pass, opaque, motion vectors, late opaque, transparent) draw. Instances and count are read as for drawing (the first surface's command); the section holds the current transforms only (no per-instance motion vectors). Multiview renders draw all instances. Used by GPU static batches ([method instance_geometry_set_gpu_static]); combines with [method multimesh_set_indirect_shadow_culling].
+				When the scene render is occlusion culled (occluders with [member Viewport.use_occlusion_culling], or [member Viewport.use_hiz_occlusion_culling]), the compute pass also drops the instances the same occlusion buffer hides, with the CPU's test applied to each instance's box (unless the multimesh's instance ignores occlusion culling, see [constant INSTANCE_FLAG_IGNORE_OCCLUSION_CULLING]); with [code]rendering/occlusion_culling/jitter_projection[/code] an instance once seen stays drawn for some frames, as on the CPU.
+				If the mesh has LODs (and the viewport's [member Viewport.mesh_lod_threshold] is above 0), each instance is drawn with the LOD the renderer picks for a single instance (distance from the camera to its box, its largest scale, [member GeometryInstance3D.lod_bias]): the section is split by LOD, one draw per LOD and surface; the shadow sections ([method multimesh_set_indirect_shadow_culling]) too. Without view culling an indirect multimesh is always drawn with the full mesh (its draw commands hold the full mesh's index count).
+				[b]Note:[/b] Mariner fork (patches E25a, E25b, E25c). Forward+ only.
 			</description>
 		</method>
 		<method name="multimesh_set_mesh">
@@ -3351,6 +3626,14 @@
 				Sets the emission randomness ratio. This randomizes the emission of particles within their phase. Equivalent to [member GPUParticles3D.randomness].
 			</description>
 		</method>
+		<method name="particles_set_screen_space_collision">
+			<return type="void" />
+			<param index="0" name="particles" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<description>
+				If [param enable] is [code]true[/code], the particles collide with the depth buffer of the 3D view (screen space collision). Equivalent to [member GPUParticles3D.collision_screen_space].
+			</description>
+		</method>
 		<method name="particles_set_speed_scale">
 			<return type="void" />
 			<param index="0" name="particles" type="RID" />
@@ -3581,6 +3864,14 @@
 				The scenario is the 3D world that all the visual instances exist in.
 			</description>
 		</method>
+		<method name="scenario_get_gpu_static_info" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="scenario" type="RID" />
+			<description>
+				Returns the GPU static batches of the scenario: [code]batches[/code] (count), [code]instances[/code] (batched instances) and [code]multimeshes[/code] (the indirect multimesh of each batch, for [method multimesh_get_view_command_buffer_rd_rid] and statistics).
+				[b]Note:[/b] Mariner fork (patch E25a).
+			</description>
+		</method>
 		<method name="scenario_set_camera_attributes">
 			<return type="void" />
 			<param index="0" name="scenario" type="RID" />
@@ -3595,6 +3886,19 @@
 			<param index="1" name="compositor" type="RID" />
 			<description>
 				Sets the compositor ([param compositor]) that will be used with this scenario. See also [Compositor].
+			</description>
+		</method>
+		<method name="scenario_set_ddgi_volume">
+			<return type="void" />
+			<param index="0" name="scenario" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="transform" type="Transform3D" />
+			<param index="3" name="size" type="Vector3" />
+			<param index="4" name="probe_spacing" type="float" />
+			<param index="5" name="rays_per_probe" type="int" />
+			<param index="6" name="probes_per_frame" type="int" />
+			<description>
+				Sets the DDGI probe volume of the scenario in a moving frame, see [DDGIVolume3D]: [param transform] is the center and orientation of the box (scale is ignored), [param size] its extent. Used by viewports of the scenario whose [Environment] has [member Environment.ddgi_enabled]. One volume per scenario.
 			</description>
 		</method>
 		<method name="scenario_set_environment">
@@ -4139,6 +4443,13 @@
 				[b]Note:[/b] The equivalent node is [Viewport].
 			</description>
 		</method>
+		<method name="viewport_get_dynamic_resolution_scale" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="viewport" type="RID" />
+			<description>
+				Returns the 3D scale the viewport renders at (the dynamic resolution scale when it is enabled).
+			</description>
+		</method>
 		<method name="viewport_get_measured_render_time_cpu" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="viewport" type="RID" />
@@ -4318,12 +4629,30 @@
 				If [code]true[/code], the viewport's 3D elements are not rendered.
 			</description>
 		</method>
+		<method name="viewport_set_dynamic_resolution">
+			<return type="void" />
+			<param index="0" name="viewport" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="target_ms" type="float" />
+			<param index="3" name="min_scale" type="float" />
+			<description>
+				Makes the 3D resolution scale of the viewport follow its GPU time towards [param target_ms], between [param min_scale] and its scaling 3D scale. See [member Viewport.dynamic_resolution_enabled].
+			</description>
+		</method>
 		<method name="viewport_set_environment_mode">
 			<return type="void" />
 			<param index="0" name="viewport" type="RID" />
 			<param index="1" name="mode" type="int" enum="RenderingServer.ViewportEnvironmentMode" />
 			<description>
 				Sets the viewport's environment mode which allows enabling or disabling rendering of 3D environment over 2D canvas. When disabled, 2D will not be affected by the environment. When enabled, 2D will be affected by the environment if the environment background mode is [constant ENV_BG_CANVAS]. The default behavior is to inherit the setting from the viewport's parent. If the topmost parent is also set to [constant VIEWPORT_ENVIRONMENT_INHERIT], then the behavior will be the same as if it was set to [constant VIEWPORT_ENVIRONMENT_ENABLED].
+			</description>
+		</method>
+		<method name="viewport_set_force_motion_vectors">
+			<return type="void" />
+			<param index="0" name="viewport" type="RID" />
+			<param index="1" name="force_motion_vectors" type="bool" />
+			<description>
+				If [code]true[/code], the viewport renders motion vectors even without TAA, FSR 2 or DLSS, for [member CameraAttributes.motion_blur_enabled] (Mariner engine patch E15a: bound for scripts).
 			</description>
 		</method>
 		<method name="viewport_set_frame_generation">
@@ -4348,6 +4677,15 @@
 			<param index="1" name="transform" type="Transform2D" />
 			<description>
 				Sets the viewport's global transformation matrix.
+			</description>
+		</method>
+		<method name="viewport_set_hiz_occlusion_reference">
+			<return type="void" />
+			<param index="0" name="viewport" type="RID" />
+			<param index="1" name="reference" type="Transform3D" />
+			<param index="2" name="radius" type="float" />
+			<description>
+				Sets the reference frame of the camera's vehicle for [method viewport_set_use_hiz_occlusion_culling], see [member Viewport.hiz_occlusion_reference] and [member Viewport.hiz_occlusion_reference_radius].
 			</description>
 		</method>
 		<method name="viewport_set_measure_render_time">
@@ -4542,6 +4880,14 @@
 			<description>
 				If [code]true[/code], 2D rendering will use a high dynamic range (HDR) [code]RGBA16[/code] format framebuffer. Additionally, 2D rendering will be performed on linear values and will be converted using the appropriate transfer function immediately before blitting to the screen (if the Viewport is attached to the screen).
 				Practically speaking, this means that the end result of the Viewport will not be clamped to the [code]0-1[/code] range and can be used in 3D rendering without color encoding adjustments. This allows 2D rendering to take advantage of effects requiring high dynamic range (e.g. 2D glow) as well as substantially improves the appearance of effects requiring highly detailed gradients. This setting has the same effect as [member Viewport.use_hdr_2d].
+			</description>
+		</method>
+		<method name="viewport_set_use_hiz_occlusion_culling">
+			<return type="void" />
+			<param index="0" name="viewport" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<description>
+				If [code]true[/code], the viewport culls objects hidden behind what it rendered in earlier frames, see [member Viewport.use_hiz_occlusion_culling].
 			</description>
 		</method>
 		<method name="viewport_set_use_occlusion_culling">
@@ -5443,7 +5789,11 @@
 			Use NVIDIA DLSS Super Resolution (through NVIDIA Streamline) for the viewport's 3D buffer. The amount of scaling can be set using [member Viewport.scaling_3d_scale]: DLSS picks the closest of its quality modes, e.g. [code]1.0[/code] - DLAA (antialiasing only), [code]0.66[/code] - Quality, [code]0.58[/code] - Balanced, [code]0.5[/code] - Performance, [code]0.33[/code] - Ultra Performance. Values greater than [code]1.0[/code] are not supported and bilinear downsampling will be used instead. Like FSR 2, it is a temporal upscaler, so TAA is disabled internally.
 			[b]Note:[/b] Only available in custom builds with Streamline support, on Windows with the Forward+ renderer (D3D12 or Vulkan), an NVIDIA RTX GPU and the Streamline runtime DLLs ([code]sl.interposer.dll[/code], [code]sl.common.dll[/code], [code]sl.dlss.dll[/code], [code]nvngx_dlss.dll[/code]) next to the executable. Use [method Streamline.get_capability] with [constant Streamline.STREAMLINE_CAPABILITY_DLSS] to check availability. When unavailable, bilinear scaling is used instead.
 		</constant>
-		<constant name="VIEWPORT_SCALING_3D_MODE_MAX" value="7" enum="ViewportScaling3DMode">
+		<constant name="VIEWPORT_SCALING_3D_MODE_FSR3" value="7" enum="ViewportScaling3DMode">
+			Use AMD FidelityFX Super Resolution 3.1 (the FSR 3.1.4 upscaler of the FidelityFX SDK 1.1.4) for the viewport's 3D buffer. The amount of scaling can be set using [member Viewport.scaling_3d_scale], e.g. [code]0.67[/code] - Quality, [code]0.59[/code] - Balanced, [code]0.5[/code] - Performance, [code]0.33[/code] - Ultra Performance; [code]1.0[/code] gives native AA. Values greater than [code]1.0[/code] are not supported and bilinear downsampling will be used instead. Compared to FSR 2.2 it handles thin and moving detail, particles and disocclusions better (less ghosting and shimmering) at a similar cost. [member Viewport.fsr_sharpness] controls its sharpening pass. Like FSR 2, it is a temporal upscaler, so TAA is disabled internally.
+			[b]Note:[/b] Only available with the Forward+ renderer; the shaders are compiled the first time a viewport uses this mode. With other renderers, bilinear scaling is used instead.
+		</constant>
+		<constant name="VIEWPORT_SCALING_3D_MODE_MAX" value="8" enum="ViewportScaling3DMode">
 			Represents the size of the [enum ViewportScaling3DMode] enum.
 		</constant>
 		<constant name="VIEWPORT_UPDATE_DISABLED" value="0" enum="ViewportUpdateMode">
@@ -5852,6 +6202,9 @@
 		<constant name="ENV_TONE_MAPPER_AGX" value="4" enum="EnvironmentToneMapper">
 			Uses an adjustable film-like tonemapping curve and desaturates bright values for a more realistic appearance. Better than other tonemappers at maintaining the hue of colors as they become brighter. The slowest tonemapping option.
 		</constant>
+		<constant name="ENV_TONE_MAPPER_GT7" value="5" enum="EnvironmentToneMapper">
+			The Gran Turismo 7 tonemapper. See [constant Environment.TONE_MAPPER_GT7].
+		</constant>
 		<constant name="ENV_SSR_ROUGHNESS_QUALITY_DISABLED" value="0" enum="EnvironmentSSRRoughnessQuality">
 			Lowest quality of roughness filter for screen-space reflections. Rough materials will not have blurrier screen-space reflections compared to smooth (non-rough) materials. This is the fastest option.
 		</constant>
@@ -6070,6 +6423,24 @@
 		</constant>
 		<constant name="SHADOW_CASTING_SETTING_SHADOWS_ONLY" value="3" enum="ShadowCastingSetting">
 			Only render the shadows from the object. The object itself will not be drawn.
+		</constant>
+		<constant name="SHADOW_CACHE_MODE_AUTO" value="0" enum="ShadowCacheMode">
+			The instance is cached once its transform and base stayed unchanged for [member ProjectSettings.rendering/lights_and_shadows/directional_shadow/cache_static_after_frames] frames, unless it changes its own depth: skinning or blend shapes, [code]TIME[/code] in the vertex shader (or in the fragment shader with [code]discard[/code]), an indirect multimesh, particles.
+		</constant>
+		<constant name="SHADOW_CACHE_MODE_STATIC" value="1" enum="ShadowCacheMode">
+			The instance is always cached, also when it animates its own depth (its shadow then shows the state of the last cache refresh).
+		</constant>
+		<constant name="SHADOW_CACHE_MODE_DYNAMIC" value="2" enum="ShadowCacheMode">
+			The instance is never cached: it is drawn into the directional shadow every frame.
+		</constant>
+		<constant name="RAYTRACING_MODE_DEFAULT" value="0" enum="RaytracingMode">
+			Drawn and in the raytracing scene.
+		</constant>
+		<constant name="RAYTRACING_MODE_ONLY" value="1" enum="RaytracingMode">
+			Only in the raytracing scene: not drawn, no shadow maps.
+		</constant>
+		<constant name="RAYTRACING_MODE_DISABLED" value="2" enum="RaytracingMode">
+			Drawn, not in the raytracing scene.
 		</constant>
 		<constant name="VISIBILITY_RANGE_FADE_DISABLED" value="0" enum="VisibilityRangeFadeMode" keywords="LOD_FADE_DISABLED">
 			Disable visibility range fading for the given instance.

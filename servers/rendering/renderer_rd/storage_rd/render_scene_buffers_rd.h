@@ -552,4 +552,95 @@ public:
 	virtual uint32_t get_pathtracing_sample_count() const override { return pathtracing_published_samples.get(); }
 	virtual void reset_pathtracing() override { pathtracing_reset_requested.set(); }
 	bool consume_pathtracing_reset() { return pathtracing_reset_requested.clear_if_set(); }
+
+	/* Dynamic diffuse GI probes (Mariner E12, Environment.ddgi_enabled), owned by the Forward+ renderer. */
+
+	enum {
+		DDGI_VOLUME_WORLD = 0, // Grid around the camera (Environment).
+		DDGI_VOLUME_LOCAL = 1, // Grid in the frame of a DDGIVolume3D (the ship, DG2).
+		DDGI_VOLUME_MAX = 2,
+	};
+
+	struct DDGIVolume {
+		RID irradiance; // RGBA16F atlas: 8x8 octahedral irradiance (+1 texel border) per probe, a = probe active. Sky channel.
+		RID irradiance_lights; // The same for the lights channel (sun, lamps, emission; DG3).
+		RID distance; // RG16F atlas: 16x16 octahedral mean distance and mean squared distance (+1 texel border).
+		RID rays; // Storage buffer: radiance (half rgb) and signed hit distance (half) per ray.
+		RID probe_state; // Storage buffer per probe slot: ivec4 (cell, frames since reset), vec4 (offset).
+		RID probe_data; // RGBA16F, one texel per probe slot: offset from the cell (in spacings) for the scene shader.
+		RID slot_list; // Storage buffer: the probe slots updated this frame.
+		Vector3i probe_count;
+		Vector3i grid_min; // Cell of the first probe (the world grid follows the camera; 0 for the local grid).
+		bool has_grid = false;
+		Vector3 spacing;
+		int rays_per_probe = 0;
+		uint32_t round_robin = 0; // Next slot of the round robin update (probes per frame).
+		bool active = false; // Updated this frame, scene shaders sample it.
+	};
+
+	struct DDGI {
+		DDGIVolume volumes[DDGI_VOLUME_MAX];
+		RID params_buffer; // Parameters of both volumes (scene shader layout).
+		RID light_buffer;
+		uint32_t frame_index = 0;
+		uint64_t frame = UINT64_MAX; // Frame the probes were last updated in.
+		bool active = false; // Any volume updated this frame.
+	} ddgi;
+
+	void free_ddgi_volume(uint32_t p_volume);
+	void free_ddgi();
+
+	/* Mariner E20: ReSTIR DI state of the viewport (the textures are named textures of the "mariner_restir" context). */
+	struct Restir {
+		RID light_buffer; // RestirDI::Light[].
+		RID cell_buffer; // uvec2 (offset, count) per grid cell.
+		RID index_buffer; // Light indices of the cells.
+		RID remap_buffer; // Light index of the previous frame -> index of this frame.
+		RID params_buffer; // RestirDI::Params (std140).
+		uint32_t light_capacity = 0;
+		uint32_t cell_capacity = 0;
+		uint32_t index_capacity = 0;
+		uint32_t remap_capacity = 0;
+		LocalVector<uint64_t> light_ids; // Light instance of each light index of the last frame.
+		Projection prev_world_to_clip; // As rasterized.
+		Size2i size;
+		uint32_t parity = 0;
+		uint64_t frame = UINT64_MAX; // Frame of the last update.
+		bool history_valid = false;
+		RID diffuse; // Results of this frame for the opaque pass.
+		RID specular;
+		RID shadow_mask; // Mariner E20b: ray traced shadows of directional lights (r, g); invalid: none this frame.
+		RID shadow_params_buffer; // RestirDI::ShadowParams (std140).
+		bool shadow_history_valid = false; // Mariner E20b: the shadow history images hold the last frame.
+		uint32_t shadow_count = 0; // Mariner E20b: directional lights with ray traced shadows in the last update.
+		// Mariner E20c: the same for the late opaque surfaces (water), after their depth pre-pass.
+		RID shadow_late_mask; // Invalid: none this frame.
+		RID late_shadow_params_buffer;
+		uint32_t late_parity = 0;
+		uint64_t late_frame = UINT64_MAX;
+		bool late_shadow_history_valid = false;
+	} restir;
+
+	void free_restir();
+
+	// Mariner E13: read backs of the reduced depth (RendererSceneHiZOcclusion), several in flight.
+	struct HiZReadback {
+		RID buffer;
+		Size2i size;
+		Transform3D cam_transform;
+		Projection projection;
+		Transform3D reference;
+		float reference_radius = 0.0;
+		uint64_t frame = 0;
+		bool pending = false;
+	};
+	static constexpr uint32_t HIZ_READBACK_SLOTS = 4;
+	HiZReadback hiz_readback[HIZ_READBACK_SLOTS];
+
+	// A free slot with a buffer for p_size cells, or -1 when all are in flight.
+	int hiz_readback_acquire(const Size2i &p_size);
+	// Starts the read back of the slot (after the reduction was recorded); the camera is that of the frame.
+	void hiz_readback_request(int p_slot, const Transform3D &p_cam_transform, const Projection &p_projection, uint64_t p_frame);
+	void _hiz_readback_done(const PackedByteArray &p_data, int p_slot);
+	void free_hiz_readback();
 };

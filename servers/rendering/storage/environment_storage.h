@@ -30,11 +30,29 @@
 
 #pragma once
 
+#include "core/math/vector4.h"
 #include "core/templates/rid_owner.h"
 #include "servers/rendering/rendering_server_enums.h"
 
 class RendererEnvironmentStorage {
 public:
+	// Mariner F3: color grading in scene-linear light before the tone mapper (white balance, shadows / midtones /
+	// highlights, ASC CDL in ACEScct, saturation) and gamut mapping after it.
+	struct ColorGrading {
+		bool enabled = false;
+		float temperature = 6500.0; // Kelvin; the white point that becomes neutral (camera white balance).
+		float tint = 0.0; // -1..1, positive towards magenta.
+		Color shadows = Color(1, 1, 1);
+		Color midtones = Color(1, 1, 1);
+		Color highlights = Color(1, 1, 1);
+		Vector4 tonal_ranges = Vector4(0.0, 0.333, 0.55, 1.0); // Shadows fade out over x..y, highlights fade in over z..w (linear luminance).
+		Vector3 slope = Vector3(1, 1, 1);
+		Vector3 offset = Vector3(0, 0, 0);
+		Vector3 power = Vector3(1, 1, 1);
+		float saturation = 1.0;
+		bool gamut_mapping = true;
+	};
+
 	union TonemapParameters {
 		// Shader vec4:
 		float tonemapper_params[4];
@@ -56,7 +74,17 @@ public:
 			float awp_slope;
 			float awp_w;
 		};
+
+		// Mariner E23, Gran Turismo 7: display peak in GT7 frame buffer units (1.0 = 100 cd/m^2) and its ICtCp
+		// intensity.
+		struct {
+			float gt7_peak;
+			float gt7_peak_intensity;
+		};
 	};
+
+	// Mariner E23: GT7 curve constants for an output max value (1.0 for SDR; HDR output: peak / paper white).
+	static void gt7_tonemap_parameters(float p_output_max_value, float &r_peak, float &r_peak_intensity);
 
 private:
 	static RendererEnvironmentStorage *singleton;
@@ -152,6 +180,17 @@ private:
 		float ssao_sharpness = 0.98;
 		float ssao_direct_light_affect = 0.0;
 		float ssao_ao_channel_affect = 0.0;
+		bool ssao_gtao = false; // Mariner E18.
+		bool ssao_bent_normals = true;
+		ColorGrading color_grading; // Mariner F3.
+		float ssao_gtao_thickness = 0.5; // Mariner F1: 0 = horizon-based GTAO.
+
+		// Mariner E20: ReSTIR DI.
+		bool restir_enabled = false;
+		int restir_candidates = 8;
+		int restir_spatial_samples = 3;
+		bool restir_temporal = true;
+		bool restir_denoise = true;
 
 		// SSIL
 		bool ssil_enabled = false;
@@ -189,6 +228,23 @@ private:
 		bool pathtracing_accumulate = true;
 		int pathtracing_max_samples = 0;
 		float pathtracing_firefly_clamp = 0.0;
+
+		// Dynamic diffuse GI probes (Mariner E12).
+		bool ddgi_enabled = false;
+		Vector3i ddgi_probe_count = Vector3i(24, 8, 24);
+		float ddgi_probe_spacing = 2.0;
+		int ddgi_rays_per_probe = 128;
+		float ddgi_hysteresis = 0.97;
+		float ddgi_energy = 1.0;
+		float ddgi_bias = 0.3;
+		float ddgi_specular_occlusion = 1.0;
+		int ddgi_probes_per_frame = 0; // 0: all.
+		bool ddgi_relocation = true;
+		float ddgi_sky_energy = 1.0;
+		float ddgi_lights_energy = 1.0;
+		bool ddgi_sea = false;
+		float ddgi_sea_level = 0.0;
+		Color ddgi_sea_color = Color(0.02, 0.08, 0.1);
 	};
 
 	mutable RID_Owner<Environment, true> environment_owner;
@@ -312,6 +368,22 @@ public:
 	float environment_get_ssao_sharpness(RID p_env) const;
 	float environment_get_ssao_direct_light_affect(RID p_env) const;
 	float environment_get_ssao_ao_channel_affect(RID p_env) const;
+	void environment_set_ssao_gtao(RID p_env, bool p_enable, bool p_bent_normals, float p_thickness = 0.5);
+	bool environment_get_ssao_gtao(RID p_env) const;
+
+	// Mariner E20.
+	void environment_set_restir(RID p_env, bool p_enable, int p_candidates, int p_spatial_samples, bool p_temporal, bool p_denoise);
+	bool environment_get_restir_enabled(RID p_env) const;
+	int environment_get_restir_candidates(RID p_env) const;
+	int environment_get_restir_spatial_samples(RID p_env) const;
+	bool environment_get_restir_temporal(RID p_env) const;
+	bool environment_get_restir_denoise(RID p_env) const;
+	bool environment_get_ssao_bent_normals(RID p_env) const;
+	float environment_get_ssao_gtao_thickness(RID p_env) const;
+
+	// Mariner F3.
+	void environment_set_color_grading(RID p_env, bool p_enable, float p_temperature, float p_tint, const Color &p_shadows, const Color &p_midtones, const Color &p_highlights, const Vector4 &p_tonal_ranges, const Vector3 &p_slope, const Vector3 &p_offset, const Vector3 &p_power, float p_saturation, bool p_gamut_mapping);
+	ColorGrading environment_get_color_grading(RID p_env) const;
 
 	// SSIL
 	void environment_set_ssil(RID p_env, bool p_enable, float p_radius, float p_intensity, float p_sharpness, float p_normal_rejection);
@@ -354,4 +426,28 @@ public:
 	bool environment_get_pathtracing_accumulate(RID p_env) const;
 	int environment_get_pathtracing_max_samples(RID p_env) const;
 	float environment_get_pathtracing_firefly_clamp(RID p_env) const;
+
+	// Dynamic diffuse GI probes (Mariner E12)
+	static Vector3i ddgi_clamp_probe_count(const Vector3i &p_count);
+	// Probes per axis of a DDGI volume box (DG2): about one per spacing, corners included, within the atlas limits.
+	static Vector3i ddgi_volume_probe_count(const Vector3 &p_size, float p_spacing);
+	void environment_set_ddgi(RID p_env, bool p_enable, const Vector3i &p_probe_count, float p_probe_spacing, int p_rays_per_probe, float p_hysteresis, float p_energy, float p_bias, float p_specular_occlusion);
+	bool environment_get_ddgi_enabled(RID p_env) const;
+	Vector3i environment_get_ddgi_probe_count(RID p_env) const;
+	float environment_get_ddgi_probe_spacing(RID p_env) const;
+	int environment_get_ddgi_rays_per_probe(RID p_env) const;
+	float environment_get_ddgi_hysteresis(RID p_env) const;
+	float environment_get_ddgi_energy(RID p_env) const;
+	float environment_get_ddgi_bias(RID p_env) const;
+	float environment_get_ddgi_specular_occlusion(RID p_env) const;
+	void environment_set_ddgi_update(RID p_env, int p_probes_per_frame, bool p_relocation);
+	int environment_get_ddgi_probes_per_frame(RID p_env) const;
+	bool environment_get_ddgi_relocation(RID p_env) const;
+	void environment_set_ddgi_channels(RID p_env, float p_sky_energy, float p_lights_energy);
+	float environment_get_ddgi_sky_energy(RID p_env) const;
+	float environment_get_ddgi_lights_energy(RID p_env) const;
+	void environment_set_ddgi_sea(RID p_env, bool p_enable, float p_level, const Color &p_color);
+	bool environment_get_ddgi_sea(RID p_env) const;
+	float environment_get_ddgi_sea_level(RID p_env) const;
+	Color environment_get_ddgi_sea_color(RID p_env) const;
 };

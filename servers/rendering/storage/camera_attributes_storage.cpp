@@ -85,6 +85,95 @@ void RendererCameraAttributes::camera_attributes_set_dof_blur(RID p_camera_attri
 	cam_attributes->dof_blur_amount = p_amount;
 }
 
+void RendererCameraAttributes::camera_attributes_set_motion_blur(RID p_camera_attributes, bool p_enable, float p_intensity, float p_camera_motion, float p_max_length) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL(cam_attributes);
+	cam_attributes->motion_blur_enabled = p_enable;
+	cam_attributes->motion_blur_intensity = CLAMP(p_intensity, 0.0f, 4.0f);
+	cam_attributes->motion_blur_camera_motion = CLAMP(p_camera_motion, 0.0f, 1.0f);
+	cam_attributes->motion_blur_max_length = CLAMP(p_max_length, 0.0f, 0.25f);
+}
+
+float RendererCameraAttributes::camera_attributes_get_motion_blur_intensity(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL_V(cam_attributes, 0.0);
+	return cam_attributes->motion_blur_intensity;
+}
+
+float RendererCameraAttributes::camera_attributes_get_motion_blur_camera_motion(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL_V(cam_attributes, 1.0);
+	return cam_attributes->motion_blur_camera_motion;
+}
+
+float RendererCameraAttributes::camera_attributes_get_motion_blur_max_length(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL_V(cam_attributes, 0.0);
+	return cam_attributes->motion_blur_max_length;
+}
+
+void RendererCameraAttributes::camera_attributes_set_lens_flare(RID p_camera_attributes, bool p_enable, float p_intensity, float p_threshold, int p_ghosts, float p_ghost_spacing, float p_halo_width, float p_chromatic, float p_sun_streaks, int p_streak_count) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL(cam_attributes);
+	cam_attributes->lens_flare_enabled = p_enable;
+	cam_attributes->lens_flare_intensity = MAX(p_intensity, 0.0f);
+	cam_attributes->lens_flare_threshold = MAX(p_threshold, 0.0f);
+	cam_attributes->lens_flare_ghosts = CLAMP(p_ghosts, 0, 8);
+	cam_attributes->lens_flare_ghost_spacing = CLAMP(p_ghost_spacing, 0.0f, 1.0f);
+	cam_attributes->lens_flare_halo_width = CLAMP(p_halo_width, 0.0f, 1.0f);
+	cam_attributes->lens_flare_chromatic = CLAMP(p_chromatic, 0.0f, 0.1f);
+	cam_attributes->lens_flare_sun_streaks = MAX(p_sun_streaks, 0.0f);
+	cam_attributes->lens_flare_streak_count = CLAMP(p_streak_count, 2, 16);
+}
+
+void RendererCameraAttributes::camera_attributes_set_lens_dirt(RID p_camera_attributes, RID p_texture, float p_intensity) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL(cam_attributes);
+	cam_attributes->lens_dirt_texture = p_texture;
+	cam_attributes->lens_dirt_intensity = MAX(p_intensity, 0.0f);
+}
+
+bool RendererCameraAttributes::camera_attributes_get_lens_flare(RID p_camera_attributes, LensFlare &r_lens_flare) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	if (!cam_attributes || !cam_attributes->lens_flare_enabled) {
+		return false;
+	}
+	r_lens_flare.intensity = cam_attributes->lens_flare_intensity;
+	r_lens_flare.threshold = cam_attributes->lens_flare_threshold;
+	r_lens_flare.ghosts = cam_attributes->lens_flare_ghosts;
+	r_lens_flare.ghost_spacing = cam_attributes->lens_flare_ghost_spacing;
+	r_lens_flare.halo_width = cam_attributes->lens_flare_halo_width;
+	r_lens_flare.chromatic = cam_attributes->lens_flare_chromatic;
+	r_lens_flare.sun_streaks = cam_attributes->lens_flare_sun_streaks;
+	r_lens_flare.streak_count = cam_attributes->lens_flare_streak_count;
+	r_lens_flare.dirt_texture = cam_attributes->lens_dirt_texture;
+	r_lens_flare.dirt_intensity = cam_attributes->lens_dirt_intensity;
+	return r_lens_flare.intensity > 0.0f || r_lens_flare.sun_streaks > 0.0f;
+}
+
+void RendererCameraAttributes::camera_attributes_set_image_effects(RID p_camera_attributes, float p_chromatic_aberration, float p_lens_distortion, float p_film_grain, float p_film_grain_size, float p_sharpening) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL(cam_attributes);
+	cam_attributes->chromatic_aberration = CLAMP(p_chromatic_aberration, 0.0f, 1.0f);
+	cam_attributes->lens_distortion = CLAMP(p_lens_distortion, -1.0f, 1.0f);
+	cam_attributes->film_grain = CLAMP(p_film_grain, 0.0f, 1.0f);
+	cam_attributes->film_grain_size = CLAMP(p_film_grain_size, 1.0f, 3.99f);
+	cam_attributes->sharpening = CLAMP(p_sharpening, 0.0f, 1.0f);
+}
+
+RendererCameraAttributes::ImageEffects RendererCameraAttributes::camera_attributes_get_image_effects(RID p_camera_attributes) const {
+	ImageEffects effects;
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	if (cam_attributes) {
+		effects.chromatic_aberration = cam_attributes->chromatic_aberration;
+		effects.lens_distortion = cam_attributes->lens_distortion;
+		effects.film_grain = cam_attributes->film_grain;
+		effects.film_grain_size = cam_attributes->film_grain_size;
+		effects.sharpening = cam_attributes->sharpening;
+	}
+	return effects;
+}
+
 bool RendererCameraAttributes::camera_attributes_get_dof_far_enabled(RID p_camera_attributes) {
 	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
 	ERR_FAIL_NULL_V(cam_attributes, false);

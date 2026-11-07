@@ -193,6 +193,10 @@ layout(set = 0, binding = 2) uniform sampler shadow_sampler;
 #define SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL (1 << 1)
 #define SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR (1 << 2)
 #define SCREEN_SPACE_EFFECTS_FLAGS_RESOLVE_SSR (1 << 3)
+#define SCREEN_SPACE_EFFECTS_FLAGS_USE_GTAO (1 << 4) // Mariner E18: ao_buffer holds the world bent normal (rgb) and the visibility (a).
+#define SCREEN_SPACE_EFFECTS_FLAGS_GTAO_BENT_NORMALS (1 << 5)
+#define SCREEN_SPACE_EFFECTS_FLAGS_USE_RESTIR (1 << 6) // Mariner E20: Light3D.light_restir lights come from restir_diffuse / restir_specular.
+#define SCREEN_SPACE_EFFECTS_FLAGS_USE_RT_SHADOW (1 << 7) // Mariner E20b/c: shadows of Light3D.light_restir directional lights from restir_shadow_mask.
 
 layout(set = 0, binding = 3, std430) restrict readonly buffer OmniLights {
 	LightData data[];
@@ -479,6 +483,40 @@ layout(set = 1, binding = 34) uniform texture2D ssil_buffer;
 layout(set = 1, binding = 35) uniform texture2D ssr_buffer;
 layout(set = 1, binding = 36) uniform texture2D ssr_mip_level_buffer;
 #endif // USE_MULTIVIEW
+
+layout(set = 1, binding = 37) uniform texture2D directional_object_shadow; // Mariner E10b.
+layout(set = 1, binding = 38) uniform texture2D contact_shadow_mask; // Mariner E11 (white outside the opaque pass).
+
+// Mariner E12: DDGI probes (parameters with DDGI_FLAG_ACTIVE clear when the environment has none this frame).
+#include "../ddgi_data_inc.glsl"
+layout(set = 1, binding = 39, std140) uniform DDGIBlock {
+	DDGIData volumes[DDGI_VOLUME_COUNT];
+}
+ddgi_block;
+layout(set = 1, binding = 40) uniform texture2D ddgi_irradiance_world;
+layout(set = 1, binding = 41) uniform texture2D ddgi_distance_world;
+layout(set = 1, binding = 42) uniform texture2D ddgi_probe_data_world;
+layout(set = 1, binding = 43) uniform texture2D ddgi_irradiance_lights_world;
+layout(set = 1, binding = 44) uniform texture2D ddgi_irradiance_local;
+layout(set = 1, binding = 45) uniform texture2D ddgi_distance_local;
+layout(set = 1, binding = 46) uniform texture2D ddgi_probe_data_local;
+layout(set = 1, binding = 47) uniform texture2D ddgi_irradiance_lights_local;
+layout(set = 1, binding = 48) uniform texture2D translucent_shadow_color; // Mariner E21: transmitted colour of the nearest translucent caster.
+layout(set = 1, binding = 49) uniform texture2D translucent_shadow_distance; // Mariner E21: its distance along the light.
+layout(set = 1, binding = 50) uniform texture2D restir_diffuse; // Mariner E20: demodulated diffuse light of the ReSTIR lights.
+layout(set = 1, binding = 51) uniform texture2D restir_specular; // Mariner E20: specular without Fresnel (rgb), Fresnel weight (a).
+layout(set = 1, binding = 52) uniform texture2D restir_shadow_mask; // Mariner E20b: ray traced shadows of directional lights (r, g).
+#define DDGI_VOLUMES ddgi_block.volumes
+#define DDGI_IRRADIANCE_0 ddgi_irradiance_world
+#define DDGI_DISTANCE_0 ddgi_distance_world
+#define DDGI_PROBE_DATA_0 ddgi_probe_data_world
+#define DDGI_IRRADIANCE_1 ddgi_irradiance_local
+#define DDGI_DISTANCE_1 ddgi_distance_local
+#define DDGI_PROBE_DATA_1 ddgi_probe_data_local
+#define DDGI_IRRADIANCE_LIGHTS_0 ddgi_irradiance_lights_world
+#define DDGI_IRRADIANCE_LIGHTS_1 ddgi_irradiance_lights_local
+#define DDGI_SAMPLER SAMPLER_LINEAR_CLAMP
+#include "../ddgi_sample_inc.glsl"
 
 #endif
 

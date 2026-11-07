@@ -144,9 +144,13 @@ private:
 	LocalVector<RT_LightData> light_data;
 
 	void _initialize(RendererSceneRenderRD *p_owner);
-	uint32_t _gather_lights(RendererSceneRenderRD *p_owner, const RenderDataRD *p_render_data, uint32_t &r_sun_index);
 
 public:
+	// Lights for ray traced shading: directional lights first, then the strongest positional lights (at most
+	// RT_LIGHTS_MAX). Positional lights come from the raytracing range of the viewport (RenderDataRD::rt_lights, also
+	// off-screen; Mariner E12) when there is one, else from the lights culled for the view.
+	static uint32_t gather_lights(RendererSceneRenderRD *p_owner, const RenderDataRD *p_render_data, LocalVector<RT_LightData> &r_lights, uint32_t &r_sun_index);
+
 	static bool is_supported();
 	// Whether this frame of the viewport can be path traced (Forward+ main view, raytracing scene built this frame,
 	// no MSAA / multiview, storage-capable RGBA16F internal texture). Call after the raytracing scene was built.

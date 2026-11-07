@@ -56,6 +56,32 @@ private:
 		float dof_blur_near_distance = 2;
 		float dof_blur_near_transition = 1;
 		float dof_blur_amount = 0.1;
+
+		// Mariner E15a: motion blur.
+		bool motion_blur_enabled = false;
+		float motion_blur_intensity = 0.5; // Fraction of the motion of one frame (shutter angle / 360).
+		float motion_blur_camera_motion = 1.0; // Weight of the camera's own motion (0: objects only).
+		float motion_blur_max_length = 0.04; // Longest blur, fraction of the view height.
+
+		// Mariner E15b: lens flare and lens dirt.
+		bool lens_flare_enabled = false;
+		float lens_flare_intensity = 0.02; // Of the light above the threshold, for the ghosts and the halo.
+		float lens_flare_threshold = 4.0; // Luminance (scene linear) where the flare starts.
+		int lens_flare_ghosts = 4;
+		float lens_flare_ghost_spacing = 0.35;
+		float lens_flare_halo_width = 0.45;
+		float lens_flare_chromatic = 0.006;
+		float lens_flare_sun_streaks = 1.0; // Starburst of the sun.
+		int lens_flare_streak_count = 6;
+		RID lens_dirt_texture;
+		float lens_dirt_intensity = 1.0;
+
+		// Mariner E23: image effects (Forward+).
+		float chromatic_aberration = 0.0; // Red/blue offset at the corners, 1.0 = 2 % of the image.
+		float lens_distortion = 0.0; // Barrel > 0, pincushion < 0.
+		float film_grain = 0.0;
+		float film_grain_size = 1.5; // Pixels.
+		float sharpening = 0.0; // AMD FidelityFX CAS, 1.0 = its maximum.
 	};
 
 	RSE::DOFBlurQuality dof_blur_quality = RSE::DOF_BLUR_QUALITY_MEDIUM;
@@ -66,6 +92,29 @@ private:
 	mutable RID_Owner<CameraAttributes, true> camera_attributes_owner;
 
 public:
+	// Mariner E15b: lens flare settings of a camera attributes.
+	struct LensFlare {
+		float intensity;
+		float threshold;
+		int ghosts;
+		float ghost_spacing;
+		float halo_width;
+		float chromatic;
+		float sun_streaks;
+		int streak_count;
+		RID dirt_texture;
+		float dirt_intensity;
+	};
+
+	// Mariner E23: image effects of a camera attributes.
+	struct ImageEffects {
+		float chromatic_aberration = 0.0;
+		float lens_distortion = 0.0;
+		float film_grain = 0.0;
+		float film_grain_size = 1.5;
+		float sharpening = 0.0;
+	};
+
 	static RendererCameraAttributes *get_singleton() { return singleton; }
 
 	RendererCameraAttributes();
@@ -89,6 +138,25 @@ public:
 	float camera_attributes_get_dof_near_distance(RID p_camera_attributes);
 	float camera_attributes_get_dof_near_transition(RID p_camera_attributes);
 	float camera_attributes_get_dof_blur_amount(RID p_camera_attributes);
+
+	// Mariner E15a.
+	void camera_attributes_set_motion_blur(RID p_camera_attributes, bool p_enable, float p_intensity, float p_camera_motion, float p_max_length);
+	float camera_attributes_get_motion_blur_intensity(RID p_camera_attributes);
+	float camera_attributes_get_motion_blur_camera_motion(RID p_camera_attributes);
+	float camera_attributes_get_motion_blur_max_length(RID p_camera_attributes);
+	_FORCE_INLINE_ bool camera_attributes_uses_motion_blur(RID p_camera_attributes) {
+		CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+		return cam_attributes && cam_attributes->motion_blur_enabled && cam_attributes->motion_blur_intensity > 0.0 && cam_attributes->motion_blur_max_length > 0.0;
+	}
+
+	// Mariner E15b.
+	void camera_attributes_set_lens_flare(RID p_camera_attributes, bool p_enable, float p_intensity, float p_threshold, int p_ghosts, float p_ghost_spacing, float p_halo_width, float p_chromatic, float p_sun_streaks, int p_streak_count);
+	void camera_attributes_set_lens_dirt(RID p_camera_attributes, RID p_texture, float p_intensity);
+	bool camera_attributes_get_lens_flare(RID p_camera_attributes, LensFlare &r_lens_flare);
+
+	// Mariner E23.
+	void camera_attributes_set_image_effects(RID p_camera_attributes, float p_chromatic_aberration, float p_lens_distortion, float p_film_grain, float p_film_grain_size, float p_sharpening);
+	ImageEffects camera_attributes_get_image_effects(RID p_camera_attributes) const;
 
 	_FORCE_INLINE_ bool camera_attributes_uses_dof(RID p_camera_attributes) {
 		CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);

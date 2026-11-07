@@ -30,8 +30,10 @@
 
 #include "render_forward_clustered.h"
 
+#include "render_ddgi.h"
 #include "render_pathtracer.h"
 #include "render_raytracing.h"
+#include "render_restir.h"
 
 #include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
@@ -93,6 +95,21 @@ void RenderForwardClustered::RenderBufferDataForwardClustered::ensure_fsr2(Rende
 	}
 }
 
+void RenderForwardClustered::RenderBufferDataForwardClustered::ensure_fsr3(RendererRD::FSR3UpscalerEffect *p_effect) {
+	if (fsr3_context == nullptr && !fsr3_failed) {
+		fsr3_context = p_effect->create_context(render_buffers->get_internal_size(), render_buffers->get_target_size());
+		fsr3_failed = fsr3_context == nullptr;
+	}
+}
+
+const RendererRD::FSR3UpscalerEffect::SharedSurfaces *RenderForwardClustered::get_fsr3_shared_surfaces(const Ref<RenderSceneBuffersRD> &p_render_buffers) const {
+	if (p_render_buffers.is_null() || !p_render_buffers->has_custom_data(RB_SCOPE_FORWARD_CLUSTERED)) {
+		return nullptr;
+	}
+	Ref<RenderBufferDataForwardClustered> rb_data = p_render_buffers->get_custom_data(RB_SCOPE_FORWARD_CLUSTERED);
+	return rb_data.is_valid() ? RendererRD::FSR3UpscalerEffect::get_shared_surfaces(rb_data->get_fsr3_context()) : nullptr;
+}
+
 void RenderForwardClustered::RenderBufferDataForwardClustered::ensure_dlss(RendererRD::DLSSEffect *p_effect) {
 	if (dlss_context == nullptr) {
 		dlss_context = p_effect->create_context(render_buffers->get_internal_size(), render_buffers->get_target_size());
@@ -137,6 +154,12 @@ void RenderForwardClustered::RenderBufferDataForwardClustered::free_data() {
 		memdelete(fsr2_context);
 		fsr2_context = nullptr;
 	}
+
+	if (fsr3_context) {
+		RendererRD::FSR3UpscalerEffect::free_context(fsr3_context);
+		fsr3_context = nullptr;
+	}
+	fsr3_failed = false;
 
 	if (dlss_context) {
 		memdelete(dlss_context);
@@ -432,6 +455,20 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 
 		RID xforms_uniform_set = surf->owner->transforms_uniform_set;
 
+		// Mariner E14b / E25a: an indirect multimesh culled for this shadow pass (or this camera) draws its own section.
+		const RendererRD::MeshStorage::MultiMeshShadowCull *shadow_cull = nullptr;
+		uint32_t shadow_cull_section = 0;
+		if (p_params->cull_sections && (surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_INDIRECT)) {
+			const uint32_t *section = p_params->cull_sections->getptr(uint64_t(surf->owner));
+			if (section) {
+				shadow_cull = p_params->cull_data->getptr(surf->owner->data->base);
+				shadow_cull_section = *section;
+				if (shadow_cull) {
+					xforms_uniform_set = shadow_cull->uniform_set;
+				}
+			}
+		}
+
 		SceneShaderForwardClustered::ShaderSpecialization pipeline_specialization = p_params->base_specialization;
 		pipeline_specialization.multimesh = bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH);
 		pipeline_specialization.multimesh_format_2d = bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_FORMAT_2D);
@@ -596,6 +633,11 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 				push_constant.multimesh_motion_vectors_current_offset = 0;
 				push_constant.multimesh_motion_vectors_previous_offset = 0;
 			}
+			if (shadow_cull) {
+				// Mariner E14b: the section's instances (E25c: its first LOD bucket).
+				push_constant.multimesh_motion_vectors_current_offset = shadow_cull_section * shadow_cull->buckets * shadow_cull->capacity;
+				push_constant.multimesh_motion_vectors_previous_offset = push_constant.multimesh_motion_vectors_current_offset;
+			}
 
 			size_t push_constant_size = 0;
 			if (pipeline_key.ubershader) {
@@ -621,6 +663,23 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 					WARN_PRINT("Indirect draws are not supported when emulating point size.");
 				}
 				RD::get_singleton()->draw_list_draw(draw_list, false, mesh_storage->mesh_surface_get_vertex_count(mesh_surface), instance_count * 6);
+			} else if (indirect && shadow_cull && shadow_cull->buckets > 1 && surf->surface_index < RendererRD::MeshStorage::MultiMeshShadowCull::MAX_LOD_SURFACES) {
+				// Mariner E25c: one draw per LOD bucket of the section, with the bucket's LOD of this surface.
+				for (uint32_t b = 0; b < shadow_cull->buckets; b++) {
+					const uint32_t region = shadow_cull_section * shadow_cull->buckets + b;
+					RID bucket_index_array = mesh_storage->mesh_surface_get_index_array(mesh_surface, shadow_cull->bucket_lods[b][surf->surface_index]);
+					if (bucket_index_array.is_valid() && prev_index_array_rd != bucket_index_array) {
+						RD::get_singleton()->draw_list_bind_index_array(draw_list, bucket_index_array);
+						prev_index_array_rd = bucket_index_array;
+					}
+					push_constant.multimesh_motion_vectors_current_offset = region * shadow_cull->capacity;
+					push_constant.multimesh_motion_vectors_previous_offset = push_constant.multimesh_motion_vectors_current_offset;
+					RD::get_singleton()->draw_list_set_push_constant(draw_list, &push_constant, push_constant_size);
+					RD::get_singleton()->draw_list_draw_indirect(draw_list, bucket_index_array.is_valid(), shadow_cull->command_buffer, (region * shadow_cull->surface_count + surf->surface_index) * sizeof(uint32_t) * mesh_storage->INDIRECT_MULTIMESH_COMMAND_STRIDE, 1, 0);
+				}
+			} else if (indirect && shadow_cull) {
+				// Mariner E14b: the section's commands (E25c: the section's first LOD bucket, the full mesh).
+				RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), shadow_cull->command_buffer, (shadow_cull_section * shadow_cull->buckets * shadow_cull->surface_count + surf->surface_index) * sizeof(uint32_t) * mesh_storage->INDIRECT_MULTIMESH_COMMAND_STRIDE, 1, 0);
 			} else if (indirect) {
 				RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), mesh_storage->_multimesh_get_command_buffer_rd_rid(surf->owner->data->base), surf->surface_index * sizeof(uint32_t) * mesh_storage->INDIRECT_MULTIMESH_COMMAND_STRIDE, 1, 0);
 			} else {
@@ -767,6 +826,9 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_UNSHADED || p_no_ss_effects) {
 		// Mariner: p_no_ss_effects - late opaque pass; SSAO/SSIL/SSR were computed before it without its geometry.
 		scene_state.ubo.ss_effects_flags = 0;
+		if (p_no_ss_effects && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED && p_render_data->restir_active && p_render_data->render_buffers.is_valid() && p_render_data->render_buffers->restir.shadow_late_mask.is_valid()) {
+			scene_state.ubo.ss_effects_flags = (1 << 7); // Mariner E20c: ray traced directional shadows of the late surfaces.
+		}
 	} else if (p_render_data->reflection_probe.is_null() && is_environment(p_render_data->environment)) {
 		scene_state.ubo.ssao_ao_affect = environment_get_ssao_ao_channel_affect(p_render_data->environment);
 		scene_state.ubo.ssao_light_affect = environment_get_ssao_direct_light_affect(p_render_data->environment);
@@ -775,6 +837,18 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 			ss_flags |= environment_get_ssao_enabled(p_render_data->environment) ? (1 << 0) : 0;
 			ss_flags |= environment_get_ssil_enabled(p_render_data->environment) ? (1 << 1) : 0;
 			ss_flags |= environment_get_ssr_enabled(p_render_data->environment) ? (1 << 2) : 0;
+			if (_gtao_active(p_render_data)) {
+				// Mariner E18: the AO texture holds the bent normal (rgb) and the visibility (a).
+				ss_flags |= (1 << 4);
+				ss_flags |= environment_get_ssao_bent_normals(p_render_data->environment) ? (1 << 5) : 0;
+			}
+			if (p_render_data->restir_active) {
+				ss_flags |= (1 << 6); // Mariner E20: the Light3D.light_restir lights come from the ReSTIR textures.
+				const RendererRD::LightStorage::DirectionalRtShadow *rt_shadows = nullptr;
+				if (RendererRD::LightStorage::get_singleton()->get_directional_rt_shadows(&rt_shadows) > 0) {
+					ss_flags |= (1 << 7); // Mariner E20b: ray traced directional shadows (restir_shadow_mask).
+				}
+			}
 
 			if (rd.is_valid()) {
 				Ref<RenderBufferDataForwardClustered> rb_data;
@@ -1122,7 +1196,9 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 			surf->sort.uses_lightmap = 0;
 
 			// LOD
-			if (p_render_data->scene_data->screen_mesh_lod_threshold > 0.0 && mesh_storage->mesh_surface_has_lod(surf->surface)) {
+			// Mariner E25c: not for indirect multimeshes - their draw commands hold the full mesh's index count, a LOD's
+			// index buffer would be read past its end (camera-culled ones pick a LOD per instance on the GPU instead).
+			if (p_render_data->scene_data->screen_mesh_lod_threshold > 0.0 && mesh_storage->mesh_surface_has_lod(surf->surface) && !(inst->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_INDIRECT)) {
 				uint32_t indices = 0;
 				surf->sort.lod_index = mesh_storage->mesh_surface_get_lod(surf->surface, inst->lod_model_scale * inst->lod_bias, lod_distance * p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, indices);
 				if (p_render_data->render_info) {
@@ -1477,6 +1553,45 @@ void RenderForwardClustered::_process_ssao(Ref<RenderSceneBuffersRD> p_render_bu
 	}
 }
 
+bool RenderForwardClustered::_gtao_active(const RenderDataRD *p_render_data) const {
+	// Mariner E18: GTAO replaces the stock SSAO on single views (no XR) of the scene.
+	if (!p_render_data || p_render_data->reflection_probe.is_valid() || !is_environment(p_render_data->environment) || p_render_data->render_buffers.is_null()) {
+		return false;
+	}
+	return environment_get_ssao_enabled(p_render_data->environment) && environment_get_ssao_gtao(p_render_data->environment) && p_render_data->render_buffers->get_view_count() == 1;
+}
+
+void RenderForwardClustered::_process_gtao(Ref<RenderSceneBuffersRD> p_render_buffers, const RenderDataRD *p_render_data, RID p_normal_roughness) {
+	RENDER_TIMESTAMP("Process GTAO");
+	if (!gtao) {
+		gtao = memnew(RendererRD::GTAO);
+	}
+	const Size2i size = p_render_buffers->get_internal_size();
+	const StringName scope = SNAME("mariner_gtao_out");
+	const StringName name = SNAME("final");
+	if (p_render_buffers->has_texture(scope, name) && (p_render_buffers->get_texture_format(scope, name).width != uint32_t(size.width) || p_render_buffers->get_texture_format(scope, name).height != uint32_t(size.height))) {
+		p_render_buffers->clear_context(scope);
+	}
+	if (!p_render_buffers->has_texture(scope, name)) {
+		p_render_buffers->create_texture(scope, name, RD::DATA_FORMAT_R8G8B8A8_UNORM, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, size);
+	}
+
+	const RenderSceneDataRD *scene_data = p_render_data->scene_data;
+	RendererRD::GTAO::Settings settings;
+	settings.projection = scene_data->get_cam_projection(); // With the depth correction, as rasterized.
+	settings.view_to_world = scene_data->cam_transform.basis.orthonormalized();
+	settings.radius = environment_get_ssao_radius(p_render_data->environment);
+	// The stock intensity (2 by default) maps to the exponent of the visibility (1: as computed).
+	settings.intensity = environment_get_ssao_intensity(p_render_data->environment) * 0.5f;
+	settings.sharpness = environment_get_ssao_sharpness(p_render_data->environment);
+	settings.thickness = environment_get_ssao_gtao_thickness(p_render_data->environment);
+	settings.quality = GLOBAL_GET_CACHED(int, "rendering/environment/ssao/quality");
+	settings.frame = RSG::rasterizer->get_frame_number();
+	// The history is thrown away when the camera moved: there are no motion vectors before the opaque pass.
+	settings.camera_cut = !scene_data->cam_transform.is_equal_approx(scene_data->prev_cam_transform) || scene_data->cam_projection != scene_data->prev_cam_projection;
+	gtao->process(p_render_buffers.ptr(), p_render_buffers->get_depth_texture(), p_normal_roughness, RID(), p_render_buffers->get_texture(scope, name), size, settings);
+}
+
 void RenderForwardClustered::_process_ssil(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, const Transform3D &p_transform) {
 	ERR_FAIL_NULL(ss_effects);
 	ERR_FAIL_COND(p_render_buffers.is_null());
@@ -1625,7 +1740,8 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 
 		//render directional shadows
 		for (uint32_t i = 0; i < p_render_data->directional_shadows.size(); i++) {
-			_render_shadow_pass(p_render_data->render_shadows[p_render_data->directional_shadows[i]].light, p_render_data->shadow_atlas, p_render_data->render_shadows[p_render_data->directional_shadows[i]].pass, p_render_data->render_shadows[p_render_data->directional_shadows[i]].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, false, i == p_render_data->directional_shadows.size() - 1, false, p_render_data->render_info, viewport_size, p_render_data->scene_data->cam_transform);
+			const RenderShadowData &shadow_data = p_render_data->render_shadows[p_render_data->directional_shadows[i]];
+			_render_shadow_pass(shadow_data.light, p_render_data->shadow_atlas, shadow_data.pass, shadow_data.instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, false, i == p_render_data->directional_shadows.size() - 1, false, p_render_data->render_info, viewport_size, p_render_data->scene_data->cam_transform, &shadow_data);
 		}
 		//render positional shadows
 		for (uint32_t i = 0; i < p_render_data->shadows.size(); i++) {
@@ -1641,6 +1757,10 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 
 	if (render_shadows) {
 		_render_shadow_end();
+	}
+
+	if (translucent_shadow_job.valid) {
+		_render_translucent_shadow(); // Mariner E21.
 	}
 
 	if (rb_data.is_valid() && ss_effects) {
@@ -1660,7 +1780,11 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 			}
 
 			if (p_use_ssao) {
-				_process_ssao(rb, p_render_data->environment, p_normal_roughness_slices, p_render_data->scene_data->view_projection);
+				if (_gtao_active(p_render_data)) {
+					_process_gtao(rb, p_render_data, p_normal_roughness_slices[0]);
+				} else {
+					_process_ssao(rb, p_render_data->environment, p_normal_roughness_slices, p_render_data->scene_data->view_projection);
+				}
 			}
 
 			if (p_use_ssil) {
@@ -1817,6 +1941,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		SCALE_FSR2,
 		SCALE_MFX,
 		SCALE_DLSS,
+		SCALE_FSR3,
 	} scale_type = SCALE_NONE;
 
 	switch (rb->get_scaling_3d_mode()) {
@@ -1825,6 +1950,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			break;
 		case RSE::VIEWPORT_SCALING_3D_MODE_DLSS:
 			scale_type = SCALE_DLSS;
+			break;
+		case RSE::VIEWPORT_SCALING_3D_MODE_FSR3:
+			scale_type = SCALE_FSR3;
 			break;
 		case RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL:
 #ifdef METAL_MFXTEMPORAL_ENABLED
@@ -1839,6 +1967,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	bool using_upscaling = scale_type != SCALE_NONE;
 
+	// Mariner E15a: motion blur reads the motion vectors (objects' own motion needs the viewport to track it: TAA,
+	// a temporal upscaler or RenderingServer.viewport_set_force_motion_vectors).
+	const bool using_motion_blur = rb.is_valid() && rb->get_view_count() == 1 && RSG::camera_attributes->camera_attributes_uses_motion_blur(p_render_data->camera_attributes);
+
 	// check if we need motion vectors
 	bool motion_vectors_required;
 	if (using_debug_mvs) {
@@ -1849,6 +1981,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		motion_vectors_required = true;
 	} else if (!is_reflection_probe && using_upscaling) {
 		motion_vectors_required = true;
+	} else if (!is_reflection_probe && using_motion_blur) {
+		motion_vectors_required = true; // Mariner E15a.
 	} else {
 		motion_vectors_required = false;
 	}
@@ -1973,6 +2107,23 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	if (!using_pathtracing && !is_reflection_probe && rb->pathtracing.accum.is_valid()) {
 		rb->free_pathtracing();
 	}
+
+	// Mariner E20: ReSTIR DI (Environment.restir_enabled). Decided here, after the TLAS build: the light buffers mark
+	// the Light3D.light_restir lights for the opaque pass, which takes their light from ReSTIR.
+	if (rb.is_valid() && !is_reflection_probe && !using_pathtracing && is_environment(p_render_data->environment) && RendererEnvironmentStorage::get_singleton()->environment_get_restir_enabled(p_render_data->environment) && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED) {
+		if (!RenderRestirDI::is_supported()) {
+			WARN_PRINT_ONCE("ReSTIR needs Forward+ on Vulkan with ray query support and the rendering/raytracing/scene_acceleration_structures project setting; Light3D.light_restir lights are rasterized.");
+		} else if (!p_render_data->rt_instances) {
+			WARN_PRINT_ONCE("ReSTIR needs Viewport.raytracing_scene_enabled on the viewport; Light3D.light_restir lights are rasterized.");
+		} else if (rb->get_view_count() != 1 || rb->get_msaa_3d() != RSE::VIEWPORT_MSAA_DISABLED) {
+			WARN_PRINT_ONCE("ReSTIR needs a single view and 3D MSAA disabled; Light3D.light_restir lights are rasterized.");
+		} else if (rb->has_raytracing_scene()) {
+			p_render_data->restir_active = true;
+		}
+	}
+	if (!p_render_data->restir_active && !is_reflection_probe && rb.is_valid() && rb->restir.params_buffer.is_valid()) {
+		rb->free_restir();
+	}
 	if (using_pathtracing) {
 		using_ssr = false;
 		using_ssil = false;
@@ -1984,6 +2135,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	// textures; with MSAA they stay in the regular opaque pass).
 	scene_state.opaque_late_allowed = rb_data.is_valid() && !is_reflection_probe && rb->get_msaa_3d() == RSE::VIEWPORT_MSAA_DISABLED && rb->has_internal_texture() && rb->has_depth_texture() && !using_pathtracing;
 	_fill_render_list(RENDER_LIST_OPAQUE, p_render_data, PASS_MODE_COLOR, using_sdfgi, using_sdfgi || using_voxelgi, using_motion_pass);
+	_view_cull_indirect_multimeshes(p_render_data); // Mariner E25a.
 	render_list[RENDER_LIST_OPAQUE].sort_by_key();
 	render_list[RENDER_LIST_MOTION].sort_by_key();
 	render_list[RENDER_LIST_ALPHA].sort_by_reverse_depth_and_priority();
@@ -2010,6 +2162,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 					environment_get_ssao_enabled(p_render_data->environment) ||
 					using_ssil ||
 					ce_needs_normal_roughness ||
+					p_render_data->restir_active || // Mariner E20: ReSTIR reads the normals and roughness.
 					get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_NORMAL_BUFFER ||
 					scene_state.used_normal_texture) {
 				depth_pass_mode = PASS_MODE_DEPTH_NORMAL_ROUGHNESS;
@@ -2196,6 +2349,17 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	bool using_ssao = depth_pre_pass && !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssao_enabled(p_render_data->environment);
 
+	// Mariner E11: screen space contact shadows of a directional light, from the depth pre-pass, for the opaque pass.
+	Vector3 contact_direction;
+	float contact_length = 0.0;
+	const bool using_contact_shadows = depth_pre_pass && rb.is_valid() && !is_reflection_probe && rb->get_view_count() == 1 && contact_shadows && RendererRD::LightStorage::get_singleton()->get_directional_contact_shadow(contact_direction, contact_length);
+	contact_shadow_mask = RID();
+
+	// Mariner E13: the depth reduced for occlusion culling of the next frames (Viewport.use_hiz_occlusion_culling).
+	// Mariner E22: the depth of the largest perspective view of the frame feeds the screen space collision of particles.
+	const bool using_particles_collision = depth_pre_pass && rb.is_valid() && !is_reflection_probe && rb->get_view_count() == 1 && RendererRD::ParticlesStorage::get_singleton()->screen_collision_wanted() && !p_render_data->scene_data->cam_projection.is_orthogonal();
+	const bool using_hiz_occlusion = depth_pre_pass && rb.is_valid() && !is_reflection_probe && rb->get_view_count() == 1 && rb->hiz_occlusion.enabled && hiz_occlusion_depth && !p_render_data->scene_data->cam_projection.is_orthogonal();
+
 	if (depth_pre_pass) { //depth pre pass
 		bool needs_pre_resolve = _needs_post_prepass_render(p_render_data, using_sdfgi || using_voxelgi);
 		if (needs_pre_resolve) {
@@ -2215,8 +2379,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, RID(), samplers, depth_prepass_uniform_buffer_index);
 
-		bool finish_depth = using_ssao || using_ssil || using_sdfgi || using_voxelgi || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth;
+		bool finish_depth = using_ssao || using_ssil || using_sdfgi || using_voxelgi || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth || using_contact_shadows || using_hiz_occlusion || using_particles_collision;
 		RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, depth_pass_mode, 0, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization);
+		_apply_view_cull(render_list_params); // Mariner E25a.
 		_render_list_with_draw_list(&render_list_params, depth_framebuffer, RD::DrawFlags(needs_pre_resolve ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_ALL), depth_pass_clear, 0.0f, 0u, p_render_data->render_region);
 
 		RD::get_singleton()->draw_command_end_label();
@@ -2259,6 +2424,96 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		}
 	}
 	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sdfgi || using_voxelgi, normal_roughness_views, rb_data.is_valid() && rb_data->has_voxelgi() ? rb_data->get_voxelgi() : RID());
+
+	if (using_contact_shadows) {
+		RENDER_TIMESTAMP("Contact Shadows");
+		RD::get_singleton()->draw_command_begin_label("Contact Shadows");
+		const StringName scope = SNAME("mariner_contact_shadows");
+		const StringName name = SNAME("mask");
+		const Size2i size = rb->get_internal_size();
+		if (!rb->has_texture(scope, name) || rb->get_texture_format(scope, name).width != uint32_t(size.width) || rb->get_texture_format(scope, name).height != uint32_t(size.height)) {
+			if (rb->has_texture(scope, name)) {
+				rb->clear_context(scope);
+			}
+			rb->create_texture(scope, name, RD::DATA_FORMAT_R8_UNORM, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, size);
+		}
+		RendererRD::ContactShadows::Settings settings;
+		settings.projection = p_render_data->scene_data->get_cam_projection();
+		settings.light_direction = contact_direction;
+		settings.length = contact_length;
+		settings.steps = GLOBAL_GET_CACHED(int, "rendering/lights_and_shadows/contact_shadows/steps");
+		settings.thickness = GLOBAL_GET_CACHED(float, "rendering/lights_and_shadows/contact_shadows/thickness");
+		settings.min_thickness = MAX(0.01f, contact_length / settings.steps);
+		const float max_distance = GLOBAL_GET_CACHED(float, "rendering/lights_and_shadows/contact_shadows/max_distance");
+		settings.fade_from = max_distance * 0.7;
+		settings.fade_to = max_distance;
+		settings.frame = RSG::rasterizer->get_frame_number();
+		contact_shadows->process(rb->get_depth_texture(0), rb->get_texture(scope, name), size, settings);
+		contact_shadow_mask = rb->get_texture(scope, name);
+		RD::get_singleton()->draw_command_end_label();
+	}
+
+	if (using_particles_collision) {
+		const Size2i size = rb->get_internal_size();
+		const Size2i half((size.width + 1) / 2, (size.height + 1) / 2);
+		RendererRD::ParticlesStorage *particles = RendererRD::ParticlesStorage::get_singleton();
+		const RID dest = particles->screen_collision_begin(RSG::rasterizer->get_frame_number(), uint64_t(size.width) * uint64_t(size.height), half);
+		if (dest.is_valid()) {
+			RENDER_TIMESTAMP("Particles Screen Collision");
+			const Projection projection = p_render_data->scene_data->get_cam_projection();
+			const Transform3D &cam = p_render_data->scene_data->cam_transform;
+			particles_screen_collision->process(rb->get_depth_texture(0), size, projection, cam.basis, dest, half);
+			particles->screen_collision_end(projection * Projection(cam.affine_inverse()), cam.origin);
+		}
+	}
+
+	if (using_hiz_occlusion) {
+		RENDER_TIMESTAMP("Hi-Z Occlusion Depth");
+		RD::get_singleton()->draw_command_begin_label("Hi-Z Occlusion Depth");
+		const Size2i size = rb->get_internal_size();
+		const int width = CLAMP(rb->hiz_occlusion.buffer_width, 32, 1024);
+		const Size2i cells(MIN(width, size.width), CLAMP(int(Math::round(float(width) * size.height / MAX(size.width, 1))), 1, size.height));
+		const int slot = rb->hiz_readback_acquire(cells);
+		if (slot >= 0) {
+			hiz_occlusion_depth->process(rb->get_depth_texture(0), size, p_render_data->scene_data->get_cam_projection(), rb->hiz_readback[slot].buffer, cells);
+			rb->hiz_readback_request(slot, p_render_data->scene_data->cam_transform, p_render_data->scene_data->cam_projection, RSG::rasterizer->get_frame_number());
+		}
+		RD::get_singleton()->draw_command_end_label();
+	}
+
+	// Mariner E12: DDGI probes (Environment.ddgi_enabled) on the raytracing scene, sampled by the color passes.
+	if (rb.is_valid() && !is_reflection_probe) {
+		const bool want_ddgi = !using_pathtracing && is_environment(p_render_data->environment) && environment_get_ddgi_enabled(p_render_data->environment) && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED;
+		bool ddgi_updated = false;
+		if (want_ddgi) {
+			if (!RenderDDGI::is_supported()) {
+				WARN_PRINT_ONCE("DDGI needs Forward+ on Vulkan with ray query support and the rendering/raytracing/scene_acceleration_structures project setting; using the environment's ambient light.");
+			} else if (!p_render_data->rt_instances) {
+				WARN_PRINT_ONCE("DDGI needs Viewport.raytracing_scene_enabled on the viewport; using the environment's ambient light.");
+			} else {
+				RENDER_TIMESTAMP("DDGI");
+				ddgi_updated = ddgi->update(this, p_render_data, scene_state.uniform_buffers[depth_prepass_uniform_buffer_index], radiance_texture);
+			}
+		}
+		if (!ddgi_updated) {
+			if (!want_ddgi && rb->ddgi.params_buffer.is_valid()) {
+				rb->free_ddgi();
+			}
+			rb->ddgi.active = false;
+		}
+	}
+
+	// Mariner E20: ReSTIR DI light of the opaque pass.
+	if (p_render_data->restir_active) {
+		RENDER_TIMESTAMP("ReSTIR DI");
+		if (!restir) {
+			restir = memnew(RenderRestirDI);
+		}
+		rb->restir.diffuse = RID();
+		rb->restir.specular = RID();
+		rb->restir.shadow_mask = RID();
+		restir->update(this, p_render_data, normal_roughness_views[0]);
+	}
 
 	if (current_cluster_builder) {
 		base_specialization.cluster_has_area_light = current_cluster_builder->get_cluster_count_by_type(ClusterBuilderRD::ELEMENT_TYPE_AREA_LIGHT) != 0;
@@ -2361,6 +2616,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			uint32_t opaque_color_pass_flags = using_motion_pass ? (color_pass_flags & ~uint32_t(COLOR_PASS_FLAG_MOTION_VECTORS)) : color_pass_flags;
 			RID opaque_framebuffer = using_motion_pass ? rb_data->get_color_pass_fb(opaque_color_pass_flags) : color_framebuffer;
 			RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, PASS_MODE_COLOR, opaque_color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization);
+			_apply_view_cull(render_list_params); // Mariner E25a.
 			_render_list_with_draw_list(&render_list_params, opaque_framebuffer, RD::DrawFlags(load_color ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_COLOR_ALL) | (depth_pre_pass ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_DEPTH), c, 0.0f, 0u, p_render_data->render_region);
 		}
 
@@ -2387,6 +2643,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_MOTION, p_render_data, radiance_texture, samplers, opaque_pass_uniform_buffer_index, true);
 
 			RenderListParameters render_list_params(render_list[RENDER_LIST_MOTION].elements.ptr(), render_list[RENDER_LIST_MOTION].element_info.ptr(), render_list[RENDER_LIST_MOTION].elements.size(), reverse_cull, PASS_MODE_COLOR, color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization);
+			_apply_view_cull(render_list_params); // Mariner E25a.
 			_render_list_with_draw_list(&render_list_params, color_framebuffer);
 
 			RD::get_singleton()->draw_command_end_label();
@@ -2411,12 +2668,22 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		if (depth_pre_pass) {
 			RID late_depth_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE_LATE, nullptr, RID(), samplers, depth_prepass_uniform_buffer_index);
 			RenderListParameters late_depth_params(late_list.elements.ptr(), late_list.element_info.ptr(), late_list.elements.size(), reverse_cull, depth_pass_mode, 0, rb_data.is_null(), p_render_data->directional_light_soft_shadows, late_depth_uniform_set, late_wireframe, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization);
+			_apply_view_cull(late_depth_params); // Mariner E25a.
 			_render_list_with_draw_list(&late_depth_params, depth_framebuffer, RD::DRAW_DEFAULT_ALL, Vector<Color>(), 0.0f, 0u, p_render_data->render_region);
+		}
+
+		// Mariner E20c: ray traced directional shadows for the late surfaces (their depth and normals are in now).
+		if (rb.is_valid()) {
+			rb->restir.shadow_late_mask = RID();
+			if (p_render_data->restir_active && restir && depth_pre_pass) {
+				restir->update_late_shadows(p_render_data, normal_roughness_views[0], rb->get_texture_slice(RB_SCOPE_BUFFERS, RB_TEX_OPAQUE_LATE_DEPTH, 0, 0));
+			}
 		}
 
 		uint32_t late_uniform_buffer_index = _setup_environment(p_render_data, is_reflection_probe, screen_size, screen_size, p_default_bg_color, true, using_motion_pass, false, true);
 		RID late_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE_LATE, p_render_data, radiance_texture, samplers, late_uniform_buffer_index, true);
 		RenderListParameters late_params(late_list.elements.ptr(), late_list.element_info.ptr(), late_list.elements.size(), reverse_cull, PASS_MODE_COLOR, color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, late_uniform_set, late_wireframe, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization);
+		_apply_view_cull(late_params); // Mariner E25a.
 		_render_list_with_draw_list(&late_params, color_framebuffer, RD::DRAW_DEFAULT_ALL, Vector<Color>(), 0.0f, 0u, p_render_data->render_region);
 
 		RD::get_singleton()->draw_command_end_label();
@@ -2605,6 +2872,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 		RID alpha_framebuffer = rb_data.is_valid() ? rb_data->get_color_pass_fb(transparent_color_pass_flags) : color_only_framebuffer;
 		RenderListParameters render_list_params(render_list[RENDER_LIST_ALPHA].elements.ptr(), render_list[RENDER_LIST_ALPHA].element_info.ptr(), render_list[RENDER_LIST_ALPHA].elements.size(), reverse_cull, PASS_MODE_COLOR, transparent_color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization);
+		_apply_view_cull(render_list_params); // Mariner E25a.
 		_render_list_with_draw_list(&render_list_params, alpha_framebuffer, RD::DRAW_DEFAULT_ALL, Vector<Color>(), 0.0f, 0u, p_render_data->render_region);
 	}
 
@@ -2615,7 +2883,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	RD::get_singleton()->draw_command_begin_label("Resolve");
 
 	if (rb_data.is_valid() && use_msaa) {
-		bool resolve_velocity_buffer = (using_taa || using_upscaling || ce_needs_motion_vectors) && rb->has_velocity_buffer(true);
+		bool resolve_velocity_buffer = (using_taa || using_upscaling || ce_needs_motion_vectors || using_motion_blur) && rb->has_velocity_buffer(true);
 		for (uint32_t v = 0; v < rb->get_view_count(); v++) {
 			RD::get_singleton()->texture_resolve_multisample(rb->get_color_msaa(v), rb->get_internal_texture(v));
 			resolve_effects->resolve_depth(rb->get_depth_msaa(v), rb->get_depth_texture(v), rb->get_internal_size(), texture_multisamples[msaa]);
@@ -2685,6 +2953,59 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 				rb->set_upscaler_ready(true);
 				fsr2_effect->upscale(params);
+			}
+
+			RD::get_singleton()->draw_command_end_label();
+		} else if (scale_type == SCALE_FSR3) {
+			// Mariner E24a: AMD FSR 3.1 upscaler, same inputs as FSR 2.
+			if (fsr3_effect == nullptr) {
+				fsr3_effect = memnew(RendererRD::FSR3UpscalerEffect); // Compiles its shaders: only for projects that use it.
+			}
+			rb_data->ensure_fsr3(fsr3_effect);
+
+			RID exposure;
+			if (RSG::camera_attributes->camera_attributes_uses_auto_exposure(p_render_data->camera_attributes)) {
+				exposure = luminance->get_current_luminance_buffer(rb);
+			}
+
+			RD::get_singleton()->draw_command_begin_label("FSR 3.1");
+			RENDER_TIMESTAMP("FSR 3.1");
+
+			for (uint32_t v = 0; v < rb->get_view_count(); v++) {
+				real_t fov = p_render_data->scene_data->cam_projection.get_fov();
+				real_t aspect = p_render_data->scene_data->cam_projection.get_aspect();
+				real_t fovy = p_render_data->scene_data->cam_projection.get_fovy(fov, 1.0 / aspect);
+				Vector2 jitter = p_render_data->scene_data->taa_jitter * Vector2(rb->get_internal_size()) * 0.5f;
+				RendererRD::FSR3UpscalerEffect::Parameters params;
+				params.context = rb_data->get_fsr3_context();
+				params.internal_size = rb->get_internal_size();
+				params.sharpness = CLAMP(1.0f - (rb->get_fsr_sharpness() / 2.0f), 0.0f, 1.0f);
+				params.color = rb->get_internal_texture(v);
+				params.depth = rb->get_depth_texture(v);
+				params.velocity = rb->get_velocity_buffer(false, v);
+				params.reactive = rb->get_internal_texture_reactive(v);
+				params.exposure = exposure;
+				params.output = rb->get_upscaled_texture(v);
+				params.z_near = p_render_data->scene_data->z_near;
+				params.z_far = p_render_data->scene_data->z_far;
+				params.fovy = fovy;
+				params.jitter = jitter;
+				params.delta_time = float(time_step);
+				params.reset_accumulation = false;
+
+				Projection correction;
+				correction.set_depth_correction(true, true, false);
+
+				const Projection &prev_proj = p_render_data->scene_data->prev_cam_projection;
+				const Projection &cur_proj = p_render_data->scene_data->cam_projection;
+				const Transform3D &prev_transform = p_render_data->scene_data->prev_cam_transform;
+				const Transform3D &cur_transform = p_render_data->scene_data->cam_transform;
+				params.reprojection = (correction * prev_proj) * prev_transform.affine_inverse() * cur_transform * (correction * cur_proj).inverse();
+
+				rb->set_upscaler_ready(params.context != nullptr);
+				if (params.context) {
+					fsr3_effect->upscale(params);
+				}
 			}
 
 			RD::get_singleton()->draw_command_end_label();
@@ -2837,7 +3158,7 @@ void RenderForwardClustered::_render_buffers_debug_draw(const RenderDataRD *p_re
 	}
 }
 
-void RenderForwardClustered::_render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier, float p_screen_mesh_lod_threshold, bool p_open_pass, bool p_close_pass, bool p_clear_region, RenderingServerTypes::RenderInfo *p_render_info, const Size2i &p_viewport_size, const Transform3D &p_main_cam_transform) {
+void RenderForwardClustered::_render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier, float p_screen_mesh_lod_threshold, bool p_open_pass, bool p_close_pass, bool p_clear_region, RenderingServerTypes::RenderInfo *p_render_info, const Size2i &p_viewport_size, const Transform3D &p_main_cam_transform, const RenderShadowData *p_cache_data) {
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 
 	ERR_FAIL_COND(!light_storage->owns_light_instance(p_light));
@@ -2879,6 +3200,23 @@ void RenderForwardClustered::_render_shadow_pass(RID p_light, RID p_shadow_atlas
 		light_transform = light_storage->light_instance_get_shadow_transform(p_light, p_pass);
 
 		atlas_rect = light_storage->light_instance_get_directional_rect(p_light);
+
+		if (p_pass == 5) {
+			// Mariner E21: the translucent shadow map is drawn by the material pass after the shadow passes.
+			translucent_shadow_job.valid = true;
+			translucent_shadow_job.light = p_light;
+			translucent_shadow_job.instances = &p_instances;
+			return;
+		}
+
+		if (p_pass == 4) {
+			// Mariner E10b: object shadow - its own texture, all of it, cleared; casters behind the near plane are
+			// impossible (the map is fitted to them), so no pancaking.
+			const int size = light_storage->light_directional_get_object_shadow_size(base);
+			light_storage->directional_object_shadow_get_texture(size);
+			_render_shadow_append(light_storage->directional_object_shadow_get_fb(), p_instances, light_projection, light_transform, light_storage->light_instance_get_shadow_range(p_light, 4), 0, 0, reverse_cull_face, false, false, false, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, Rect2i(0, 0, size, size), true, true, false, false, p_render_info, p_viewport_size, p_main_cam_transform);
+			return;
+		}
 
 		if (light_storage->light_directional_get_shadow_mode(base) == RSE::LIGHT_DIRECTIONAL_SHADOW_PARALLEL_4_SPLITS) {
 			atlas_rect.size.width /= 2;
@@ -3022,14 +3360,345 @@ void RenderForwardClustered::_render_shadow_pass(RID p_light, RID p_shadow_atlas
 			light_storage->light_instance_set_shadow_transform(p_light, Projection(), light_storage->light_instance_get_base_transform(p_light), zfar, 0, 0, 0);
 		}
 
+	} else if (p_cache_data && p_cache_data->cache && light_storage->light_get_type(base) == RSE::LIGHT_DIRECTIONAL && directional_shadow_cache.enabled && _directional_shadow_cache_prepare()) {
+		// Mariner E10: directional shadow cache. Static casters come from the cache (redrawn there if anything about
+		// them changed), dynamic casters are drawn on top every frame.
+		_directional_shadow_cache_stats_frame();
+		DirectionalShadowCache::Entry &entry = directional_shadow_cache.entries[p_light].cascades[p_pass];
+		const bool hit = entry.valid && entry.generation == directional_shadow_cache.generation && entry.static_hash == p_cache_data->static_hash && entry.rect == atlas_rect && entry.projection == light_projection && entry.transform == light_transform && entry.zfar == zfar && entry.reverse_cull_face == reverse_cull_face && entry.use_pancake == use_pancake;
+		if (!hit) {
+			_render_shadow_append(directional_shadow_cache.framebuffer, p_cache_data->static_instances, light_projection, light_transform, zfar, 0, 0, reverse_cull_face, false, false, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, atlas_rect, flip_y, true, false, false, p_render_info, p_viewport_size, p_main_cam_transform);
+			entry.valid = true;
+			entry.generation = directional_shadow_cache.generation;
+			entry.static_hash = p_cache_data->static_hash;
+			entry.rect = atlas_rect;
+			entry.projection = light_projection;
+			entry.transform = light_transform;
+			entry.zfar = zfar;
+			entry.reverse_cull_face = reverse_cull_face;
+			entry.use_pancake = use_pancake;
+			directional_shadow_cache.refreshes++;
+			directional_shadow_cache.total_refreshes++;
+			directional_shadow_cache.static_instances += p_cache_data->static_instances.size();
+		} else {
+			directional_shadow_cache.hits++;
+			directional_shadow_cache.total_hits++;
+		}
+		entry.last_used_frame = RSG::rasterizer->get_frame_number();
+		directional_shadow_cache.dynamic_instances += p_cache_data->dynamic_instances.size();
+
+		_render_shadow_append(render_fb, p_cache_data->dynamic_instances, light_projection, light_transform, zfar, 0, 0, reverse_cull_face, false, false, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, atlas_rect, flip_y, false, p_open_pass, p_close_pass, p_render_info, p_viewport_size, p_main_cam_transform);
+		scene_state.shadow_passes[scene_state.shadow_passes.size() - 1].copy_depth_from = directional_shadow_cache.texture;
 	} else {
+		if (p_cache_data && p_cache_data->cache && light_storage->light_get_type(base) == RSE::LIGHT_DIRECTIONAL && directional_shadow_cache.enabled) {
+			_directional_shadow_cache_stats_frame();
+			directional_shadow_cache.uncached++;
+		}
 		//render shadow
 		_render_shadow_append(render_fb, p_instances, light_projection, light_transform, zfar, 0, 0, reverse_cull_face, using_dual_paraboloid, using_dual_paraboloid_flip, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, atlas_rect, flip_y, p_clear_region, p_open_pass, p_close_pass, p_render_info, p_viewport_size, p_main_cam_transform);
 	}
 }
 
+bool RenderForwardClustered::_directional_shadow_cache_prepare() {
+	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
+	const RID atlas = light_storage->directional_shadow_get_texture();
+	if (atlas.is_null()) {
+		return false;
+	}
+	const RD::TextureFormat atlas_format = RD::get_singleton()->texture_get_format(atlas);
+	const Size2i size(atlas_format.width, atlas_format.height);
+	if (directional_shadow_cache.texture.is_valid() && directional_shadow_cache.size == size && directional_shadow_cache.format == atlas_format.format) {
+		return true;
+	}
+	_directional_shadow_cache_free();
+
+	RD::TextureFormat tf;
+	tf.format = atlas_format.format;
+	tf.width = size.width;
+	tf.height = size.height;
+	tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	directional_shadow_cache.texture = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	ERR_FAIL_COND_V(directional_shadow_cache.texture.is_null(), false);
+	RD::get_singleton()->set_resource_name(directional_shadow_cache.texture, "Directional shadow cache");
+	Vector<RID> fb_tex;
+	fb_tex.push_back(directional_shadow_cache.texture);
+	directional_shadow_cache.framebuffer = RD::get_singleton()->framebuffer_create(fb_tex);
+	directional_shadow_cache.size = size;
+	directional_shadow_cache.format = atlas_format.format;
+	directional_shadow_cache.generation++; // Every entry is stale.
+	return true;
+}
+
+void RenderForwardClustered::_directional_shadow_cache_free() {
+	if (directional_shadow_cache.framebuffer.is_valid() && RD::get_singleton()->framebuffer_is_valid(directional_shadow_cache.framebuffer)) {
+		RD::get_singleton()->free_rid(directional_shadow_cache.framebuffer);
+	}
+	directional_shadow_cache.framebuffer = RID();
+	if (directional_shadow_cache.texture.is_valid()) {
+		RD::get_singleton()->free_rid(directional_shadow_cache.texture);
+	}
+	directional_shadow_cache.texture = RID();
+	directional_shadow_cache.size = Size2i();
+	directional_shadow_cache.format = RD::DATA_FORMAT_MAX;
+	directional_shadow_cache.entries.clear();
+	directional_shadow_cache.generation++;
+}
+
+void RenderForwardClustered::_directional_shadow_cache_stats_frame() {
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	if (directional_shadow_cache.stats_frame == frame) {
+		return;
+	}
+	Dictionary stats;
+	stats["enabled"] = directional_shadow_cache.enabled;
+	stats["cascades"] = directional_shadow_cache.hits + directional_shadow_cache.refreshes + directional_shadow_cache.uncached;
+	stats["hits"] = directional_shadow_cache.hits;
+	stats["refreshes"] = directional_shadow_cache.refreshes;
+	stats["uncached"] = directional_shadow_cache.uncached;
+	stats["static_instances"] = directional_shadow_cache.static_instances;
+	stats["dynamic_instances"] = directional_shadow_cache.dynamic_instances;
+	stats["memory"] = int64_t(directional_shadow_cache.size.width) * directional_shadow_cache.size.height * (directional_shadow_cache.format == RD::DATA_FORMAT_D16_UNORM ? 2 : 4); // Bytes.
+	directional_shadow_cache.last_stats = stats;
+	directional_shadow_cache.stats_frame = frame;
+	directional_shadow_cache.hits = 0;
+	directional_shadow_cache.refreshes = 0;
+	directional_shadow_cache.uncached = 0;
+	directional_shadow_cache.static_instances = 0;
+	directional_shadow_cache.dynamic_instances = 0;
+
+	// Forget lights that were not drawn for a while (freed or hidden).
+	LocalVector<RID> stale;
+	for (const KeyValue<RID, DirectionalShadowCache::LightEntries> &E : directional_shadow_cache.entries) {
+		uint64_t last = 0;
+		for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; i++) {
+			last = MAX(last, E.value.cascades[i].last_used_frame);
+		}
+		if (frame > last + 600) {
+			stale.push_back(E.key);
+		}
+	}
+	for (const RID &rid : stale) {
+		directional_shadow_cache.entries.erase(rid);
+	}
+}
+
+void RenderForwardClustered::directional_shadow_cache_set_enabled(bool p_enabled) {
+	if (directional_shadow_cache.enabled == p_enabled) {
+		return;
+	}
+	directional_shadow_cache.enabled = p_enabled;
+	if (!p_enabled) {
+		_directional_shadow_cache_free();
+		directional_shadow_cache.last_stats = Dictionary();
+		directional_shadow_cache.total_hits = 0;
+		directional_shadow_cache.total_refreshes = 0;
+	}
+}
+
+Dictionary RenderForwardClustered::directional_shadow_cache_get_stats() const {
+	// Counts of the last complete frame, and running totals (they include the frame being drawn).
+	Dictionary stats = directional_shadow_cache.last_stats.duplicate();
+	stats["enabled"] = directional_shadow_cache.enabled;
+	stats["total_hits"] = int64_t(directional_shadow_cache.total_hits);
+	stats["total_refreshes"] = int64_t(directional_shadow_cache.total_refreshes);
+	return stats;
+}
+
+// Mariner E25c: LOD buckets of an indirect multimesh's GPU culling. The breakpoints of all surfaces' LODs in "LOD
+// distance over model scale" (the renderer picks LOD i of a surface per instance where edge_length_i * model_scale *
+// lod_bias / (distance * lod_distance_multiplier) <= threshold); each bucket draws each surface with the LOD at its
+// lower end. Returns the bucket count (1: no LOD), r_limits the upper ends of the buckets but the last.
+uint32_t RenderForwardClustered::_indirect_lod_buckets(RID p_multimesh, float p_threshold, LocalVector<float> &r_limits, RendererRD::MeshStorage::MultiMeshShadowCull &r_lods, uint32_t *r_lod_counts) const {
+	using Cull = RendererRD::MultiMeshShadowCull;
+	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+	r_limits.clear();
+	const RID mesh = mesh_storage->_multimesh_get_mesh(p_multimesh);
+	const uint32_t surface_count = mesh.is_valid() ? uint32_t(mesh_storage->mesh_get_surface_count(mesh)) : 0u;
+	if (p_threshold <= 0.0f || surface_count == 0 || surface_count > Cull::MAX_LOD_SURFACES) {
+		return 1;
+	}
+	for (uint32_t s = 0; s < surface_count; s++) {
+		void *surface = mesh_storage->mesh_get_surface(mesh, s);
+		for (uint32_t l = 0; l < mesh_storage->mesh_surface_get_lod_count(surface); l++) {
+			const float limit = mesh_storage->mesh_surface_get_lod_edge_length(surface, l) / p_threshold;
+			if (limit > 0.0f && !r_limits.has(limit)) {
+				r_limits.push_back(limit);
+			}
+		}
+	}
+	r_limits.sort();
+	if (r_limits.size() > Cull::MAX_LOD_BUCKETS - 1) {
+		r_limits.resize(Cull::MAX_LOD_BUCKETS - 1); // The farthest bucket keeps a finer LOD than needed.
+	}
+	const uint32_t buckets = r_limits.size() + 1;
+	for (uint32_t b = 0; b < buckets && buckets > 1; b++) {
+		for (uint32_t s = 0; s < surface_count; s++) {
+			void *surface = mesh_storage->mesh_get_surface(mesh, s);
+			uint32_t lod = 0; // As mesh_surface_get_lod() at the bucket's lower end, with the limits' own arithmetic.
+			for (uint32_t l = 0; b > 0 && l < mesh_storage->mesh_surface_get_lod_count(surface); l++) {
+				if (mesh_storage->mesh_surface_get_lod_edge_length(surface, l) / p_threshold > r_limits[b - 1]) {
+					break;
+				}
+				lod = l + 1;
+			}
+			r_lods.bucket_lods[b][s] = lod;
+			r_lod_counts[b * Cull::MAX_LOD_SURFACES + s] = mesh_storage->mesh_surface_get_lod_index_count(surface, lod);
+		}
+	}
+	return buckets;
+}
+
+// Mariner E25c: fills the LOD part of a section's data.
+static void _set_section_lods(RendererRD::MultiMeshShadowCull::SectionData &r_data, const LocalVector<float> &p_limits, const uint32_t *p_lod_counts, bool p_orthogonal) {
+	using Cull = RendererRD::MultiMeshShadowCull;
+	for (uint32_t b = 0; b < p_limits.size(); b++) {
+		r_data.lod_limits[b] = p_limits[b];
+	}
+	memcpy(r_data.lod_counts, p_lod_counts, sizeof(uint32_t) * Cull::MAX_LOD_BUCKETS * Cull::MAX_LOD_SURFACES);
+	r_data.info[0] = p_limits.size() + 1;
+	r_data.info[1] |= Cull::SECTION_LOD | (p_orthogonal ? Cull::SECTION_LOD_ORTHOGONAL : 0);
+}
+
+// Mariner E25a: indirect multimeshes with view culling (MultiMesh / RenderingServer.multimesh_set_indirect_view_culling,
+// GPU static batches): their instances inside the camera's side planes are copied into a section of their own (one per
+// geometry instance), with draw commands of their own, before the depth pre-pass; the camera's passes draw the section.
+// Several renders a frame (viewports, probes) reuse the buffers in order (the render graph orders the writes after the
+// earlier draws). Multiview renders draw all instances.
+void RenderForwardClustered::_view_cull_indirect_multimeshes(const RenderDataRD *p_render_data) {
+	scene_state.view_cull_sections.clear();
+	scene_state.view_cull_data.clear();
+	if (!multimesh_shadow_cull || p_render_data->scene_data->view_count != 1) {
+		return;
+	}
+	using Cull = RendererRD::MultiMeshShadowCull;
+	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+	RD *rd = RD::get_singleton();
+	const RenderSceneDataRD *scene_data = p_render_data->scene_data;
+
+	HashMap<RID, LocalVector<const GeometryInstanceForwardClustered *>> users;
+	for (uint32_t i = 0; i < p_render_data->instances->size(); i++) {
+		const GeometryInstanceForwardClustered *inst = static_cast<const GeometryInstanceForwardClustered *>((*p_render_data->instances)[i]);
+		if (!(inst->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_INDIRECT) || !mesh_storage->multimesh_get_indirect_view_culling(inst->data->base)) {
+			continue;
+		}
+		LocalVector<const GeometryInstanceForwardClustered *> &list = users[inst->data->base];
+		scene_state.view_cull_sections[uint64_t(inst)] = list.size();
+		list.push_back(inst);
+	}
+	if (users.is_empty()) {
+		return;
+	}
+	rd->draw_command_begin_label("Cull Indirect MultiMeshes (Camera)");
+
+	// Mariner E25b: the occlusion pyramid the CPU culled the other instances with, if there is one.
+	const GPUOcclusionData *occ = gpu_occlusion;
+	const bool use_occlusion = occ != nullptr && occ->buffer != nullptr && !occ->buffer->is_empty() && occ->buffer->get_mip_sizes().size() <= Cull::OCCLUSION_MAX_MIPS;
+	Cull::Occlusion occlusion;
+	Transform3D occlusion_cam_inv;
+	if (use_occlusion) {
+		occlusion_cam_inv = occ->cam_transform.affine_inverse();
+		const LocalVector<float> &depth = occ->buffer->get_data();
+		const uint32_t depth_size = depth.size() * sizeof(float);
+		if (scene_state.occlusion_depth_buffer.is_null() || scene_state.occlusion_depth_size < depth_size) {
+			if (scene_state.occlusion_depth_buffer.is_valid()) {
+				rd->free_rid(scene_state.occlusion_depth_buffer);
+			}
+			scene_state.occlusion_depth_size = depth_size;
+			scene_state.occlusion_depth_buffer = rd->storage_buffer_create(depth_size);
+		}
+		rd->buffer_update(scene_state.occlusion_depth_buffer, 0, depth_size, depth.ptr());
+
+		Cull::OcclusionHeader header = {};
+		const LocalVector<Size2i> &mip_sizes = occ->buffer->get_mip_sizes();
+		for (uint32_t m = 0; m < mip_sizes.size(); m++) {
+			header.mips[m][0] = mip_sizes[m].x;
+			header.mips[m][1] = mip_sizes[m].y;
+			header.mips[m][2] = occ->buffer->get_mip_offset(m);
+		}
+		header.info[0] = mip_sizes.size();
+		header.info[1] = uint32_t(occ->buffer->get_occlusion_frame());
+		header.info[2] = occ->jitter ? 1 : 0;
+		header.info[3] = occ->is_orthogonal ? 1 : 0;
+		header.misc[0] = occ->z_near;
+		if (scene_state.occlusion_header_buffer.is_null()) {
+			scene_state.occlusion_header_buffer = rd->storage_buffer_create(sizeof(Cull::OcclusionHeader));
+		}
+		rd->buffer_update(scene_state.occlusion_header_buffer, 0, sizeof(header), &header);
+		occlusion.depth_buffer = scene_state.occlusion_depth_buffer;
+		occlusion.header_buffer = scene_state.occlusion_header_buffer;
+	}
+
+	const Vector3 camera_position = scene_data->main_cam_transform.origin;
+	const float lod_threshold = scene_data->screen_mesh_lod_threshold;
+	for (const KeyValue<RID, LocalVector<const GeometryInstanceForwardClustered *>> &E : users) {
+		const RID multimesh = E.key;
+		const uint32_t section_count = E.value.size();
+
+		RendererRD::MeshStorage::MultiMeshShadowCull lods;
+		LocalVector<float> limits;
+		uint32_t lod_counts[Cull::MAX_LOD_BUCKETS * Cull::MAX_LOD_SURFACES] = {};
+		const uint32_t buckets = _indirect_lod_buckets(multimesh, lod_threshold, limits, lods, lod_counts);
+
+		RendererRD::MeshStorage::MultiMeshShadowCull cull;
+		if (!mesh_storage->multimesh_view_cull_prepare(multimesh, section_count * buckets, scene_shader.default_shader_rd, TRANSFORMS_UNIFORM_SET, cull)) {
+			for (const GeometryInstanceForwardClustered *inst : E.value) {
+				scene_state.view_cull_sections.erase(uint64_t(inst)); // Drawn whole, as before.
+			}
+			continue;
+		}
+		cull.buckets = buckets;
+		memcpy(cull.bucket_lods, lods.bucket_lods, sizeof(cull.bucket_lods));
+
+		LocalVector<Cull::Pass> passes;
+		passes.resize(section_count);
+		const Projection view_clip = scene_data->cam_projection * Projection(scene_data->cam_transform.affine_inverse());
+		for (uint32_t i = 0; i < section_count; i++) {
+			const GeometryInstanceForwardClustered *inst = E.value[i];
+			Cull::Pass &pass = passes[i];
+			pass.section = i;
+			Cull::get_side_planes(view_clip * Projection(inst->transform), pass.planes);
+			Cull::SectionData &data = pass.data;
+			uint32_t flags = 0;
+			data.set_aabb(cull.mesh_aabb);
+			data.set_world(inst->transform);
+			data.camera[0] = camera_position.x;
+			data.camera[1] = camera_position.y;
+			data.camera[2] = camera_position.z;
+			data.camera[3] = scene_data->lod_distance_multiplier / MAX(inst->lod_bias, 0.0001f);
+			if (use_occlusion && !inst->ignore_occlusion_culling) {
+				data.set_view(occlusion_cam_inv * inst->transform, occ->cam_projection);
+				flags |= Cull::SECTION_OCCLUSION;
+			}
+			if (inst->has_gpu_visibility_range()) {
+				for (int k = 0; k < 4; k++) {
+					data.range[k] = inst->gpu_visibility_range[k];
+				}
+				flags |= Cull::SECTION_RANGE;
+			}
+			data.info[0] = 1;
+			data.info[1] = flags;
+			if (buckets > 1) {
+				_set_section_lods(data, limits, lod_counts, scene_data->cam_orthogonal);
+			}
+			pass.has_data = data.info[1] != 0;
+		}
+		multimesh_shadow_cull->process(cull, passes.ptr(), section_count, section_count, use_occlusion ? &occlusion : nullptr);
+		scene_state.view_cull_data[multimesh] = cull;
+	}
+	rd->draw_command_end_label();
+}
+
+void RenderForwardClustered::_apply_view_cull(RenderListParameters &r_params) const {
+	if (!scene_state.view_cull_data.is_empty()) {
+		r_params.cull_sections = &scene_state.view_cull_sections;
+		r_params.cull_data = &scene_state.view_cull_data;
+	}
+}
+
 void RenderForwardClustered::_render_shadow_begin() {
 	scene_state.shadow_passes.clear();
+	scene_state.shadow_cull_passes.clear();
+	scene_state.shadow_cull_data.clear();
 	RD::get_singleton()->draw_command_begin_label("Shadow Setup");
 	_update_render_base_uniform_set();
 
@@ -3110,6 +3779,42 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 
 		shadow_pass.uniform_buffer_index = uniform_buffer_index;
 
+		if (!p_use_dp && multimesh_shadow_cull) {
+			// Mariner E14b: indirect multimeshes that cull their instances per shadow pass get a section of this pass.
+			RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+			const Projection light_clip = p_projection * Projection(p_transform.affine_inverse());
+			for (uint32_t i = 0; i < p_instances.size(); i++) {
+				const GeometryInstanceForwardClustered *inst = static_cast<const GeometryInstanceForwardClustered *>(p_instances[i]);
+				if (!(inst->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_INDIRECT) || !mesh_storage->multimesh_get_indirect_shadow_culling(inst->data->base)) {
+					continue;
+				}
+				// One section per pass and geometry instance (instances sharing the multimesh have their own transforms).
+				const RID multimesh = inst->data->base;
+				LocalVector<RendererRD::MultiMeshShadowCull::Pass> &passes = scene_state.shadow_cull_passes[multimesh];
+				RendererRD::MultiMeshShadowCull::Pass pass;
+				pass.section = passes.size();
+				RendererRD::MultiMeshShadowCull::get_side_planes(light_clip * Projection(inst->transform), pass.planes);
+				// Mariner E25c: visibility range and LOD from the camera, as the CPU does for shadow casters.
+				pass.data.set_world(inst->transform);
+				pass.data.camera[0] = p_main_cam_transform.origin.x;
+				pass.data.camera[1] = p_main_cam_transform.origin.y;
+				pass.data.camera[2] = p_main_cam_transform.origin.z;
+				pass.data.camera[3] = p_lod_distance_multiplier / MAX(inst->lod_bias, 0.0001f);
+				pass.data.info[0] = 1;
+				if (inst->has_gpu_visibility_range()) {
+					// Instances out of the visibility range from the camera cast no shadow.
+					pass.has_data = true;
+					for (int k = 0; k < 4; k++) {
+						pass.data.range[k] = inst->gpu_visibility_range[k];
+					}
+					pass.data.info[1] = RendererRD::MultiMeshShadowCull::SECTION_RANGE;
+				}
+				passes.push_back(pass);
+				shadow_pass.shadow_cull_sections[uint64_t(inst)] = pass.section;
+			}
+			scene_state.shadow_cull_lod_threshold = scene_data.screen_mesh_lod_threshold;
+		}
+
 		scene_state.shadow_passes.push_back(shadow_pass);
 	}
 }
@@ -3128,13 +3833,50 @@ void RenderForwardClustered::_render_shadow_process() {
 		shadow_pass.rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_SECONDARY, nullptr, RID(), RendererRD::MaterialStorage::get_singleton()->samplers_rd_get_default(), shadow_pass.uniform_buffer_index, false);
 	}
 
+	// Mariner E14b: the instances of each culled indirect multimesh per pass, before the passes are drawn.
+	if (!scene_state.shadow_cull_passes.is_empty()) {
+		RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+		for (KeyValue<RID, LocalVector<RendererRD::MultiMeshShadowCull::Pass>> &E : scene_state.shadow_cull_passes) {
+			// Mariner E25c: LOD buckets by the distance from the camera (the stock path picks shadow LODs so too).
+			RendererRD::MeshStorage::MultiMeshShadowCull lods;
+			LocalVector<float> limits;
+			uint32_t lod_counts[RendererRD::MultiMeshShadowCull::MAX_LOD_BUCKETS * RendererRD::MultiMeshShadowCull::MAX_LOD_SURFACES] = {};
+			const uint32_t buckets = _indirect_lod_buckets(E.key, scene_state.shadow_cull_lod_threshold, limits, lods, lod_counts);
+			RendererRD::MeshStorage::MultiMeshShadowCull cull;
+			if (!mesh_storage->multimesh_shadow_cull_prepare(E.key, E.value.size() * buckets, scene_shader.default_shader_rd, TRANSFORMS_UNIFORM_SET, cull)) {
+				continue; // Not drawn from sections (whole, as before).
+			}
+			cull.buckets = buckets;
+			memcpy(cull.bucket_lods, lods.bucket_lods, sizeof(cull.bucket_lods));
+			for (RendererRD::MultiMeshShadowCull::Pass &pass : E.value) {
+				if (buckets > 1) {
+					_set_section_lods(pass.data, limits, lod_counts, false);
+					pass.has_data = true;
+				}
+				if (pass.has_data) {
+					pass.data.set_aabb(cull.mesh_aabb); // The range is to the box's center, LOD to the box.
+				}
+			}
+			multimesh_shadow_cull->process(cull, E.value.ptr(), E.value.size(), E.value.size());
+			scene_state.shadow_cull_data[E.key] = cull;
+		}
+	}
+
 	RD::get_singleton()->draw_command_end_label();
 }
 void RenderForwardClustered::_render_shadow_end() {
 	RD::get_singleton()->draw_command_begin_label("Shadow Render");
 
 	for (SceneState::ShadowPass &shadow_pass : scene_state.shadow_passes) {
+		if (shadow_pass.copy_depth_from.is_valid()) {
+			// Mariner E10: static casters of the cascade from the directional shadow cache.
+			copy_effects->copy_depth_rect_to_depth_fb(shadow_pass.copy_depth_from, shadow_pass.framebuffer, shadow_pass.rect);
+		}
 		RenderListParameters render_list_parameters(render_list[RENDER_LIST_SECONDARY].elements.ptr() + shadow_pass.element_from, render_list[RENDER_LIST_SECONDARY].element_info.ptr() + shadow_pass.element_from, shadow_pass.element_count, shadow_pass.flip_cull, shadow_pass.pass_mode, 0, true, false, shadow_pass.rp_uniform_set, false, Vector2(), shadow_pass.lod_distance_multiplier, shadow_pass.screen_mesh_lod_threshold, 1, shadow_pass.element_from);
+		if (!shadow_pass.shadow_cull_sections.is_empty() && !scene_state.shadow_cull_data.is_empty()) {
+			render_list_parameters.cull_sections = &shadow_pass.shadow_cull_sections;
+			render_list_parameters.cull_data = &scene_state.shadow_cull_data;
+		}
 		_render_list_with_draw_list(&render_list_parameters, shadow_pass.framebuffer, shadow_pass.clear_depth ? RD::DRAW_CLEAR_DEPTH : RD::DRAW_DEFAULT_ALL, Vector<Color>(), 0.0f, 0, shadow_pass.rect);
 	}
 
@@ -3247,6 +3989,70 @@ void RenderForwardClustered::_render_material(const Transform3D &p_cam_transform
 		_render_list(draw_list, RD::get_singleton()->framebuffer_get_format(p_framebuffer), &render_list_params, 0, render_list_params.element_count);
 		RD::get_singleton()->draw_list_end();
 	}
+
+	RD::get_singleton()->draw_command_end_label();
+}
+
+void RenderForwardClustered::_render_translucent_shadow() {
+	// Mariner E21: the material pass along the light writes, for the nearest translucent caster, its transmitted
+	// colour (the material's backlight, else white mixed towards the albedo by the alpha) and its distance from the
+	// near plane of the map. Cleared to white at "infinity".
+	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
+	const TranslucentShadowJob job = translucent_shadow_job;
+	translucent_shadow_job = TranslucentShadowJob();
+	ERR_FAIL_COND(!light_storage->owns_light_instance(job.light) || job.instances == nullptr);
+
+	const int size = MAX(64, int(GLOBAL_GET_CACHED(int, "rendering/lights_and_shadows/directional_shadow/translucent_shadow_size")));
+	const RendererRD::LightStorage::DirectionalTranslucentShadow &ts = light_storage->directional_translucent_shadow_get(size);
+
+	RD::get_singleton()->draw_command_begin_label("Render Translucent Shadow");
+
+	RenderSceneDataRD scene_data;
+	scene_data.flip_y = false; // As the directional shadow passes.
+	scene_data.cam_projection = light_storage->light_instance_get_shadow_camera(job.light, 5);
+	scene_data.cam_transform = light_storage->light_instance_get_shadow_transform(job.light, 5);
+	scene_data.view_projection[0] = scene_data.cam_projection;
+	scene_data.z_near = 0.0;
+	scene_data.z_far = light_storage->light_instance_get_shadow_range(job.light, 5);
+	scene_data.dual_paraboloid_side = 0;
+	scene_data.material_uv2_mode = false;
+	scene_data.opaque_prepass_threshold = 0.0f;
+	scene_data.emissive_exposure_normalization = 1.0f;
+	scene_data.time = time;
+	scene_data.time_step = time_step;
+	scene_data.main_cam_transform = scene_data.cam_transform;
+	scene_data.translucent_shadow_pass = true;
+
+	RenderDataRD render_data;
+	render_data.scene_data = &scene_data;
+	render_data.cluster_size = 1;
+	render_data.cluster_max_elements = 32;
+	render_data.instances = job.instances;
+
+	scene_shader.enable_advanced_shader_group();
+	_update_render_base_uniform_set();
+
+	const Size2i fb_size(size, size);
+	uint32_t uniform_buffer_index = _setup_environment(&render_data, true, fb_size, fb_size, Color());
+
+	PassMode pass_mode = PASS_MODE_DEPTH_MATERIAL;
+	_fill_render_list(RENDER_LIST_SECONDARY, &render_data, pass_mode);
+	render_list[RENDER_LIST_SECONDARY].sort_by_key();
+	_fill_instance_data(RENDER_LIST_SECONDARY);
+
+	RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_SECONDARY, nullptr, RID(), RendererRD::MaterialStorage::get_singleton()->samplers_rd_get_default(), uniform_buffer_index);
+
+	RenderListParameters render_list_params(render_list[RENDER_LIST_SECONDARY].elements.ptr(), render_list[RENDER_LIST_SECONDARY].element_info.ptr(), render_list[RENDER_LIST_SECONDARY].elements.size(), true, pass_mode, 0, true, false, rp_uniform_set);
+	Vector<Color> clear = {
+		Color(1, 1, 1, 1),
+		Color(0, 0, 0, 0),
+		Color(0, 0, 0, 0),
+		Color(0, 0, 0, 0),
+		Color(1e30, 0, 0, 0)
+	};
+	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(ts.fb, RD::DRAW_CLEAR_ALL, clear, 0.0f, 0, Rect2i(Point2i(), fb_size));
+	_render_list(draw_list, RD::get_singleton()->framebuffer_get_format(ts.fb), &render_list_params, 0, render_list_params.element_count);
+	RD::get_singleton()->draw_list_end();
 
 	RD::get_singleton()->draw_command_end_label();
 }
@@ -3918,6 +4724,9 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		u.binding = 27;
 		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 		RID aot = rb.is_valid() && rb->has_texture(RB_SCOPE_SSAO, RB_FINAL) ? rb->get_texture(RB_SCOPE_SSAO, RB_FINAL) : RID();
+		if (_gtao_active(p_render_data) && rb->has_texture(SNAME("mariner_gtao_out"), SNAME("final"))) {
+			aot = rb->get_texture(SNAME("mariner_gtao_out"), SNAME("final")); // Mariner E18.
+		}
 		RID texture = aot.is_valid() ? aot : texture_storage->texture_rd_get_default(is_multiview ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
 		u.append_id(texture);
 		uniforms.push_back(u);
@@ -4039,6 +4848,89 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		RID texture = ssr_mip_level.is_valid() ? ssr_mip_level : texture_storage->texture_rd_get_default(is_multiview ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
 		u.append_id(texture);
 		uniforms.push_back(u);
+	}
+	{
+		// Mariner E10b: directional object shadow (not while drawing shadows: it may be the attachment).
+		RD::Uniform u;
+		u.binding = 37;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		const RID object_shadow = RendererRD::LightStorage::get_singleton()->directional_object_shadow_get_current_texture();
+		u.append_id(p_use_directional_shadow_atlas && object_shadow.is_valid() ? object_shadow : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_DEPTH));
+		uniforms.push_back(u);
+	}
+	{
+		// Mariner E11: contact shadow mask - only for the opaque pass (its pixels are the depth pre-pass ones),
+		// white everywhere else (transparent, late opaque, shadow passes).
+		RD::Uniform u;
+		u.binding = 38;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		const bool use_mask = contact_shadow_mask.is_valid() && p_render_data != nullptr && (p_render_list == RENDER_LIST_OPAQUE || p_render_list == RENDER_LIST_MOTION);
+		u.append_id(use_mask ? contact_shadow_mask : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE));
+		uniforms.push_back(u);
+	}
+
+	{
+		// Mariner E12: DDGI probes of the viewport when they were updated this frame (color passes), else inactive.
+		const bool use_ddgi = rb.is_valid() && p_render_data != nullptr && p_render_data->reflection_probe.is_null() && rb->ddgi.active && rb->ddgi.frame == RSG::rasterizer->get_frame_number();
+		RD::Uniform u;
+		u.binding = 39;
+		u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
+		u.append_id(use_ddgi ? rb->ddgi.params_buffer : ddgi->get_inactive_params_buffer());
+		uniforms.push_back(u);
+		// Bindings 40-43: world grid, 44-47: local grid (DDGIVolume3D); black when not updated this frame.
+		const RID black = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
+		for (uint32_t vi = 0; vi < RenderSceneBuffersRD::DDGI_VOLUME_MAX; vi++) {
+			const bool on = use_ddgi && rb->ddgi.volumes[vi].active;
+			const RenderSceneBuffersRD::DDGIVolume *v = on ? &rb->ddgi.volumes[vi] : nullptr;
+			const RID textures[4] = { v ? v->irradiance : black, v ? v->distance : black, v ? v->probe_data : black, v ? v->irradiance_lights : black };
+			for (uint32_t t = 0; t < 4; t++) {
+				RD::Uniform tu;
+				tu.binding = 40 + vi * 4 + t;
+				tu.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+				tu.append_id(textures[t]);
+				uniforms.push_back(tu);
+			}
+		}
+	}
+	{
+		// Mariner E21: translucent shadow map (colour, distance); not while drawing shadows or the map itself.
+		const RID color = RendererRD::LightStorage::get_singleton()->directional_translucent_shadow_get_color();
+		const RID distance = RendererRD::LightStorage::get_singleton()->directional_translucent_shadow_get_distance();
+		const bool use = p_use_directional_shadow_atlas && color.is_valid() && distance.is_valid();
+		RD::Uniform u;
+		u.binding = 48;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		u.append_id(use ? color : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE));
+		uniforms.push_back(u);
+		RD::Uniform d;
+		d.binding = 49;
+		d.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		d.append_id(use ? distance : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE));
+		uniforms.push_back(d);
+	}
+	{
+		// Mariner E20: ReSTIR DI light (diffuse, specular) of this frame.
+		Ref<RenderSceneBuffersRD> restir_rb = p_render_data ? p_render_data->render_buffers : Ref<RenderSceneBuffersRD>();
+		const bool use = restir_rb.is_valid() && p_render_data->restir_active && restir_rb->restir.diffuse.is_valid() && restir_rb->restir.frame == RSG::rasterizer->get_frame_number();
+		const RID black = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
+		RD::Uniform u;
+		u.binding = 50;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		u.append_id(use ? restir_rb->restir.diffuse : black);
+		uniforms.push_back(u);
+		RD::Uniform s;
+		s.binding = 51;
+		s.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		s.append_id(use ? restir_rb->restir.specular : black);
+		uniforms.push_back(s);
+		// Mariner E20b: ray traced shadows of directional lights.
+		RD::Uniform m;
+		m.binding = 52;
+		m.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		// Mariner E20c: the late opaque pass has its own mask (its surfaces were not in the depth pre-pass).
+		const RID mask = !use ? RID() : (p_render_list == RENDER_LIST_OPAQUE_LATE ? restir_rb->restir.shadow_late_mask : restir_rb->restir.shadow_mask);
+		m.append_id(use && mask.is_valid() ? mask : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE));
+		uniforms.push_back(m);
 	}
 
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.default_shader_rd, RENDER_PASS_UNIFORM_SET, uniforms);
@@ -5401,6 +6293,16 @@ RenderForwardClustered::RenderForwardClustered() {
 			defines += "\n#define USE_VERTEX_LIGHTING\n";
 		}
 
+		// Mariner M1-M3.
+		if (GLOBAL_GET("rendering/shading/overrides/multiscatter_diffuse")) {
+			defines += "\n#define DIFFUSE_MULTISCATTER\n";
+		}
+		if (GLOBAL_GET("rendering/shading/overrides/micro_shadowing")) {
+			defines += "\n#define MICRO_SHADOWING\n";
+		}
+		if (GLOBAL_GET("rendering/shading/overrides/multi_bounce_ao")) {
+			defines += "\n#define MULTI_BOUNCE_AO\n";
+		}
 		bool specular_occlusion = GLOBAL_GET("rendering/reflections/specular_occlusion/enabled");
 		if (!specular_occlusion) {
 			defines += "\n#define SPECULAR_OCCLUSION_DISABLED\n";
@@ -5522,6 +6424,11 @@ RenderForwardClustered::RenderForwardClustered() {
 	fsr2_effect = memnew(RendererRD::FSR2Effect);
 	dlss_effect = memnew(RendererRD::DLSSEffect);
 	ss_effects = memnew(RendererRD::SSEffects);
+	contact_shadows = memnew(RendererRD::ContactShadows); // Mariner E11.
+	hiz_occlusion_depth = memnew(RendererRD::HiZOcclusionDepth); // Mariner E13.
+	particles_screen_collision = memnew(RendererRD::ParticlesScreenCollision); // Mariner E22.
+	multimesh_shadow_cull = memnew(RendererRD::MultiMeshShadowCull); // Mariner E14b.
+	ddgi = memnew(RenderDDGI); // Mariner E12 (shaders are created on first use).
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	motion_vectors_store = memnew(RendererRD::MotionVectorsStore);
 	mfx_temporal_effect = memnew(RendererRD::MFXTemporalEffect);
@@ -5537,9 +6444,39 @@ bool RenderForwardClustered::pathtracing_is_supported() const {
 }
 
 RenderForwardClustered::~RenderForwardClustered() {
+	_directional_shadow_cache_free(); // Mariner E10.
+	if (contact_shadows) {
+		memdelete(contact_shadows); // Mariner E11.
+		contact_shadows = nullptr;
+	}
+	for (RID rid : { scene_state.occlusion_depth_buffer, scene_state.occlusion_header_buffer }) {
+		if (rid.is_valid()) {
+			RD::get_singleton()->free_rid(rid); // Mariner E25b.
+		}
+	}
+	if (multimesh_shadow_cull) {
+		memdelete(multimesh_shadow_cull); // Mariner E14b.
+		multimesh_shadow_cull = nullptr;
+	}
+	if (hiz_occlusion_depth) {
+		memdelete(hiz_occlusion_depth); // Mariner E13.
+		hiz_occlusion_depth = nullptr;
+	}
+	if (particles_screen_collision) {
+		memdelete(particles_screen_collision); // Mariner E22.
+		particles_screen_collision = nullptr;
+	}
 	if (pathtracer) {
 		memdelete(pathtracer);
 		pathtracer = nullptr;
+	}
+	if (restir) {
+		memdelete(restir); // Mariner E20.
+		restir = nullptr;
+	}
+	if (ddgi) {
+		memdelete(ddgi); // Mariner E12.
+		ddgi = nullptr;
 	}
 	if (raytracing) {
 		memdelete(raytracing);
@@ -5550,6 +6487,10 @@ RenderForwardClustered::~RenderForwardClustered() {
 		memdelete(ss_effects);
 		ss_effects = nullptr;
 	}
+	if (gtao) {
+		memdelete(gtao);
+		gtao = nullptr;
+	}
 
 	if (taa != nullptr) {
 		memdelete(taa);
@@ -5559,6 +6500,11 @@ RenderForwardClustered::~RenderForwardClustered() {
 	if (fsr2_effect) {
 		memdelete(fsr2_effect);
 		fsr2_effect = nullptr;
+	}
+
+	if (fsr3_effect) {
+		memdelete(fsr3_effect);
+		fsr3_effect = nullptr;
 	}
 
 	if (dlss_effect) {

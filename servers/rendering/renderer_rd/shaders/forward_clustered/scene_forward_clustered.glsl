@@ -6,7 +6,6 @@
 
 /* Include half precision types. */
 #include "../half_inc.glsl"
-
 #include "scene_forward_clustered_inc.glsl"
 
 #define SHADER_IS_SRGB false
@@ -578,6 +577,10 @@ void vertex_shader(vec3 vertex_input,
 					continue; //not masked
 				}
 
+				if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_RESTIR) && omni_lights.data[light_index].restir > 0.5) {
+					continue; // Mariner E20: lit by ReSTIR DI (restir_diffuse / restir_specular).
+				}
+
 				if (omni_lights.data[light_index].bake_mode == LIGHT_BAKE_STATIC && bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) {
 					continue; // Statically baked light and object uses lightmap, skip
 				}
@@ -611,6 +614,10 @@ void vertex_shader(vec3 vertex_input,
 
 				if (!bool(spot_lights.data[light_index].mask & instances.data[instance_index].layer_mask)) {
 					continue; //not masked
+				}
+
+				if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_RESTIR) && spot_lights.data[light_index].restir > 0.5) {
+					continue; // Mariner E20: lit by ReSTIR DI (restir_diffuse / restir_specular).
 				}
 
 				if (spot_lights.data[light_index].bake_mode == LIGHT_BAKE_STATIC && bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) {
@@ -879,7 +886,6 @@ void main() {
 
 /* Include half precision types. */
 #include "../half_inc.glsl"
-
 #include "scene_forward_clustered_inc.glsl"
 
 /* Varyings */
@@ -1082,9 +1088,8 @@ layout(location = 2) out vec2 motion_vector;
 #define SPECULAR_SCHLICK_GGX
 #endif
 
-#include "../scene_forward_lights_inc.glsl"
-
 #include "../scene_forward_gi_inc.glsl"
+#include "../scene_forward_lights_inc.glsl"
 
 #endif //!defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 
@@ -1225,6 +1230,9 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 	vec3 albedo_highp = vec3(1.0);
 	vec3 backlight = vec3(0.0);
+	// Mariner E16: MAIN_LIGHT_DIRECTION / MAIN_LIGHT_SHADOW of the fragment function: the first directional light.
+	vec3 main_light_direction = scene_data.directional_light_count > 0 ? directional_lights.data[0].direction : vec3(0.0, 0.0, 1.0);
+	float main_light_shadow = 1.0;
 	vec4 transmittance_color = vec4(0.0, 0.0, 0.0, 1.0);
 	float transmittance_depth = 0.0;
 	float transmittance_boost = 0.0;
@@ -1686,6 +1694,25 @@ void fragment_shader(in SceneData scene_data) {
 
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 
+	// Mariner E18: GTAO visibility and screen space bent normal (world space in the texture).
+	float gtao_visibility = 1.0;
+	bool gtao_bent_used = false;
+	vec3 gtao_bent = normal;
+#ifndef USE_MULTIVIEW
+	if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_GTAO)) {
+		vec4 gtao_sample = textureLod(sampler2D(ao_buffer, SAMPLER_LINEAR_CLAMP), screen_uv, 0.0);
+		gtao_visibility = gtao_sample.a;
+		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_GTAO_BENT_NORMALS)) {
+			vec3 bent_world = gtao_sample.rgb * 2.0 - 1.0;
+			if (dot(bent_world, bent_world) > 0.01) {
+				// Row vector times the rotation of view_matrix = its transpose times the vector.
+				gtao_bent = normalize(bent_world * mat3(scene_data.view_matrix[0].xyz, scene_data.view_matrix[1].xyz, scene_data.view_matrix[2].xyz));
+				gtao_bent_used = true;
+			}
+		}
+	}
+#endif
+
 #ifndef AMBIENT_LIGHT_DISABLED
 // Use bent normal for indirect lighting where possible
 #ifdef BENT_NORMAL_MAP_USED
@@ -1693,6 +1720,10 @@ void fragment_shader(in SceneData scene_data) {
 #else
 	vec3 indirect_normal = normal;
 #endif
+	if (gtao_bent_used) {
+		// The screen space bent normal follows the scene; a bent normal map adds the detail of the surface on top.
+		indirect_normal = normalize(gtao_bent + (indirect_normal - normal));
+	}
 
 	if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP)) {
 #ifdef LIGHT_ANISOTROPY_USED
@@ -2027,11 +2058,41 @@ void fragment_shader(in SceneData scene_data) {
 	}
 #endif // !USE_LIGHTMAP
 
+#ifndef USE_LIGHTMAP
+	// Mariner E12: DDGI probes replace the sky / color ambient light (not SDFGI or VoxelGI where those apply). The
+	// probes have no specular part: the sky reflection is darkened where the probes' sky channel sees less light than
+	// the sky gives (interiors, under the deck; lamps inside do not bring the sky reflection back). DG3: the sky and
+	// lights channels are weighted with their multipliers at once (weather, lightning, ship lamps); the sky multiplier
+	// also scales the sky reflection and the ambient light where no grid applies.
+	if (bool((ddgi_block.volumes[DDGI_VOLUME_WORLD].grid_min.w | ddgi_block.volumes[DDGI_VOLUME_LOCAL].grid_min.w) & DDGI_FLAG_ACTIVE) && !bool(instances.data[instance_index].flags & (INSTANCE_FLAGS_USE_SDFGI | INSTANCE_FLAGS_USE_VOXEL_GI | INSTANCE_FLAGS_USE_GI_BUFFERS))) {
+		vec3 ddgi_world_pos = (inv_view_matrix * vec4(vertex, 1.0)).xyz;
+		vec3 ddgi_world_normal = normalize(mat3(inv_view_matrix) * indirect_normal);
+		vec3 ddgi_world_view = normalize(mat3(inv_view_matrix) * view);
+		float ddgi_amount;
+		vec3 ddgi_lights;
+		vec3 ddgi_sky = ddgi_apply(ambient_light, ddgi_world_pos, ddgi_world_normal, ddgi_world_view, false, ddgi_amount, ddgi_lights);
+		vec2 ddgi_channels = ddgi_block.volumes[DDGI_VOLUME_WORLD].channels.xy;
+		if (ddgi_amount > 0.0) {
+			const vec3 lum_weights = vec3(0.2126, 0.7152, 0.0722);
+			float ambient_lum = dot(ambient_light, lum_weights);
+			float sky_lum = dot(ddgi_sky, lum_weights);
+			float specular_occlusion = clamp(sky_lum / max(ambient_lum, 1e-4), 0.0, 1.0);
+			indirect_specular_light *= mix(1.0, specular_occlusion, ddgi_block.volumes[DDGI_VOLUME_WORLD].misc.x * ddgi_amount);
+		}
+		indirect_specular_light *= ddgi_channels.x;
+		ambient_light = ddgi_sky * ddgi_channels.x + ddgi_lights * ddgi_channels.y;
+	}
+#endif // !USE_LIGHTMAP
+
+#ifdef MICRO_SHADOWING
+	micro_shadow_ao = half(ao); // Mariner M2: the material's own occlusion only.
+#endif
+
 	if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO)) {
 #ifdef USE_MULTIVIEW
 		float ssao = texture(sampler2DArray(ao_buffer, SAMPLER_LINEAR_CLAMP), vec3(screen_uv, ViewIndex)).r;
 #else
-		float ssao = texture(sampler2D(ao_buffer, SAMPLER_LINEAR_CLAMP), screen_uv).r;
+		float ssao = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_GTAO) ? gtao_visibility : texture(sampler2D(ao_buffer, SAMPLER_LINEAR_CLAMP), screen_uv).r;
 #endif
 		ao = min(ao, ssao);
 		ao_light_affect = mix(ao_light_affect, max(ao_light_affect, implementation_data.ssao_light_affect), implementation_data.ssao_ao_affect);
@@ -2140,49 +2201,68 @@ void fragment_shader(in SceneData scene_data) {
 
 	//finalize ambient light here
 	{
-		ambient_light *= ao;
-#ifndef SPECULAR_OCCLUSION_DISABLED
-#ifdef BENT_NORMAL_MAP_USED
-		// Apply cone to cone intersection with cosine weighted assumption:
-		// https://blog.selfshadow.com/publications/s2016-shading-course/activision/s2016_pbs_activision_occlusion.pdf
-		float cos_a_v = sqrt(1.0 - ao);
-		float limited_roughness = max(roughness, 0.01); // Avoid artifacts at really low roughness.
-		float cos_a_s = exp2((-log(10.0) / log(2.0)) * limited_roughness * limited_roughness);
-		float cos_b = dot(bent_normal_vector, reflect(-view, normal));
-
-		// Intersection between the spherical caps of the visibility and specular cone.
-		// Based on Christopher Oat and Pedro V. Sander's "Ambient aperture lighting":
-		// https://advances.realtimerendering.com/s2006/Chapter8-Ambient_Aperture_Lighting.pdf
-		float r1 = acos(cos_a_v);
-		float r2 = acos(cos_a_s);
-		float d = acos(cos_b);
-		float area = 0.0;
-
-		if (d <= max(r1, r2) - min(r1, r2)) {
-			// One cap is enclosed in the other.
-			area = M_TAU - M_TAU * max(cos_a_v, cos_a_s);
-		} else if (d >= r1 + r2) {
-			// No intersection.
-			area = 0.0;
+#ifdef MULTI_BOUNCE_AO
+		bool multi_bounce_ao = true; // Mariner M3: for every kind of occlusion.
+#else
+		bool multi_bounce_ao = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_GTAO);
+#endif
+		if (multi_bounce_ao) {
+			// Mariner E18: multiple bounces brighten the occlusion of light surfaces (Jimenez et al. 2016).
+			vec3 a = 2.0404 * albedo - 0.3324;
+			vec3 b = -4.7951 * albedo + 0.6417;
+			vec3 c = 2.7552 * albedo + 0.6903;
+			ambient_light *= max(vec3(ao), ((ao * a + b) * ao + c) * ao);
 		} else {
-			float delta = abs(r1 - r2);
-			float x = 1.0 - clamp((d - delta) / (r1 + r2 - delta), 0.0, 1.0);
-			area = smoothstep(0.0, 1.0, x);
-			area *= M_TAU - M_TAU * max(cos_a_v, cos_a_s);
+			ambient_light *= ao;
 		}
+#ifndef SPECULAR_OCCLUSION_DISABLED
+		bool use_bent_occlusion = gtao_bent_used;
+		vec3 occlusion_bent = gtao_bent;
+#ifdef BENT_NORMAL_MAP_USED
+		use_bent_occlusion = true;
+		occlusion_bent = gtao_bent_used ? normalize(gtao_bent + (bent_normal_vector - normal)) : bent_normal_vector;
+#endif
+		if (use_bent_occlusion) {
+			// Apply cone to cone intersection with cosine weighted assumption:
+			// https://blog.selfshadow.com/publications/s2016-shading-course/activision/s2016_pbs_activision_occlusion.pdf
+			float cos_a_v = sqrt(1.0 - ao);
+			float limited_roughness = max(roughness, 0.01); // Avoid artifacts at really low roughness.
+			float cos_a_s = exp2((-log(10.0) / log(2.0)) * limited_roughness * limited_roughness);
+			float cos_b = dot(occlusion_bent, reflect(-view, normal));
 
-		float specular_occlusion = area / (M_TAU * (1.0 - cos_a_s));
-		indirect_specular_light *= specular_occlusion;
-#else // BENT_NORMAL_MAP_USED
-		float specular_occlusion = (ambient_light.r * 0.3 + ambient_light.g * 0.59 + ambient_light.b * 0.11) * 2.0; // Luminance of ambient light.
-		specular_occlusion = min(specular_occlusion * 4.0, 1.0); // This multiplication preserves speculars on bright areas.
+			// Intersection between the spherical caps of the visibility and specular cone.
+			// Based on Christopher Oat and Pedro V. Sander's "Ambient aperture lighting":
+			// https://advances.realtimerendering.com/s2006/Chapter8-Ambient_Aperture_Lighting.pdf
+			float r1 = acos(cos_a_v);
+			float r2 = acos(cos_a_s);
+			float d = acos(cos_b);
+			float area = 0.0;
 
-		float reflective_f = (1.0 - roughness) * metallic;
-		// 10.0 is a magic number, it gives the intended effect in most scenarios.
-		// Low enough for occlusion, high enough for reaction to lights and shadows.
-		specular_occlusion = max(min(reflective_f * specular_occlusion * 10.0, 1.0), specular_occlusion);
-		indirect_specular_light *= specular_occlusion;
-#endif // BENT_NORMAL_MAP_USED
+			if (d <= max(r1, r2) - min(r1, r2)) {
+				// One cap is enclosed in the other.
+				area = M_TAU - M_TAU * max(cos_a_v, cos_a_s);
+			} else if (d >= r1 + r2) {
+				// No intersection.
+				area = 0.0;
+			} else {
+				float delta = abs(r1 - r2);
+				float x = 1.0 - clamp((d - delta) / (r1 + r2 - delta), 0.0, 1.0);
+				area = smoothstep(0.0, 1.0, x);
+				area *= M_TAU - M_TAU * max(cos_a_v, cos_a_s);
+			}
+
+			float specular_occlusion = area / (M_TAU * (1.0 - cos_a_s));
+			indirect_specular_light *= specular_occlusion;
+		} else {
+			float specular_occlusion = (ambient_light.r * 0.3 + ambient_light.g * 0.59 + ambient_light.b * 0.11) * 2.0; // Luminance of ambient light.
+			specular_occlusion = min(specular_occlusion * 4.0, 1.0); // This multiplication preserves speculars on bright areas.
+
+			float reflective_f = (1.0 - roughness) * metallic;
+			// 10.0 is a magic number, it gives the intended effect in most scenarios.
+			// Low enough for occlusion, high enough for reaction to lights and shadows.
+			specular_occlusion = max(min(reflective_f * specular_occlusion * 10.0, 1.0), specular_occlusion);
+			indirect_specular_light *= specular_occlusion;
+		}
 #endif // SPECULAR_OCCLUSION_DISABLED
 		ambient_light *= albedo.rgb;
 
@@ -2348,10 +2428,10 @@ void fragment_shader(in SceneData scene_data) {
 					vec3 light_dir = directional_lights.data[i].direction;
 					vec3 base_normal_bias = geo_normal * (1.0 - max(0.0, dot(light_dir, -geo_normal)));
 
-#define BIAS_FUNC(m_var, m_idx)                                                                 \
-	m_var.xyz += light_dir * directional_lights.data[i].shadow_bias[m_idx];                     \
+#define BIAS_FUNC(m_var, m_idx) \
+	m_var.xyz += light_dir * directional_lights.data[i].shadow_bias[m_idx]; \
 	vec3 normal_bias = base_normal_bias * directional_lights.data[i].shadow_normal_bias[m_idx]; \
-	normal_bias -= light_dir * dot(light_dir, normal_bias);                                     \
+	normal_bias -= light_dir * dot(light_dir, normal_bias); \
 	m_var.xyz += normal_bias;
 
 					//version with soft shadows, more expensive
@@ -2539,6 +2619,44 @@ void fragment_shader(in SceneData scene_data) {
 					}
 #endif
 
+#ifndef MODE_RENDER_SDF
+					// Mariner E10b: object shadow (e.g. the own ship) - its own map along the light, at any distance.
+					if (directional_lights.data[i].object_shadow_params.x > 0.5) {
+						vec4 v = vec4(vertex, 1.0);
+						v.xyz += light_dir * directional_lights.data[i].object_shadow_params.y;
+						vec3 normal_bias = base_normal_bias * directional_lights.data[i].object_shadow_params.z;
+						normal_bias -= light_dir * dot(light_dir, normal_bias);
+						v.xyz += normal_bias;
+						vec4 object_coord = directional_lights.data[i].object_shadow_matrix * v;
+						object_coord /= object_coord.w;
+						if (all(greaterThan(object_coord.xy, vec2(0.0))) && all(lessThan(object_coord.xy, vec2(1.0)))) {
+							object_coord.z = clamp(object_coord.z, 0.0, 1.0); // Receivers beyond the far plane: as far as possible.
+							float object_shadow = sample_directional_pcf_shadow(directional_object_shadow, vec2(directional_lights.data[i].object_shadow_params.w) * directional_lights.data[i].soft_shadow_scale, object_coord, scene_data.taa_frame_count);
+							shadow = min(shadow, object_shadow);
+						}
+					}
+
+					// Mariner E11: screen space contact shadow (the mask of the depth pre-pass).
+					if (directional_lights.data[i].contact_shadow_params.x > 0.5) {
+						shadow = min(shadow, texelFetch(sampler2D(contact_shadow_mask, SAMPLER_NEAREST_CLAMP), ivec2(gl_FragCoord.xy), 0).r);
+					}
+
+					// Mariner E20b/E20c: ray traced shadow (Light3D.light_restir) in place of the shadow maps - opaque and late
+					// opaque passes (water), at any distance; transparent materials keep the shadow maps.
+					if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_RT_SHADOW) && directional_lights.data[i].contact_shadow_params.y > 0.5) {
+						vec4 rt_shadow = texelFetch(sampler2D(restir_shadow_mask, SAMPLER_NEAREST_CLAMP), ivec2(gl_FragCoord.xy), 0);
+						float rt = directional_lights.data[i].contact_shadow_params.y > 1.5 ? rt_shadow.g : rt_shadow.r;
+						if (directional_lights.data[i].contact_shadow_params.z > 0.5) {
+							// Mariner E20d: shadow maps near (casters outside the raytracing scene: GPU-driven foliage,
+							// displaced terrain), the traced shadow where they fade out and beyond.
+							float far_w = smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z);
+							shadow = min(shadow, mix(1.0, rt, far_w));
+						} else {
+							shadow = rt;
+						}
+					}
+#endif
+
 #ifdef USE_VERTEX_LIGHTING
 					diffuse_light *= mix(1.0, shadow, diffuse_light_interp.a);
 					direct_specular_light *= mix(1.0, shadow, specular_light_interp.a);
@@ -2646,6 +2764,36 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 
 			blur_shadow(shadow);
+#ifdef MAIN_LIGHT_SHADOW_USED
+			if (i == 0) {
+				shadow *= clamp(main_light_shadow, 0.0, 1.0); // Mariner E16: e.g. self-shadowing of parallax mapping.
+			}
+#endif
+
+			// Mariner E21: translucent shadow - behind the nearest translucent caster along the light, the light is
+			// tinted by what it lets through (2x2 taps, weighted, so the edges are not stair-stepped).
+			vec3 translucent = vec3(1.0);
+#if !defined(SHADOWS_DISABLED) && !defined(MODE_RENDER_SDF)
+			if (directional_lights.data[i].translucent_shadow_params.x > 0.5 && shadow > 0.001) {
+				vec4 tcoord = directional_lights.data[i].translucent_shadow_matrix * vec4(vertex, 1.0);
+				tcoord.xyz /= tcoord.w;
+				if (all(greaterThan(tcoord.xy, vec2(0.0))) && all(lessThan(tcoord.xy, vec2(1.0)))) {
+					float receiver = tcoord.z * directional_lights.data[i].translucent_shadow_params.y - directional_lights.data[i].translucent_shadow_params.z;
+					vec2 texel = tcoord.xy / directional_lights.data[i].translucent_shadow_params.w - 0.5;
+					ivec2 base = ivec2(floor(texel));
+					vec2 f = fract(texel);
+					ivec2 tsize = ivec2(1.0 / directional_lights.data[i].translucent_shadow_params.w);
+					translucent = vec3(0.0);
+					for (int t = 0; t < 4; t++) {
+						ivec2 p = clamp(base + ivec2(t & 1, t >> 1), ivec2(0), tsize - 1);
+						float w = ((t & 1) == 1 ? f.x : 1.0 - f.x) * ((t >> 1) == 1 ? f.y : 1.0 - f.y);
+						float caster = texelFetch(sampler2D(translucent_shadow_distance, SAMPLER_NEAREST_CLAMP), p, 0).r;
+						vec3 through = texelFetch(sampler2D(translucent_shadow_color, SAMPLER_NEAREST_CLAMP), p, 0).rgb;
+						translucent += (receiver > caster ? through : vec3(1.0)) * w;
+					}
+				}
+			}
+#endif
 
 #ifdef DEBUG_DRAW_PSSM_SPLITS
 			vec3 tint = vec3(1.0);
@@ -2666,7 +2814,7 @@ void fragment_shader(in SceneData scene_data) {
 
 			light_compute(normal, directional_lights.data[i].direction, normalize(view), size_A,
 #ifndef DEBUG_DRAW_PSSM_SPLITS
-					directional_lights.data[i].color * directional_lights.data[i].energy,
+					directional_lights.data[i].color * directional_lights.data[i].energy * translucent,
 #else
 					directional_lights.data[i].color * directional_lights.data[i].energy * tint,
 #endif
@@ -2730,6 +2878,10 @@ void fragment_shader(in SceneData scene_data) {
 					continue; //not masked
 				}
 
+				if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_RESTIR) && omni_lights.data[light_index].restir > 0.5) {
+					continue; // Mariner E20: lit by ReSTIR DI (restir_diffuse / restir_specular).
+				}
+
 				if (omni_lights.data[light_index].bake_mode == LIGHT_BAKE_STATIC && bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) {
 					continue; // Statically baked light and object uses lightmap, skip
 				}
@@ -2789,6 +2941,10 @@ void fragment_shader(in SceneData scene_data) {
 
 				if (!bool(spot_lights.data[light_index].mask & instances.data[instance_index].layer_mask)) {
 					continue; //not masked
+				}
+
+				if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_RESTIR) && spot_lights.data[light_index].restir > 0.5) {
+					continue; // Mariner E20: lit by ReSTIR DI (restir_diffuse / restir_specular).
 				}
 
 				if (spot_lights.data[light_index].bake_mode == LIGHT_BAKE_STATIC && bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) {
@@ -2880,6 +3036,18 @@ void fragment_shader(in SceneData scene_data) {
 		}
 	}
 #endif // !USE_VERTEX_LIGHTING
+
+	if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_RESTIR)) {
+		// Mariner E20: light of the Light3D.light_restir lights with ray traced shadows, from ReSTIR DI (this pixel of the
+		// depth prepass). The specular is stored without Fresnel; alpha is the share weighted by the Schlick term.
+		ivec2 restir_pixel = ivec2(gl_FragCoord.xy);
+		vec3 restir_d = texelFetch(sampler2D(restir_diffuse, SAMPLER_NEAREST_CLAMP), restir_pixel, 0).rgb;
+		vec4 restir_s = texelFetch(sampler2D(restir_specular, SAMPLER_NEAREST_CLAMP), restir_pixel, 0);
+		vec3 restir_f0 = vec3(f0);
+		float restir_f90 = clamp(dot(restir_f0, vec3(50.0 * 0.33)), float(metallic), 1.0);
+		diffuse_light += restir_d;
+		direct_specular_light += vec3(energy_compensation) * restir_s.rgb * (restir_f0 + (restir_f90 - restir_f0) * restir_s.a);
+	}
 #endif //!defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 
 #ifdef USE_SHADOW_TO_OPACITY
@@ -3008,6 +3176,16 @@ void fragment_shader(in SceneData scene_data) {
 	normal_output_buffer.rgb = encode24(normal) * 0.5 + 0.5;
 	normal_output_buffer.a = 0.0;
 	depth_output_buffer.r = -vertex.z;
+
+	if (bool(scene_data.flags & SCENE_DATA_FLAGS_TRANSLUCENT_SHADOW_PASS)) {
+		// Mariner E21: what the caster lets through - its backlight, else white turned towards the albedo by the alpha.
+#ifdef LIGHT_BACKLIGHT_USED
+		vec3 transmitted = backlight;
+#else
+		vec3 transmitted = mix(vec3(1.0), albedo, alpha);
+#endif
+		albedo_output_buffer = vec4(clamp(transmitted, vec3(0.0), vec3(1.0)), 1.0);
+	}
 
 	orm_output_buffer.r = ao;
 	orm_output_buffer.g = roughness;

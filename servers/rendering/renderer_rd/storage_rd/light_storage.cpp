@@ -81,6 +81,11 @@ LightStorage::~LightStorage() {
 	free_reflection_data();
 	free_light_data();
 
+	if (directional_object_shadow.depth.is_valid()) { // Mariner E10b.
+		RD::get_singleton()->free_rid(directional_object_shadow.depth);
+	}
+	_free_directional_translucent_shadow(); // Mariner E21.
+
 	for (const KeyValue<int, ShadowCubemap> &E : shadow_cubemaps) {
 		RD::get_singleton()->free_rid(E.value.cubemap);
 	}
@@ -339,6 +344,20 @@ uint32_t LightStorage::light_get_shadow_caster_mask(RID p_light) const {
 	return light->shadow_caster_mask;
 }
 
+void LightStorage::light_set_restir(RID p_light, bool p_enable) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+	light->restir = p_enable;
+	light->version++;
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+bool LightStorage::light_is_restir(RID p_light) const {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, false);
+	return light->restir;
+}
+
 void LightStorage::light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) {
 	Light *light = light_owner.get_or_null(p_light);
 	ERR_FAIL_NULL(light);
@@ -405,6 +424,167 @@ bool LightStorage::light_directional_get_blend_splits(RID p_light) const {
 	ERR_FAIL_NULL_V(light, false);
 
 	return light->directional_blend_splits;
+}
+
+void LightStorage::light_directional_set_object_shadow(RID p_light, uint32_t p_layers, int p_size, int p_from_cascade) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+
+	light->directional_object_shadow_layers = p_layers;
+	light->directional_object_shadow_size = CLAMP(int(Math::nearest_power_of_2_templated(uint32_t(MAX(p_size, 64)))), 64, 16384);
+	light->directional_object_shadow_from_cascade = CLAMP(p_from_cascade, 0, 4);
+	light->version++;
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+uint32_t LightStorage::light_directional_get_object_shadow_layers(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, 0);
+	return light->directional_object_shadow_layers;
+}
+
+int LightStorage::light_directional_get_object_shadow_size(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, 0);
+	return light->directional_object_shadow_size;
+}
+
+int LightStorage::light_directional_get_object_shadow_from_cascade(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, 0);
+	return light->directional_object_shadow_from_cascade;
+}
+
+void LightStorage::light_instance_set_directional_object_shadow(RID p_light_instance, bool p_enabled) {
+	LightInstance *light_instance = light_instance_owner.get_or_null(p_light_instance);
+	ERR_FAIL_NULL(light_instance);
+	light_instance->directional_object_shadow = p_enabled;
+}
+
+void LightStorage::light_instance_set_directional_translucent_shadow(RID p_light_instance, bool p_enabled) {
+	LightInstance *light_instance = light_instance_owner.get_or_null(p_light_instance);
+	ERR_FAIL_NULL(light_instance);
+	light_instance->directional_translucent_shadow = p_enabled;
+}
+
+void LightStorage::_free_directional_translucent_shadow() {
+	DirectionalTranslucentShadow &ts = directional_translucent_shadow;
+	const RID textures[6] = { ts.color, ts.normal, ts.orm, ts.emission, ts.distance, ts.depth };
+	for (const RID &t : textures) {
+		if (t.is_valid()) {
+			RD::get_singleton()->free_rid(t); // Frees the framebuffer too (dependency).
+		}
+	}
+	ts = DirectionalTranslucentShadow();
+}
+
+const LightStorage::DirectionalTranslucentShadow &LightStorage::directional_translucent_shadow_get(int p_size) {
+	DirectionalTranslucentShadow &ts = directional_translucent_shadow;
+	if (ts.fb.is_valid() && ts.size == p_size) {
+		return ts;
+	}
+	_free_directional_translucent_shadow();
+	RD::TextureFormat tf;
+	tf.width = p_size;
+	tf.height = p_size;
+	tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT;
+	tf.format = RD::DATA_FORMAT_R8G8B8A8_UNORM;
+	ts.color = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	ts.normal = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	ts.orm = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
+	ts.emission = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	tf.format = RD::DATA_FORMAT_R32_SFLOAT;
+	ts.distance = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	tf.format = RD::get_singleton()->texture_is_format_supported_for_usage(RD::DATA_FORMAT_D32_SFLOAT, RD::TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) ? RD::DATA_FORMAT_D32_SFLOAT : RD::DATA_FORMAT_X8_D24_UNORM_PACK32;
+	tf.usage_bits = RD::TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	ts.depth = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	RD::get_singleton()->set_resource_name(ts.color, "Directional translucent shadow color");
+	RD::get_singleton()->set_resource_name(ts.distance, "Directional translucent shadow distance");
+	Vector<RID> fb = { ts.color, ts.normal, ts.orm, ts.emission, ts.distance, ts.depth };
+	ts.fb = RD::get_singleton()->framebuffer_create(fb);
+	ts.size = p_size;
+	return ts;
+}
+
+bool LightStorage::light_instance_has_directional_object_shadow(RID p_light_instance) const {
+	const LightInstance *light_instance = light_instance_owner.get_or_null(p_light_instance);
+	ERR_FAIL_NULL_V(light_instance, false);
+	return light_instance->directional_object_shadow;
+}
+
+void LightStorage::light_directional_set_contact_shadow(RID p_light, float p_length) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+	light->directional_contact_shadow_length = MAX(0.0f, p_length);
+	light->version++;
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+float LightStorage::light_directional_get_contact_shadow(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, 0.0);
+	return light->directional_contact_shadow_length;
+}
+
+void LightStorage::light_directional_set_restir_shadow_mode(RID p_light, int p_mode) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+	ERR_FAIL_INDEX(p_mode, 2);
+	light->directional_restir_shadow_mode = p_mode;
+	light->version++;
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+int LightStorage::light_directional_get_restir_shadow_mode(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, 0);
+	return light->directional_restir_shadow_mode;
+}
+
+bool LightStorage::get_frame_sun(Vector3 &r_direction, Color &r_color, float &r_angular_diameter) const {
+	if (!frame_sun.active) {
+		return false;
+	}
+	r_direction = frame_sun.direction;
+	r_color = frame_sun.color;
+	r_angular_diameter = frame_sun.angular_diameter;
+	return true;
+}
+
+bool LightStorage::get_directional_contact_shadow(Vector3 &r_direction, float &r_length) const {
+	if (!directional_contact_shadow.active) {
+		return false;
+	}
+	r_direction = directional_contact_shadow.direction;
+	r_length = directional_contact_shadow.length;
+	return true;
+}
+
+RID LightStorage::directional_object_shadow_get_texture(int p_size) {
+	if (directional_object_shadow.depth.is_valid() && directional_object_shadow.size == p_size && directional_object_shadow.use_16_bits == directional_shadow.use_16_bits) {
+		return directional_object_shadow.depth;
+	}
+	if (directional_object_shadow.depth.is_valid()) {
+		RD::get_singleton()->free_rid(directional_object_shadow.depth); // Frees the framebuffer too (dependency).
+		directional_object_shadow.depth = RID();
+		directional_object_shadow.fb = RID();
+	}
+	RD::TextureFormat tf;
+	tf.format = get_shadow_atlas_depth_format(directional_shadow.use_16_bits);
+	tf.width = p_size;
+	tf.height = p_size;
+	tf.usage_bits = get_shadow_atlas_depth_usage_bits();
+	directional_object_shadow.depth = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	ERR_FAIL_COND_V(directional_object_shadow.depth.is_null(), RID());
+	RD::get_singleton()->set_resource_name(directional_object_shadow.depth, "Directional object shadow");
+	Vector<RID> fb_tex;
+	fb_tex.push_back(directional_object_shadow.depth);
+	directional_object_shadow.fb = RD::get_singleton()->framebuffer_create(fb_tex);
+	directional_object_shadow.size = p_size;
+	directional_object_shadow.use_16_bits = directional_shadow.use_16_bits;
+	// The texture is bound in the render pass uniform set (cached by RID): nothing else to invalidate.
+	return directional_object_shadow.depth;
 }
 
 void LightStorage::light_directional_set_sky_mode(RID p_light, RSE::LightDirectionalSkyMode p_mode) {
@@ -718,6 +898,9 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 	Transform3D inverse_transform = p_camera_transform.affine_inverse();
 
 	r_directional_light_count = 0;
+	directional_contact_shadow.active = false; // Mariner E11: chosen below.
+	directional_rt_shadow_count = 0; // Mariner E20b: chosen below.
+	frame_sun.active = false; // Mariner E15b: chosen below.
 	r_positional_light_count = 0;
 
 	omni_light_count = 0;
@@ -860,6 +1043,74 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 					float fade_start = light->param[RSE::LIGHT_PARAM_SHADOW_FADE_START];
 					light_data.fade_from = -light_data.shadow_split_offsets[3] * MIN(fade_start, 0.999); //using 1.0 would break smoothstep
 					light_data.fade_to = -light_data.shadow_split_offsets[3];
+
+					// Mariner E10b: object shadow map (pass 4), the whole texture.
+					if (light_instance->directional_object_shadow) {
+						const LightInstance::ShadowTransform &ost = light_instance->shadow_transform[4];
+						Projection correction;
+						correction.set_depth_correction(false, true, false);
+						Projection bias;
+						bias.set_light_bias();
+						const Transform3D modelview = (inverse_transform * ost.transform).inverse();
+						const Projection shadow_mtx = bias * (correction * ost.camera) * modelview;
+						RendererRD::MaterialStorage::store_camera(shadow_mtx, light_data.object_shadow_matrix);
+						light_data.object_shadow_params[0] = 1.0;
+						light_data.object_shadow_params[1] = light->param[RSE::LIGHT_PARAM_SHADOW_BIAS] / 100.0 * ost.bias_scale * light_data.soft_shadow_scale;
+						light_data.object_shadow_params[2] = light->param[RSE::LIGHT_PARAM_SHADOW_NORMAL_BIAS] * ost.shadow_texel_size;
+						light_data.object_shadow_params[3] = directional_object_shadow.size > 0 ? 1.0 / directional_object_shadow.size : 0.0;
+					} else {
+						light_data.object_shadow_params[0] = 0.0;
+					}
+				} else {
+					light_data.object_shadow_params[0] = 0.0;
+				}
+
+				// Mariner E21: translucent shadow map (pass 5): uv and distance / far along the light.
+				light_data.translucent_shadow_params[0] = 0.0;
+				if (light_instance->directional_translucent_shadow && light_data.shadow_opacity > 0.001 && directional_translucent_shadow.size > 0) {
+					const LightInstance::ShadowTransform &tst = light_instance->shadow_transform[5];
+					Projection bias;
+					bias.set_light_bias();
+					const Transform3D modelview = (inverse_transform * tst.transform).inverse();
+					const Projection mtx = bias * tst.camera * modelview;
+					RendererRD::MaterialStorage::store_camera(mtx, light_data.translucent_shadow_matrix);
+					light_data.translucent_shadow_params[0] = 1.0;
+					light_data.translucent_shadow_params[1] = tst.farplane;
+					light_data.translucent_shadow_params[2] = MAX(0.02f, tst.shadow_texel_size * 2.0f);
+					light_data.translucent_shadow_params[3] = 1.0f / directional_translucent_shadow.size;
+				}
+
+				// Mariner E11: the first shadowed directional light with a contact shadow length reads the mask.
+				light_data.contact_shadow_params[0] = 0.0;
+				if (!directional_contact_shadow.active && light_data.shadow_opacity > 0.001 && light->directional_contact_shadow_length > 0.0) {
+					directional_contact_shadow.active = true;
+					directional_contact_shadow.direction = direction;
+					directional_contact_shadow.length = light->directional_contact_shadow_length;
+					light_data.contact_shadow_params[0] = 1.0;
+				}
+
+				// Mariner E20b: ray traced shadow (ReSTIR pass) for a shadowed directional light with light_restir.
+				light_data.contact_shadow_params[1] = 0.0;
+				// Mariner E20d: 1 - the traced shadow only takes over where the shadow maps fade out.
+				light_data.contact_shadow_params[2] = light->directional_restir_shadow_mode == 1 ? 1.0 : 0.0;
+				if (light->restir && !light->negative && p_render_data && p_render_data->restir_active && light_data.shadow_opacity > 0.001 && directional_rt_shadow_count < MAX_DIRECTIONAL_RT_SHADOWS) {
+					DirectionalRtShadow &rt = directional_rt_shadows[directional_rt_shadow_count];
+					rt.to_light = light_transform.basis.xform(Vector3(0, 0, 1)).normalized();
+					rt.tan_radius = Math::tan(Math::deg_to_rad(CLAMP(light->param[RSE::LIGHT_PARAM_SIZE], 0.0f, 90.0f)) * 0.5f);
+					directional_rt_shadow_count++;
+					light_data.contact_shadow_params[1] = float(directional_rt_shadow_count);
+				}
+
+				{
+					// Mariner E15b: the brightest directional light is the sun of the lens flare.
+					const Color sun = linear_col * MAX(light_data.energy, 0.0f);
+					const float strength = MAX(sun.r, MAX(sun.g, sun.b));
+					if (strength > 0.0f && (!frame_sun.active || strength > MAX(frame_sun.color.r, MAX(frame_sun.color.g, frame_sun.color.b)))) {
+						frame_sun.active = true;
+						frame_sun.direction = direction;
+						frame_sun.color = sun;
+						frame_sun.angular_diameter = angular_diameter;
+					}
 				}
 
 				r_directional_light_count++;
@@ -1054,6 +1305,8 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 		light_data.color[1] = linear_col.g * energy;
 		light_data.color[2] = linear_col.b * energy;
 		light_data.specular_amount = light->param[RSE::LIGHT_PARAM_SPECULAR] * 2.0;
+		// Mariner E20: lit by ReSTIR DI in the opaque pass (negative lights stay rasterized: they are not resampled).
+		light_data.restir = (light->restir && !light->negative && p_render_data && p_render_data->restir_active && (type == RSE::LIGHT_OMNI || type == RSE::LIGHT_SPOT)) ? 1.0f : 0.0f;
 		light_data.volumetric_fog_energy = light->param[RSE::LIGHT_PARAM_VOLUMETRIC_FOG_ENERGY];
 		light_data.bake_mode = light->bake_mode;
 

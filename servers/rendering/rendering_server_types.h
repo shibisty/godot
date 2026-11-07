@@ -107,6 +107,9 @@ struct SurfaceData {
 
 	Vector4 uv_scale;
 
+	// Mariner E17: world units covered by one unit of the first UV channel (0 when unknown). Texture streaming uses it to tell how many texels reach a screen pixel.
+	float uv_density = 0.0f;
+
 	RID material;
 };
 

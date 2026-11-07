@@ -2201,6 +2201,9 @@ void main() {
 	highp mat4 model_matrix = world_transform;
 	vec3 albedo = vec3(1.0);
 	vec3 backlight = vec3(0.0);
+	// Mariner E16: MAIN_LIGHT_DIRECTION / MAIN_LIGHT_SHADOW exist for compatibility (not applied by this renderer).
+	vec3 main_light_direction = vec3(0.0, 0.0, 1.0);
+	float main_light_shadow = 1.0;
 	vec4 transmittance_color = vec4(0.0, 0.0, 0.0, 1.0);
 	float transmittance_depth = 0.0;
 	float transmittance_boost = 0.0;

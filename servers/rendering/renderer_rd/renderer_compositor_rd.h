@@ -32,6 +32,7 @@
 
 #include "core/io/image.h"
 #include "servers/rendering/renderer_compositor.h"
+#include "servers/rendering/renderer_rd/effects/fsr3_frame_generation.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/renderer_canvas_render_rd.h"
@@ -117,6 +118,28 @@ protected:
 	};
 	HashMap<DisplayServerEnums::WindowID, FrameGenerationHudless> frame_generation_hudless;
 
+	// Mariner E24b: AMD FSR 3 frame generation, per screen. Display-size RGBA16F copies of the frame without and with
+	// the UI (blitted like the screen, so the values are already in the swap chain's encoding) and the interpolated one.
+	struct FSR3FrameGenerationScreen {
+		RendererRD::FSR3FrameGenerationContext *context = nullptr;
+		RID hudless;
+		RID hudless_framebuffer;
+		RID final_color;
+		RID final_framebuffer;
+		RID output;
+		Size2i size;
+		Size2i max_render_size;
+		RID render_target; // Captured this frame.
+		RendererRD::FSR3UpscalerEffect::SharedSurfaces surfaces;
+		uint64_t captured_frame = 0;
+		uint64_t presented = 0;
+		bool reset = true;
+	};
+	HashMap<DisplayServerEnums::WindowID, FSR3FrameGenerationScreen> fsr3_frame_generation;
+	RendererRD::FSR3FrameGenerationEffect *fsr3_frame_generation_effect = nullptr;
+	void _fsr3_frame_generation_free(FSR3FrameGenerationScreen &p_screen);
+	void _fsr3_frame_generation_present(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen &p_blit);
+
 	RID _get_render_target_blit_uniform_set(RID p_rd_texture);
 	BlitMode _set_blit_push_constant(const RenderingServerTypes::BlitToScreen &p_blit, Size2 p_screen_size, int p_screen_rotation_degrees, RD::ColorSpace p_color_space, float p_reference_multiplier, float p_output_max_value);
 
@@ -150,6 +173,9 @@ public:
 	virtual void begin_frame(double frame_step) override;
 	virtual void blit_render_targets_to_screen(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen *p_render_targets, int p_amount) override;
 	virtual void frame_generation_capture_hudless(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen &p_blit) override;
+	virtual void fsr3_frame_generation_capture(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen &p_blit, const Ref<RenderSceneBuffers> &p_render_buffers) override;
+	virtual uint64_t fsr3_frame_generation_get_presented_count(DisplayServerEnums::WindowID p_screen) const override;
+	virtual RID fsr3_frame_generation_get_output_texture(DisplayServerEnums::WindowID p_screen) const override;
 
 	virtual bool is_opengl() override { return false; }
 	virtual void gl_end_frame(bool p_swap_buffers) override {}

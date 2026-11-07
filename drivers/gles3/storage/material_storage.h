@@ -635,7 +635,7 @@ public:
 	virtual void global_shader_parameters_load_settings(bool p_load_textures = true) override;
 	virtual void global_shader_parameters_clear() override;
 
-	virtual int32_t global_shader_parameters_instance_allocate(RID p_instance) override;
+	virtual int32_t global_shader_parameters_instance_allocate(RID p_instance, uint32_t p_elements) override;
 	virtual void global_shader_parameters_instance_free(RID p_instance) override;
 	virtual void global_shader_parameters_instance_update(RID p_instance, int p_index, const Variant &p_value, int p_flags_count = 0) override;
 
@@ -682,6 +682,7 @@ public:
 
 	virtual void material_set_param(RID p_material, const StringName &p_param, const Variant &p_value) override;
 	virtual Variant material_get_param(RID p_material, const StringName &p_param) const override;
+	virtual void material_get_textures(RID p_material, LocalVector<RID> &r_textures) const override;
 
 	virtual void material_set_next_pass(RID p_material, RID p_next_material) override;
 	virtual void material_set_render_priority(RID p_material, int priority) override;

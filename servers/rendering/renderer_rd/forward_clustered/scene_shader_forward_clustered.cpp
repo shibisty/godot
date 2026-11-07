@@ -82,6 +82,7 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	uses_transmittance = false;
 	uses_time = false;
 	writes_modelview_or_projection = false;
+	writes_depth = false;
 	uses_world_coordinates = false;
 	uses_particle_trails = false;
 	uses_z_clip_scale = false;
@@ -154,6 +155,9 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 
 	actions.write_flag_pointers["MODELVIEW_MATRIX"] = &writes_modelview_or_projection;
 	actions.write_flag_pointers["PROJECTION_MATRIX"] = &writes_modelview_or_projection;
+	// Mariner E16: a shader writing DEPTH needs its own depth pre-pass / shadow pass (the shared default material wrote
+	// the flat depth, and the color pass then failed the depth test against it).
+	actions.write_flag_pointers["DEPTH"] = &writes_depth;
 	actions.write_flag_pointers["VERTEX"] = &uses_vertex;
 	actions.write_flag_pointers["POSITION"] = &uses_position;
 	actions.write_flag_pointers["TANGENT"] = &writes_tangent;
@@ -779,6 +783,8 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.renames["SSS_TRANSMITTANCE_DEPTH"] = "transmittance_depth";
 		actions.renames["SSS_TRANSMITTANCE_BOOST"] = "transmittance_boost";
 		actions.renames["BACKLIGHT"] = "backlight";
+		actions.renames["MAIN_LIGHT_DIRECTION"] = "main_light_direction"; // Mariner E16.
+		actions.renames["MAIN_LIGHT_SHADOW"] = "main_light_shadow";
 		actions.renames["AO"] = "ao";
 		actions.renames["AO_LIGHT_AFFECT"] = "ao_light_affect";
 		actions.renames["EMISSION"] = "emission";
@@ -862,6 +868,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.usage_defines["SSS_STRENGTH"] = "#define ENABLE_SSS\n";
 		actions.usage_defines["SSS_TRANSMITTANCE_DEPTH"] = "#define ENABLE_TRANSMITTANCE\n";
 		actions.usage_defines["BACKLIGHT"] = "#define LIGHT_BACKLIGHT_USED\n";
+		actions.usage_defines["MAIN_LIGHT_SHADOW"] = "#define MAIN_LIGHT_SHADOW_USED\n"; // Mariner E16.
 		actions.usage_defines["SCREEN_UV"] = "#define SCREEN_UV_USED\n";
 
 		actions.usage_defines["FOG"] = "#define CUSTOM_FOG_USED\n";

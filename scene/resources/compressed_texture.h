@@ -66,6 +66,7 @@ private:
 	int w = 0;
 	int h = 0;
 	mutable Ref<BitMap> alpha_cache;
+	bool streaming = false; // Mariner E17.
 
 	Error _load_data(const String &p_path, int &r_width, int &r_height, Ref<Image> &image, bool &r_request_3d, bool &r_request_normal, bool &r_request_roughness, int &mipmap_limit, int p_size_limit = 0);
 	virtual void reload_from_file() override;
@@ -90,6 +91,7 @@ public:
 	virtual Image::Format get_format() const override;
 	Error load(const String &p_path);
 	String get_load_path() const;
+	int get_streaming_mip() const;
 
 	int get_width() const override;
 	int get_height() const override;

@@ -33,9 +33,15 @@
 #include "core/templates/paged_allocator.h"
 #include "servers/rendering/multi_uma_buffer.h"
 #include "servers/rendering/renderer_rd/cluster_builder_rd.h"
+#include "servers/rendering/renderer_rd/effects/contact_shadows.h"
 #include "servers/rendering/renderer_rd/effects/dlss.h"
 #include "servers/rendering/renderer_rd/effects/fsr2.h"
+#include "servers/rendering/renderer_rd/effects/fsr3_upscaler.h"
+#include "servers/rendering/renderer_rd/effects/gtao.h"
+#include "servers/rendering/renderer_rd/effects/hiz_occlusion_depth.h"
 #include "servers/rendering/renderer_rd/effects/motion_vectors_store.h"
+#include "servers/rendering/renderer_rd/effects/multimesh_shadow_cull.h"
+#include "servers/rendering/renderer_rd/effects/particles_screen_collision.h"
 #include "servers/rendering/renderer_rd/effects/ss_effects.h"
 #include "servers/rendering/renderer_rd/effects/taa.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_forward_clustered.h"
@@ -59,6 +65,8 @@
 namespace RendererSceneRenderImplementation {
 
 class RenderPathtracer;
+class RenderDDGI;
+class RenderRestirDI;
 class RenderRaytracing;
 
 class RenderForwardClustered : public RendererSceneRenderRD {
@@ -102,6 +110,8 @@ public:
 	private:
 		RenderSceneBuffersRD *render_buffers = nullptr;
 		RendererRD::FSR2Context *fsr2_context = nullptr;
+		RendererRD::FSR3UpscalerContext *fsr3_context = nullptr; // Mariner E24a.
+		bool fsr3_failed = false; // Don't retry a failed context creation every frame.
 		RendererRD::DLSSContext *dlss_context = nullptr;
 #ifdef METAL_MFXTEMPORAL_ENABLED
 		RendererRD::MFXTemporalContext *mfx_temporal_context = nullptr;
@@ -151,6 +161,9 @@ public:
 
 		void ensure_fsr2(RendererRD::FSR2Effect *p_effect);
 		RendererRD::FSR2Context *get_fsr2_context() const { return fsr2_context; }
+
+		void ensure_fsr3(RendererRD::FSR3UpscalerEffect *p_effect);
+		RendererRD::FSR3UpscalerContext *get_fsr3_context() const { return fsr3_context; }
 
 		void ensure_dlss(RendererRD::DLSSEffect *p_effect);
 		RendererRD::DLSSContext *get_dlss_context() const { return dlss_context; }
@@ -247,6 +260,10 @@ private:
 		uint32_t element_offset = 0;
 		bool use_directional_soft_shadow = false;
 		SceneShaderForwardClustered::ShaderSpecialization base_specialization = {};
+		// Mariner E14b / E25a: shadow pass or camera sections of indirect multimeshes (geometry instance -> section), and
+		// their buffers.
+		const HashMap<uint64_t, uint32_t> *cull_sections = nullptr;
+		const HashMap<RID, RendererRD::MeshStorage::MultiMeshShadowCull> *cull_data = nullptr;
 
 		RenderListParameters(GeometryInstanceSurfaceDataCache **p_elements, RenderElementInfo *p_element_info, int p_element_count, bool p_reverse_cull, PassMode p_pass_mode, uint32_t p_color_pass_flags, bool p_no_gi, bool p_use_directional_soft_shadows, RID p_render_pass_uniform_set, bool p_force_wireframe = false, const Vector2 &p_uv_offset = Vector2(), float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, uint32_t p_view_count = 1, uint32_t p_element_offset = 0, SceneShaderForwardClustered::ShaderSpecialization p_base_specialization = {}) {
 			elements = p_elements;
@@ -451,7 +468,27 @@ private:
 			bool flip_cull;
 
 			uint32_t uniform_buffer_index;
+
+			// Mariner E10: copy this depth texture (the directional shadow cache) into `rect` before drawing.
+			RID copy_depth_from;
+
+			// Mariner E14b: indirect multimeshes culled for this pass: geometry instance (pointer) -> section of its multimesh.
+			HashMap<uint64_t, uint32_t> shadow_cull_sections;
 		};
+
+		// Mariner E14b: the passes of each culled indirect multimesh in this batch of shadow passes.
+		HashMap<RID, LocalVector<RendererRD::MultiMeshShadowCull::Pass>> shadow_cull_passes;
+		HashMap<RID, RendererRD::MeshStorage::MultiMeshShadowCull> shadow_cull_data;
+		float shadow_cull_lod_threshold = 0.0; // Mariner E25c: of the shadow passes appended last.
+
+		// Mariner E25a: indirect multimeshes culled for the camera of the scene render being drawn (geometry instance ->
+		// section of its multimesh), and their buffers.
+		HashMap<uint64_t, uint32_t> view_cull_sections;
+		HashMap<RID, RendererRD::MeshStorage::MultiMeshShadowCull> view_cull_data;
+		// Mariner E25b: the occlusion pyramid of RendererSceneRender::gpu_occlusion and the occlusion passes.
+		RID occlusion_depth_buffer;
+		uint32_t occlusion_depth_size = 0; // Bytes.
+		RID occlusion_header_buffer;
 
 		LocalVector<ShadowPass> shadow_passes;
 
@@ -759,10 +796,34 @@ private:
 
 	RendererRD::TAA *taa = nullptr;
 	RendererRD::FSR2Effect *fsr2_effect = nullptr;
+	RendererRD::FSR3UpscalerEffect *fsr3_effect = nullptr; // Mariner E24a: created on first use.
+
+public:
+	virtual const RendererRD::FSR3UpscalerEffect::SharedSurfaces *get_fsr3_shared_surfaces(const Ref<RenderSceneBuffersRD> &p_render_buffers) const override;
+
+private:
 	RenderRaytracing *raytracing = nullptr; // Raytracing scene (TLAS) for compositor effects, created on first use.
 	RenderPathtracer *pathtracer = nullptr; // Path tracer (Mariner E5c, Environment.pathtracing_enabled), created on first use.
+	RenderDDGI *ddgi = nullptr; // DDGI probes (Mariner E12, Environment.ddgi_enabled).
+	RenderRestirDI *restir = nullptr; // Mariner E20, created on first use.
 	RendererRD::DLSSEffect *dlss_effect = nullptr;
 	RendererRD::SSEffects *ss_effects = nullptr;
+	RendererRD::GTAO *gtao = nullptr; // Mariner E18, created on first use.
+	bool _gtao_active(const RenderDataRD *p_render_data) const;
+	void _process_gtao(Ref<RenderSceneBuffersRD> p_render_buffers, const RenderDataRD *p_render_data, RID p_normal_roughness);
+	RendererRD::ContactShadows *contact_shadows = nullptr; // Mariner E11.
+	RendererRD::HiZOcclusionDepth *hiz_occlusion_depth = nullptr; // Mariner E13.
+	RendererRD::ParticlesScreenCollision *particles_screen_collision = nullptr; // Mariner E22.
+	RendererRD::MultiMeshShadowCull *multimesh_shadow_cull = nullptr; // Mariner E14b.
+	uint32_t _indirect_lod_buckets(RID p_multimesh, float p_threshold, LocalVector<float> &r_limits, RendererRD::MeshStorage::MultiMeshShadowCull &r_lods, uint32_t *r_lod_counts) const; // Mariner E25c.
+	RID contact_shadow_mask; // Mariner E11: the mask of the frame being drawn (for the opaque pass), else null.
+	// Mariner E21: the translucent shadow map of this frame, drawn after the shadow passes.
+	struct TranslucentShadowJob {
+		bool valid = false;
+		RID light;
+		const PagedArray<RenderGeometryInstance *> *instances = nullptr;
+	} translucent_shadow_job;
+	void _render_translucent_shadow();
 
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	RendererRD::MFXTemporalEffect *mfx_temporal_effect = nullptr;
@@ -784,8 +845,55 @@ private:
 
 	/* Render shadows */
 
-	void _render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier = 0, float p_screen_mesh_lod_threshold = 0.0, bool p_open_pass = true, bool p_close_pass = true, bool p_clear_region = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D());
+	void _render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier = 0, float p_screen_mesh_lod_threshold = 0.0, bool p_open_pass = true, bool p_close_pass = true, bool p_clear_region = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D(), const RenderShadowData *p_cache_data = nullptr);
+
+	/* Mariner E10: directional shadow cache */
+
+	// The static casters of each cascade are drawn into a second depth texture the size of the directional shadow
+	// atlas, at the cascade's own atlas rect, and copied into the atlas every frame before the dynamic casters. A
+	// cascade is redrawn into the cache when its projection, light orientation, rect or static set changed.
+	struct DirectionalShadowCache {
+		bool enabled = false;
+		RID texture;
+		RID framebuffer;
+		Size2i size;
+		RD::DataFormat format = RD::DATA_FORMAT_MAX;
+		uint64_t generation = 0;
+
+		struct Entry {
+			bool valid = false;
+			uint64_t generation = 0;
+			uint64_t static_hash = 0;
+			Rect2i rect;
+			Projection projection;
+			Transform3D transform;
+			float zfar = 0.0;
+			bool reverse_cull_face = false;
+			bool use_pancake = false;
+			uint64_t last_used_frame = 0;
+		};
+		struct LightEntries {
+			Entry cascades[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
+		};
+		HashMap<RID, LightEntries> entries; // Per directional light instance.
+
+		uint64_t stats_frame = 0;
+		int hits = 0;
+		int refreshes = 0;
+		int uncached = 0;
+		int static_instances = 0;
+		int dynamic_instances = 0;
+		uint64_t total_hits = 0; // Since the cache was enabled.
+		uint64_t total_refreshes = 0;
+		Dictionary last_stats;
+	} directional_shadow_cache;
+
+	bool _directional_shadow_cache_prepare(); // Allocates the cache texture for the current atlas; false if unusable.
+	void _directional_shadow_cache_free();
+	void _directional_shadow_cache_stats_frame();
 	void _render_shadow_begin();
+	void _view_cull_indirect_multimeshes(const RenderDataRD *p_render_data); // Mariner E25a.
+	void _apply_view_cull(RenderListParameters &r_params) const; // Mariner E25a.
 	void _render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_reverse_cull_face, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, const Rect2i &p_rect = Rect2i(), bool p_flip_y = false, bool p_clear_region = true, bool p_begin = true, bool p_end = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D());
 	void _render_shadow_process();
 	void _render_shadow_end();
@@ -822,6 +930,10 @@ protected:
 public:
 	virtual bool raytracing_scene_is_supported() const override;
 	virtual bool pathtracing_is_supported() const override;
+
+	virtual void directional_shadow_cache_set_enabled(bool p_enabled) override;
+	virtual Dictionary directional_shadow_cache_get_stats() const override;
+	virtual bool directional_object_shadow_is_supported() const override { return true; }
 
 protected:
 	virtual void _render_buffers_debug_draw(const RenderDataRD *p_render_data) override;

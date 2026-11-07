@@ -75,6 +75,7 @@ private:
 	bool reverse_cull = false;
 	uint32_t cull_mask = 0;
 	uint32_t shadow_caster_mask = 0xFFFFFFFF;
+	bool restir = false; // Mariner E20.
 	bool distance_fade_enabled = false;
 	real_t distance_fade_begin = 40.0;
 	real_t distance_fade_shadow = 50.0;
@@ -138,6 +139,9 @@ public:
 	void set_shadow_caster_mask(uint32_t p_caster_mask);
 	uint32_t get_shadow_caster_mask() const;
 
+	void set_restir(bool p_enable);
+	bool is_restir() const;
+
 	void set_bake_mode(BakeMode p_mode);
 	BakeMode get_bake_mode() const;
 
@@ -168,6 +172,12 @@ public:
 		SHADOW_PARALLEL_4_SPLITS,
 	};
 
+	// Mariner E20d: how the ray traced shadow of a Light3D.light_restir directional light is used.
+	enum RestirShadowMode {
+		RESTIR_SHADOW_REPLACE,
+		RESTIR_SHADOW_BEYOND_SHADOW_MAPS,
+	};
+
 	enum SkyMode {
 		SKY_MODE_LIGHT_AND_SKY,
 		SKY_MODE_LIGHT_ONLY,
@@ -178,6 +188,13 @@ private:
 	bool blend_splits;
 	ShadowMode shadow_mode;
 	SkyMode sky_mode = SKY_MODE_LIGHT_AND_SKY;
+	// Mariner E10b: object shadow.
+	uint32_t object_shadow_layers = 0;
+	int object_shadow_size = 2048;
+	int object_shadow_from_cascade = 1;
+	void _update_object_shadow();
+	float contact_shadow_length = 0.0; // Mariner E11.
+	RestirShadowMode restir_shadow_mode = RESTIR_SHADOW_REPLACE; // Mariner E20d.
 
 protected:
 	static void _bind_methods();
@@ -193,11 +210,25 @@ public:
 	void set_sky_mode(SkyMode p_mode);
 	SkyMode get_sky_mode() const;
 
+	void set_object_shadow_layers(uint32_t p_layers);
+	uint32_t get_object_shadow_layers() const;
+	void set_object_shadow_size(int p_size);
+	int get_object_shadow_size() const;
+	void set_object_shadow_from_cascade(int p_cascade);
+	int get_object_shadow_from_cascade() const;
+
+	void set_contact_shadow_length(float p_length);
+	float get_contact_shadow_length() const;
+
+	void set_restir_shadow_mode(RestirShadowMode p_mode);
+	RestirShadowMode get_restir_shadow_mode() const;
+
 	DirectionalLight3D();
 };
 
 VARIANT_ENUM_CAST(DirectionalLight3D::ShadowMode)
 VARIANT_ENUM_CAST(DirectionalLight3D::SkyMode)
+VARIANT_ENUM_CAST(DirectionalLight3D::RestirShadowMode)
 
 class OmniLight3D : public Light3D {
 	GDCLASS(OmniLight3D, Light3D);

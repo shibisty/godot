@@ -1321,6 +1321,8 @@ MaterialStorage::MaterialStorage() {
 		actions.renames["SSS_TRANSMITTANCE_DEPTH"] = "transmittance_depth";
 		actions.renames["SSS_TRANSMITTANCE_BOOST"] = "transmittance_boost";
 		actions.renames["BACKLIGHT"] = "backlight";
+		actions.renames["MAIN_LIGHT_DIRECTION"] = "main_light_direction"; // Mariner E16.
+		actions.renames["MAIN_LIGHT_SHADOW"] = "main_light_shadow";
 		actions.renames["AO"] = "ao";
 		actions.renames["AO_LIGHT_AFFECT"] = "ao_light_affect";
 		actions.renames["EMISSION"] = "emission";
@@ -1404,6 +1406,7 @@ MaterialStorage::MaterialStorage() {
 		actions.usage_defines["SSS_STRENGTH"] = "#define ENABLE_SSS\n";
 		actions.usage_defines["SSS_TRANSMITTANCE_DEPTH"] = "#define ENABLE_TRANSMITTANCE\n";
 		actions.usage_defines["BACKLIGHT"] = "#define LIGHT_BACKLIGHT_USED\n";
+		actions.usage_defines["MAIN_LIGHT_SHADOW"] = "#define MAIN_LIGHT_SHADOW_USED\n"; // Mariner E16.
 		actions.usage_defines["SCREEN_UV"] = "#define SCREEN_UV_USED\n";
 
 		actions.usage_defines["FOG"] = "#define CUSTOM_FOG_USED\n";
@@ -2096,12 +2099,14 @@ GLuint MaterialStorage::global_shader_parameters_get_uniform_buffer() const {
 	return global_shader_uniforms.buffer;
 }
 
-int32_t MaterialStorage::global_shader_parameters_instance_allocate(RID p_instance) {
+int32_t MaterialStorage::global_shader_parameters_instance_allocate(RID p_instance, uint32_t p_elements) {
 	ERR_FAIL_COND_V(global_shader_uniforms.instance_buffer_pos.has(p_instance), -1);
-	int32_t pos = _global_shader_uniform_allocate(ShaderLanguage::MAX_INSTANCE_UNIFORM_INDICES);
-	global_shader_uniforms.instance_buffer_pos[p_instance] = pos; //save anyway
+	const uint32_t elements = CLAMP(p_elements, 1u, uint32_t(ShaderLanguage::MAX_INSTANCE_UNIFORM_INDICES));
+	int32_t pos = _global_shader_uniform_allocate(elements);
+	// Mariner E14a: a failed allocation is not recorded (it made the next attempt fail on "has(p_instance)").
 	ERR_FAIL_COND_V_MSG(pos < 0, -1, vformat("Too many instances using shader instance variables. Consider increasing rendering/limits/global_shader_variables/buffer_size in the Project Settings. Maximum items supported by this hardware is: %d.", Config::get_singleton()->max_uniform_buffer_size / sizeof(GlobalShaderUniforms::Value)));
-	global_shader_uniforms.buffer_usage[pos].elements = ShaderLanguage::MAX_INSTANCE_UNIFORM_INDICES;
+	global_shader_uniforms.instance_buffer_pos[p_instance] = pos;
+	global_shader_uniforms.buffer_usage[pos].elements = elements;
 	return pos;
 }
 
@@ -2544,6 +2549,49 @@ Variant MaterialStorage::material_get_param(RID p_material, const StringName &p_
 		return material->params[p_param];
 	} else {
 		return Variant();
+	}
+}
+
+void MaterialStorage::material_get_textures(RID p_material, LocalVector<RID> &r_textures) const {
+	// Mariner E17: walks the parameters, the shader defaults and the next passes; the depth limit guards against pass loops.
+	RID current = p_material;
+	for (int depth = 0; depth < 8 && current.is_valid(); depth++) {
+		const Material *material = material_owner.get_or_null(current);
+		if (!material) {
+			return;
+		}
+		TextureStorage *texture_storage = TextureStorage::get_singleton();
+		for (const KeyValue<StringName, Variant> &E : material->params) {
+			if (E.value.get_type() == Variant::RID) {
+				RID rid = E.value;
+				if (texture_storage->owns_texture(rid)) {
+					r_textures.push_back(rid);
+				}
+			} else if (E.value.get_type() == Variant::ARRAY) {
+				const Array array = E.value;
+				for (int i = 0; i < array.size(); i++) {
+					if (array[i].get_type() == Variant::RID) {
+						RID rid = array[i];
+						if (texture_storage->owns_texture(rid)) {
+							r_textures.push_back(rid);
+						}
+					}
+				}
+			}
+		}
+		if (material->shader) {
+			for (const KeyValue<StringName, HashMap<int, RID>> &E : material->shader->default_texture_parameter) {
+				if (material->params.has(E.key)) {
+					continue;
+				}
+				for (const KeyValue<int, RID> &F : E.value) {
+					if (texture_storage->owns_texture(F.value)) {
+						r_textures.push_back(F.value);
+					}
+				}
+			}
+		}
+		current = material->next_pass;
 	}
 }
 

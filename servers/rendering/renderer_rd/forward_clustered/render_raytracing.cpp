@@ -1134,6 +1134,7 @@ void RenderRaytracing::build_scene(const RenderDataRD *p_render_data) {
 		uint32_t inst_flags;
 		uint8_t mask;
 		uint32_t layer_mask;
+		uint32_t geom_flags = 0;
 	};
 	LocalVector<PendingMMSurface> pending_mm_surfaces;
 
@@ -1169,10 +1170,29 @@ void RenderRaytracing::build_scene(const RenderDataRD *p_render_data) {
 			continue;
 		}
 		const uint8_t mask = _rt_instance_mask(inst->layer_mask);
+		// Mariner E12 DG-F: stand-ins only for rays and partly transparent instances (canopies, nets) give candidates
+		// to the ray queries (stochastic transmission in pt_alpha_test()).
+		const uint32_t transmission = uint32_t(Math::round(CLAMP(1.0f - inst->raytracing_opacity, 0.0f, 1.0f) * 255.0f));
+		const uint32_t rt_layer_mask = (inst->layer_mask & RT_LAYER_MASK_LAYERS) | (transmission << RT_LAYER_MASK_TRANSMISSION_SHIFT);
+		const uint32_t rt_geom_flags = inst->raytracing_only ? uint32_t(RT_GEOM_FLAG_RAYTRACING_ONLY) : 0u;
+		const bool rt_candidates = inst->raytracing_only || transmission > 0;
+		auto rt_inst_flags = [rt_candidates](uint32_t p_flags) -> uint32_t {
+			if (!rt_candidates) {
+				return p_flags;
+			}
+			return (p_flags & ~uint32_t(RD::ACCELERATION_STRUCTURE_INSTANCE_FORCE_OPAQUE_BIT)) | RD::ACCELERATION_STRUCTURE_INSTANCE_FORCE_NO_OPAQUE_BIT;
+		};
 
 		if (inst->data->base_type == RSE::INSTANCE_MULTIMESH) {
 			RID mm_rid = inst->data->base;
 			if (mesh_storage->multimesh_get_transform_format(mm_rid) != RSE::MULTIMESH_TRANSFORM_3D) {
+				continue;
+			}
+			// Mariner E12 DG2: an indirect MultiMesh is usually filled by a compute shader every frame (GPU culling for
+			// this camera: frustum, Hi-Z); its instance buffer then holds only what this view sees, and the count
+			// written by the compute shader is unknown here. Left out of the raytracing scene unless the project says
+			// its contents are complete (GI / reflections would change with the camera and see stale instances).
+			if (mesh_storage->multimesh_uses_indirect(mm_rid) && !GLOBAL_GET_CACHED(bool, "rendering/raytracing/include_indirect_multimesh")) {
 				continue;
 			}
 			uint32_t mm_count = mesh_storage->multimesh_get_instances_to_draw(mm_rid);
@@ -1195,9 +1215,10 @@ void RenderRaytracing::build_scene(const RenderDataRD *p_render_data) {
 				pending.surface_counter = mesh_storage->mesh_surface_get_rt_invalidation_counter(surf->surface);
 				pending.transform = inst->transform;
 				pending.material = _process_material(resolve_material(surf, mesh), surf->shader ? surf->shader->cull_mode : RSE::CULL_MODE_BACK, alpha_tested);
-				pending.inst_flags = _rt_instance_flags(surf->shader, alpha_tested || (pending.material.flags & RT_MAT_FLAG_DIELECTRIC));
+				pending.inst_flags = rt_inst_flags(_rt_instance_flags(surf->shader, alpha_tested || (pending.material.flags & RT_MAT_FLAG_DIELECTRIC)));
+				pending.geom_flags = rt_geom_flags;
 				pending.mask = mask;
-				pending.layer_mask = inst->layer_mask;
+				pending.layer_mask = rt_layer_mask;
 				pending_mm_surfaces.push_back(pending);
 			}
 			continue;
@@ -1231,9 +1252,10 @@ void RenderRaytracing::build_scene(const RenderDataRD *p_render_data) {
 			bool alpha_tested = surf->shader && surf->shader->uses_alpha_clip;
 			const RT_MaterialData &mat = _process_material(resolve_material(surf, mesh), surf->shader ? surf->shader->cull_mode : RSE::CULL_MODE_BACK, alpha_tested);
 			RT_InstanceData geom = surf_data->geometry;
-			geom.layer_mask = inst->layer_mask;
+			geom.layer_mask = rt_layer_mask;
+			geom.flags |= rt_geom_flags;
 			Transform3D xform = surf_data->is_compressed ? inst->transform * surf_data->aabb_transform : inst->transform;
-			push_instance(surf_data->blas, xform, geom, mat, _rt_instance_flags(surf->shader, alpha_tested || (mat.flags & RT_MAT_FLAG_DIELECTRIC)), mask);
+			push_instance(surf_data->blas, xform, geom, mat, rt_inst_flags(_rt_instance_flags(surf->shader, alpha_tested || (mat.flags & RT_MAT_FLAG_DIELECTRIC))), mask);
 		}
 	}
 
@@ -1248,6 +1270,7 @@ void RenderRaytracing::build_scene(const RenderDataRD *p_render_data) {
 		if (_build_merged_mm_blas(pending.mm_rid, pending.mm_gpu_buffer, pending.mesh_surface, pending.mm_count, pending.surf->surface_index, pending.surface_counter, compute_list, dirty_blas_list, dirty_blas_update_list, &merged_sd)) {
 			RT_InstanceData geom = merged_sd.geometry;
 			geom.layer_mask = pending.layer_mask;
+			geom.flags |= pending.geom_flags;
 			geom.multimesh_address = mm_address + uint64_t(mm_cur_offset) * mm_stride * sizeof(float);
 			geom.mm_stride = mm_stride;
 			geom.mm_color_offset = mesh_storage->multimesh_get_color_offset(pending.mm_rid);
@@ -1273,7 +1296,7 @@ void RenderRaytracing::build_scene(const RenderDataRD *p_render_data) {
 		}
 		RT_InstanceData geom = surf_data->geometry;
 		geom.layer_mask = pending.layer_mask;
-		geom.flags |= RT_GEOM_FLAG_MULTIMESH_INSTANCE;
+		geom.flags |= RT_GEOM_FLAG_MULTIMESH_INSTANCE | pending.geom_flags;
 		geom.mm_vertices_per_instance = 0;
 		geom.mm_stride = mm_stride;
 		geom.mm_color_offset = mesh_storage->multimesh_get_color_offset(pending.mm_rid);

@@ -98,6 +98,12 @@ hvec3 f0_Clear_Coat_To_Surface(hvec3 f0) {
 	return clamp(f0 * (f0 * (half(0.941892) - half(0.263008) * f0) + half(0.346479)) - half(0.0285998), half(0.0), half(1.0));
 }
 
+#ifdef MICRO_SHADOWING
+// Mariner M2: material ambient occlusion of the pixel, for the micro-shadowing of direct light (set by the scene shader
+// before the lights are processed).
+half micro_shadow_ao = half(1.0);
+#endif
+
 void light_compute(hvec3 N, hvec3 L, hvec3 V, half A, hvec3 light_color, bool is_directional, half attenuation, hvec3 f0, half roughness, half metallic, half specular_amount, hvec3 albedo, inout half alpha, vec2 screen_uv, hvec3 energy_compensation,
 #ifdef LIGHT_BACKLIGHT_USED
 		hvec3 backlight,
@@ -177,6 +183,17 @@ void light_compute(hvec3 N, hvec3 L, hvec3 V, half A, hvec3 light_color, bool is
 	half NdotL = min(A + dot(N, L), half(1.0));
 	half cNdotV = max(dot(N, V), half(1e-4));
 
+#ifdef MICRO_SHADOWING
+	if (micro_shadow_ao < half(1.0)) {
+		// Mariner M2: micro-shadowing (Chan 2018, "Material Advances in Call of Duty: WWII"). The occlusion of a cavity is
+		// taken as a cone around the normal with cos(angle) = sqrt(1 - visibility); light from outside the cone is
+		// shadowed, with a squared falloff.
+		half aperture = inversesqrt(half(1.0) - min(micro_shadow_ao, half(0.9999)));
+		half micro_shadow = clamp(NdotL * aperture, half(0.0), half(1.0));
+		attenuation *= micro_shadow * micro_shadow;
+	}
+#endif
+
 #ifdef LIGHT_TRANSMITTANCE_USED
 	{
 #ifdef SSS_MODE_SKIN
@@ -229,6 +246,24 @@ void light_compute(hvec3 N, hvec3 L, hvec3 V, half A, hvec3 light_color, bool is
 
 			diffuse_brdf_NL = smoothstep(-roughness, max(roughness, half(0.01)), NdotL) * half(1.0 / M_PI);
 
+#elif defined(DIFFUSE_BURLEY) && defined(DIFFUSE_MULTISCATTER)
+			{
+				// Mariner M1: multiple-scattering diffuse BRDF, the fit of Chan 2018 ("Material Advances in Call of Duty:
+				// WWII", slides 90-94) to a simulation of diffuse microfacets (Heitz et al. 2016): flat and retroreflective
+				// on rough surfaces, Burley-like rounding on smooth ones. Gloss from the GGX alpha (= roughness^2) with the
+				// paper's parametrization alpha = sqrt(2 / (1 + 2^(18 gloss))).
+				float alpha2 = max(float(roughness) * float(roughness), 1e-3);
+				alpha2 *= alpha2;
+				float gloss = clamp(log2(2.0 / alpha2 - 1.0) * (1.0 / 18.0), 0.0, 1.0);
+				float c_ndoth = clamp(dot(vec3(N), vec3(H)), 0.0, 1.0);
+				float l_dot_h = float(cLdotH);
+				float f_rough = l_dot_h + pow(1.0 - l_dot_h, 5.0);
+				float f_smooth = (1.0 - 0.75 * pow(1.0 - float(cNdotL), 5.0)) * (1.0 - 0.75 * pow(1.0 - float(cNdotV), 5.0));
+				float t = clamp(2.2 * gloss - 0.5, 0.0, 1.0);
+				float f_d = f_rough + (f_smooth - f_rough) * t;
+				float f_b = ((34.5 * gloss - 59.0) * gloss + 24.5) * l_dot_h * exp2(-max(73.2 * gloss - 21.2, 8.9) * sqrt(c_ndoth));
+				diffuse_brdf_NL = half((1.0 / M_PI) * (f_d + f_b) * float(cNdotL));
+			}
 #elif defined(DIFFUSE_BURLEY)
 			{
 				half FD90_minus_1 = half(2.0) * cLdotH * cLdotH * roughness - half(0.5);

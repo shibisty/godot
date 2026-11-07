@@ -135,12 +135,26 @@ vec4 sample_material_texture(uint tex_idx, vec2 uv, uint mat_flags, float lod) {
 	return textureLod(sampler2D(rt_textures[nonuniformEXT(tex_idx)], material_sampler), uv, lod);
 }
 
+// Per ray state for pt_alpha_test() (DG-F): seed of the stochastic transmission, camera ray (stand-ins skipped).
+uint pt_transmission_seed = 0u;
+bool pt_camera_ray = false;
+
 bool pt_alpha_test(uint inst, uint prim, vec2 candidate_bary) {
+	// Mariner E12 DG-F: stand-ins only for rays are invisible to camera rays; partly transparent instances
+	// (canopies, nets) let a share of the rays through, decided per ray and triangle.
+	GeometryData g = geometries[inst];
+	if (pt_camera_ray && (g.flags & GEOM_FLAG_RAYTRACING_ONLY) != 0u) {
+		return false;
+	}
+	uint transmission = g.layer_mask >> GEOM_TRANSMISSION_SHIFT;
+	if (transmission != 0u && (pcg_hash(pt_transmission_seed ^ (inst * 0x9E3779B9u) ^ (prim * 0x85EBCA6Bu)) >> 24u) < transmission) {
+		return false;
+	}
 	MaterialData mat = materials[inst];
 	if (mat.alpha_scissor <= 0.0) {
 		return true;
 	}
-	GeometryData geom = geometries[inst];
+	GeometryData geom = g;
 	vec3 bary = vec3(1.0 - candidate_bary.x - candidate_bary.y, candidate_bary.x, candidate_bary.y);
 	uint i0, i1, i2;
 	get_triangle_indices_ex(geom, prim, i0, i1, i2);
@@ -528,7 +542,10 @@ vec4 trace_path(uvec2 pixel, uint sample_idx, CameraMedium cam) {
 	float water_level = cam.level;
 
 	[[dont_unroll]] for (uint event = 0u; event < max_bounces + 6u; event++) {
+		pt_camera_ray = event == 0u;
+		pt_transmission_seed = pcg_hash(rng ^ (event * 0x632BE5ABu));
 		RayHit r = trace_closest(origin, dir, ray_length);
+		pt_camera_ray = false;
 		bool primary = event == 0u;
 
 		if (in_water) {
@@ -830,7 +847,9 @@ void main() {
 		if ((flags & PT_FLAG_WRITE_DEPTH) != 0u) {
 			vec3 o, d;
 			primary_ray(vec2(pixel) + 0.5, o, d);
+			pt_camera_ray = true;
 			RayHit r = trace_closest(o, d, params.config2.y);
+			pt_camera_ray = false;
 			float depth = 0.0;
 			if (r.hit) {
 				mat4 view_mat = transpose(mat4(scene_data_block.data.view_matrix[0], scene_data_block.data.view_matrix[1], scene_data_block.data.view_matrix[2], vec4(0.0, 0.0, 0.0, 1.0)));

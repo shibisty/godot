@@ -174,6 +174,21 @@ Comment: Temporal Anti-Aliasing resolve implementation
 Copyright: 2016, Panos Karabelas
 License: Expat
 
+Files: servers/rendering/renderer_rd/shaders/effects/gtao.glsl
+Comment: GTAO with bent normals from Spartan Engine (commit cb258a150, MIT)
+Copyright: 2015-2026, Panos Karabelas
+License: Expat
+
+Files: servers/rendering/renderer_rd/shaders/effects/tonemap_gt7_inc.glsl
+Comment: Gran Turismo 7 tone mapper from Spartan Engine (commit cb258a150, MIT)
+Copyright: 2015-2026, Panos Karabelas
+License: Expat
+
+Files: servers/rendering/renderer_rd/shaders/effects/cas.glsl
+Comment: AMD FidelityFX Contrast Adaptive Sharpening (as used by Spartan Engine, commit cb258a150)
+Copyright: 2017-2019, Advanced Micro Devices, Inc.
+License: Expat
+
 Files: servers/rendering/renderer_rd/shaders/effects/smaa_blending.glsl
  servers/rendering/renderer_rd/shaders/effects/smaa_weight_calculation.glsl
  servers/rendering/renderer_rd/shaders/effects/smaa_edge_detection.glsl
@@ -199,6 +214,11 @@ License: Expat
 Files: thirdparty/amd-fsr2/*
 Comment: AMD FidelityFX Super Resolution 2
 Copyright: 2022-2023, Advanced Micro Devices, Inc.
+License: Expat
+
+Files: thirdparty/amd-fsr3/*
+Comment: AMD FidelityFX Super Resolution 3.1 and frame generation (FidelityFX SDK 1.1.4)
+Copyright: 2024, Advanced Micro Devices, Inc.
 License: Expat
 
 Files: thirdparty/angle/*

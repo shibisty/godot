@@ -490,6 +490,7 @@ private:
 		RenderPassID render_pass;
 		int pre_transform_rotation_degrees = 0;
 		uint32_t image_index = 0;
+		uint32_t extra_image_index = UINT32_MAX; // Mariner E24b: presented before image_index.
 #ifdef ANDROID_ENABLED
 		uint64_t refresh_duration = 0;
 #endif
@@ -502,6 +503,8 @@ public:
 	virtual SwapChainID swap_chain_create(RenderingContextDriver::SurfaceID p_surface) override final;
 	virtual Error swap_chain_resize(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain, uint32_t p_desired_framebuffer_count) override final;
 	virtual FramebufferID swap_chain_acquire_framebuffer(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain, bool &r_resize_required) override final;
+	virtual FramebufferID swap_chain_acquire_extra_framebuffer(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain) override final;
+	FramebufferID _swap_chain_acquire(CommandQueue *p_command_queue, SwapChain *p_swap_chain, uint32_t &r_image_index, bool &r_resize_required, uint64_t p_timeout);
 	virtual RenderPassID swap_chain_get_render_pass(SwapChainID p_swap_chain) override final;
 	virtual int swap_chain_get_pre_rotation_degrees(SwapChainID p_swap_chain) override final;
 	virtual DataFormat swap_chain_get_format(SwapChainID p_swap_chain) override final;

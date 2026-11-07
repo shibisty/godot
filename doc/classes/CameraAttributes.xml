@@ -30,5 +30,69 @@
 			If [member auto_exposure_enabled] is [code]true[/code], this can be used as a method of exposure compensation, doubling the value will increase the exposure value (measured in EV100) by 1 stop.
 			[b]Note:[/b] Only available when [member ProjectSettings.rendering/lights_and_shadows/use_physical_light_units] is enabled.
 		</member>
+		<member name="image_chromatic_aberration" type="float" setter="set_image_chromatic_aberration" getter="get_image_chromatic_aberration" default="0.0">
+			Chromatic aberration of the lens: red is shifted towards the center and blue outwards, in proportion to the distance from the center. At [code]1.0[/code] each channel moves by 2% of the image size at the edge of the frame. [code]0.0[/code] disables it.
+			[b]Note:[/b] Only supported by the Forward+ renderer, single view (not XR).
+		</member>
+		<member name="image_film_grain" type="float" setter="set_image_film_grain" getter="get_image_film_grain" default="0.0">
+			Strength of animated film grain. The grain is monochrome, added to the final (perceptual) image and strongest in the mid tones; it changes every frame. [code]0.0[/code] disables it.
+			[b]Note:[/b] Only supported by the Forward+ renderer, single view (not XR).
+		</member>
+		<member name="image_film_grain_size" type="float" setter="set_image_film_grain_size" getter="get_image_film_grain_size" default="1.5">
+			Size of the film grain in pixels of the output.
+		</member>
+		<member name="image_lens_distortion" type="float" setter="set_image_lens_distortion" getter="get_image_lens_distortion" default="0.0">
+			Radial lens distortion. Positive values give barrel distortion (straight lines near the edges bow outwards; the image is zoomed in so that the corners stay covered), negative values pincushion distortion (the edges of the image are cropped). [code]0.0[/code] disables it.
+			[b]Note:[/b] Only supported by the Forward+ renderer, single view (not XR).
+		</member>
+		<member name="image_sharpening" type="float" setter="set_image_sharpening" getter="get_image_sharpening" default="0.0">
+			Strength of contrast adaptive sharpening (AMD FidelityFX CAS) of the final image, after tonemapping, antialiasing and upscaling: edges and fine detail get sharper, flat areas and strong edges are left alone. Useful with TAA, FSR 2 or DLSS, which soften the image. [code]1.0[/code] is the CAS maximum, [code]0.0[/code] disables it.
+			[b]Note:[/b] Only supported by the Forward+ renderer, single view (not XR), without 2D MSAA on the viewport.
+		</member>
+		<member name="lens_dirt_intensity" type="float" setter="set_lens_dirt_intensity" getter="get_lens_dirt_intensity" default="1.0">
+			How much [member lens_dirt_texture] brightens the lens flare where it is light (and around the sun).
+		</member>
+		<member name="lens_dirt_texture" type="Texture2D" setter="set_lens_dirt_texture" getter="get_lens_dirt_texture">
+			Dirt, smudges or rain drops on the lens (stretched over the image, black: clean): the lens flare and the glare of the sun are brighter there, as light scattered by the dirt. Swap it for rain or spray at sea.
+		</member>
+		<member name="lens_flare_chromatic" type="float" setter="set_lens_flare_chromatic" getter="get_lens_flare_chromatic" default="0.006">
+			Color fringing of the ghosts and the halo (red and blue shifted apart along the flare's axis), in UV.
+		</member>
+		<member name="lens_flare_enabled" type="bool" setter="set_lens_flare_enabled" getter="is_lens_flare_enabled" default="false">
+			If [code]true[/code], light brighter than [member lens_flare_threshold] makes a lens flare: ghosts along the line through the center of the image and a ring (halo), as reflections between the elements of a lens do, plus a starburst and glare around the sun (the brightest directional light) while its disc is seen. Lamps at night get their ghosts and halos the same way. Added to the HDR image after depth of field (Forward+ only, one view). Mariner engine patch E15b.
+		</member>
+		<member name="lens_flare_ghost_spacing" type="float" setter="set_lens_flare_ghost_spacing" getter="get_lens_flare_ghost_spacing" default="0.35">
+			Distance between the ghosts along the line through the center, as a fraction of the distance from the light to the center.
+		</member>
+		<member name="lens_flare_ghosts" type="int" setter="set_lens_flare_ghosts" getter="get_lens_flare_ghosts" default="4">
+			Number of ghosts (0 to 8).
+		</member>
+		<member name="lens_flare_halo_width" type="float" setter="set_lens_flare_halo_width" getter="get_lens_flare_halo_width" default="0.45">
+			Radius of the halo ring, as a fraction of the image height. [code]0.0[/code]: no halo.
+		</member>
+		<member name="lens_flare_intensity" type="float" setter="set_lens_flare_intensity" getter="get_lens_flare_intensity" default="0.02">
+			Brightness of the ghosts and the halo, relative to the light above the threshold.
+		</member>
+		<member name="lens_flare_streak_count" type="int" setter="set_lens_flare_streak_count" getter="get_lens_flare_streak_count" default="6">
+			Rays of the sun's starburst (twice the number of aperture blades for an odd count, as many for an even one: 6 for a hexagonal aperture).
+		</member>
+		<member name="lens_flare_sun_streaks" type="float" setter="set_lens_flare_sun_streaks" getter="get_lens_flare_sun_streaks" default="1.0">
+			Brightness of the sun's starburst and glare, relative to the sun's light. Scaled by how much of the sun's disc is seen (not behind geometry) and faded at the edges of the image. [code]0.0[/code]: none.
+		</member>
+		<member name="lens_flare_threshold" type="float" setter="set_lens_flare_threshold" getter="get_lens_flare_threshold" default="4.0">
+			Luminance of the HDR image (scene linear, before tonemapping) above which light makes ghosts and a halo.
+		</member>
+		<member name="motion_blur_camera_motion" type="float" setter="set_motion_blur_camera_motion" getter="get_motion_blur_camera_motion" default="1.0">
+			How much the camera's own motion (turning, moving, rolling with a ship) blurs the image. [code]0.0[/code]: only objects moving relative to the world blur; [code]1.0[/code]: the full motion relative to the camera, as a real camera sees it. Geometry moving with the camera (the deck of a ship the camera is on) never blurs from the camera's motion.
+		</member>
+		<member name="motion_blur_enabled" type="bool" setter="set_motion_blur_enabled" getter="is_motion_blur_enabled" default="false">
+			If [code]true[/code], the image is blurred along the motion of each pixel during the frame, from the motion vectors of the viewport (Forward+ only, one view). The viewport needs motion vectors: TAA, FSR 2 or DLSS, or [code]RenderingServer.viewport_set_force_motion_vectors(get_viewport().get_viewport_rid(), true)[/code]. Objects moving in front of others smear over them, and the background shows through the blur of fast objects. The number of samples per pixel is [member ProjectSettings.rendering/camera/motion_blur/samples]. Mariner engine patch E15a.
+		</member>
+		<member name="motion_blur_intensity" type="float" setter="set_motion_blur_intensity" getter="get_motion_blur_intensity" default="0.5">
+			Length of the blur as a fraction of the motion during one frame, like the shutter angle of a film camera divided by 360 degrees ([code]0.5[/code]: 180 degrees). The blur gets longer at lower frame rates, as with a real shutter.
+		</member>
+		<member name="motion_blur_max_length" type="float" setter="set_motion_blur_max_length" getter="get_motion_blur_max_length" default="0.04">
+			Longest blur, as a fraction of the view's height ([code]0.04[/code]: 43 pixels at 1080p). Longer blur costs more (larger tiles to search).
+		</member>
 	</members>
 </class>

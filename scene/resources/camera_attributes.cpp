@@ -98,11 +98,216 @@ RID CameraAttributes::get_rid() const {
 	return camera_attributes;
 }
 
+void CameraAttributes::_update_motion_blur() {
+	RS::get_singleton()->camera_attributes_set_motion_blur(get_rid(), motion_blur_enabled, motion_blur_intensity, motion_blur_camera_motion, motion_blur_max_length);
+}
+
+void CameraAttributes::set_motion_blur_enabled(bool p_enabled) {
+	motion_blur_enabled = p_enabled;
+	_update_motion_blur();
+	notify_property_list_changed();
+}
+
+bool CameraAttributes::is_motion_blur_enabled() const {
+	return motion_blur_enabled;
+}
+
+void CameraAttributes::set_motion_blur_intensity(float p_intensity) {
+	motion_blur_intensity = CLAMP(p_intensity, 0.0f, 4.0f);
+	_update_motion_blur();
+}
+
+float CameraAttributes::get_motion_blur_intensity() const {
+	return motion_blur_intensity;
+}
+
+void CameraAttributes::set_motion_blur_camera_motion(float p_amount) {
+	motion_blur_camera_motion = CLAMP(p_amount, 0.0f, 1.0f);
+	_update_motion_blur();
+}
+
+float CameraAttributes::get_motion_blur_camera_motion() const {
+	return motion_blur_camera_motion;
+}
+
+void CameraAttributes::set_motion_blur_max_length(float p_length) {
+	motion_blur_max_length = CLAMP(p_length, 0.0f, 0.25f);
+	_update_motion_blur();
+}
+
+float CameraAttributes::get_motion_blur_max_length() const {
+	return motion_blur_max_length;
+}
+
+void CameraAttributes::_update_lens_flare() {
+	RS::get_singleton()->camera_attributes_set_lens_flare(get_rid(), lens_flare_enabled, lens_flare_intensity, lens_flare_threshold, lens_flare_ghosts, lens_flare_ghost_spacing, lens_flare_halo_width, lens_flare_chromatic, lens_flare_sun_streaks, lens_flare_streak_count);
+	RS::get_singleton()->camera_attributes_set_lens_dirt(get_rid(), lens_dirt_texture.is_valid() ? lens_dirt_texture->get_rid() : RID(), lens_dirt_intensity);
+}
+
+void CameraAttributes::set_lens_flare_enabled(bool p_enabled) {
+	lens_flare_enabled = p_enabled;
+	_update_lens_flare();
+	notify_property_list_changed();
+}
+
+bool CameraAttributes::is_lens_flare_enabled() const {
+	return lens_flare_enabled;
+}
+
+void CameraAttributes::set_lens_dirt_texture(const Ref<Texture2D> &p_texture) {
+	lens_dirt_texture = p_texture;
+	_update_lens_flare();
+}
+
+Ref<Texture2D> CameraAttributes::get_lens_dirt_texture() const {
+	return lens_dirt_texture;
+}
+
+void CameraAttributes::set_lens_flare_intensity(float p_value) {
+	lens_flare_intensity = MAX(p_value, 0.0f);
+	_update_lens_flare();
+}
+
+float CameraAttributes::get_lens_flare_intensity() const {
+	return lens_flare_intensity;
+}
+
+void CameraAttributes::set_lens_flare_threshold(float p_value) {
+	lens_flare_threshold = MAX(p_value, 0.0f);
+	_update_lens_flare();
+}
+
+float CameraAttributes::get_lens_flare_threshold() const {
+	return lens_flare_threshold;
+}
+
+void CameraAttributes::set_lens_flare_ghosts(int p_value) {
+	lens_flare_ghosts = CLAMP(p_value, 0, 8);
+	_update_lens_flare();
+}
+
+int CameraAttributes::get_lens_flare_ghosts() const {
+	return lens_flare_ghosts;
+}
+
+void CameraAttributes::set_lens_flare_ghost_spacing(float p_value) {
+	lens_flare_ghost_spacing = CLAMP(p_value, 0.0f, 1.0f);
+	_update_lens_flare();
+}
+
+float CameraAttributes::get_lens_flare_ghost_spacing() const {
+	return lens_flare_ghost_spacing;
+}
+
+void CameraAttributes::set_lens_flare_halo_width(float p_value) {
+	lens_flare_halo_width = CLAMP(p_value, 0.0f, 1.0f);
+	_update_lens_flare();
+}
+
+float CameraAttributes::get_lens_flare_halo_width() const {
+	return lens_flare_halo_width;
+}
+
+void CameraAttributes::set_lens_flare_chromatic(float p_value) {
+	lens_flare_chromatic = CLAMP(p_value, 0.0f, 0.1f);
+	_update_lens_flare();
+}
+
+float CameraAttributes::get_lens_flare_chromatic() const {
+	return lens_flare_chromatic;
+}
+
+void CameraAttributes::set_lens_flare_sun_streaks(float p_value) {
+	lens_flare_sun_streaks = MAX(p_value, 0.0f);
+	_update_lens_flare();
+}
+
+float CameraAttributes::get_lens_flare_sun_streaks() const {
+	return lens_flare_sun_streaks;
+}
+
+void CameraAttributes::set_lens_flare_streak_count(int p_value) {
+	lens_flare_streak_count = CLAMP(p_value, 2, 16);
+	_update_lens_flare();
+}
+
+int CameraAttributes::get_lens_flare_streak_count() const {
+	return lens_flare_streak_count;
+}
+
+void CameraAttributes::set_lens_dirt_intensity(float p_value) {
+	lens_dirt_intensity = MAX(p_value, 0.0f);
+	_update_lens_flare();
+}
+
+float CameraAttributes::get_lens_dirt_intensity() const {
+	return lens_dirt_intensity;
+}
+
+void CameraAttributes::_update_image_effects() {
+	RS::get_singleton()->camera_attributes_set_image_effects(get_rid(), image_chromatic_aberration, image_lens_distortion, image_film_grain, image_film_grain_size, image_sharpening);
+}
+
+void CameraAttributes::set_image_chromatic_aberration(float p_value) {
+	image_chromatic_aberration = CLAMP(p_value, 0.0f, 1.0f);
+	_update_image_effects();
+}
+
+float CameraAttributes::get_image_chromatic_aberration() const {
+	return image_chromatic_aberration;
+}
+
+void CameraAttributes::set_image_lens_distortion(float p_value) {
+	image_lens_distortion = CLAMP(p_value, -1.0f, 1.0f);
+	_update_image_effects();
+}
+
+float CameraAttributes::get_image_lens_distortion() const {
+	return image_lens_distortion;
+}
+
+void CameraAttributes::set_image_film_grain(float p_value) {
+	image_film_grain = CLAMP(p_value, 0.0f, 1.0f);
+	_update_image_effects();
+}
+
+float CameraAttributes::get_image_film_grain() const {
+	return image_film_grain;
+}
+
+void CameraAttributes::set_image_film_grain_size(float p_value) {
+	image_film_grain_size = CLAMP(p_value, 1.0f, 3.99f);
+	_update_image_effects();
+}
+
+float CameraAttributes::get_image_film_grain_size() const {
+	return image_film_grain_size;
+}
+
+void CameraAttributes::set_image_sharpening(float p_value) {
+	image_sharpening = CLAMP(p_value, 0.0f, 1.0f);
+	_update_image_effects();
+}
+
+float CameraAttributes::get_image_sharpening() const {
+	return image_sharpening;
+}
+
 void CameraAttributes::_validate_property(PropertyInfo &p_property) const {
 	if (!Engine::get_singleton()->is_editor_hint()) {
 		return;
 	}
 	if (!GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/use_physical_light_units") && p_property.name == "exposure_sensitivity") {
+		p_property.usage = PROPERTY_USAGE_NO_EDITOR | PROPERTY_USAGE_INTERNAL;
+		return;
+	}
+
+	if (p_property.name.begins_with("lens_") && p_property.name != "lens_flare_enabled" && !lens_flare_enabled) {
+		p_property.usage = PROPERTY_USAGE_NO_EDITOR | PROPERTY_USAGE_INTERNAL;
+		return;
+	}
+
+	if (p_property.name.begins_with("motion_blur_") && p_property.name != "motion_blur_enabled" && !motion_blur_enabled) {
 		p_property.usage = PROPERTY_USAGE_NO_EDITOR | PROPERTY_USAGE_INTERNAL;
 		return;
 	}
@@ -134,6 +339,75 @@ void CameraAttributes::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_exposure_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_auto_exposure_enabled", "is_auto_exposure_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_scale", PROPERTY_HINT_RANGE, "0.01,64,0.01"), "set_auto_exposure_scale", "get_auto_exposure_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_speed", PROPERTY_HINT_RANGE, "0.01,64,0.01"), "set_auto_exposure_speed", "get_auto_exposure_speed");
+
+	ClassDB::bind_method(D_METHOD("set_motion_blur_enabled", "enabled"), &CameraAttributes::set_motion_blur_enabled);
+	ClassDB::bind_method(D_METHOD("is_motion_blur_enabled"), &CameraAttributes::is_motion_blur_enabled);
+	ClassDB::bind_method(D_METHOD("set_motion_blur_intensity", "intensity"), &CameraAttributes::set_motion_blur_intensity);
+	ClassDB::bind_method(D_METHOD("get_motion_blur_intensity"), &CameraAttributes::get_motion_blur_intensity);
+	ClassDB::bind_method(D_METHOD("set_motion_blur_camera_motion", "amount"), &CameraAttributes::set_motion_blur_camera_motion);
+	ClassDB::bind_method(D_METHOD("get_motion_blur_camera_motion"), &CameraAttributes::get_motion_blur_camera_motion);
+	ClassDB::bind_method(D_METHOD("set_motion_blur_max_length", "length"), &CameraAttributes::set_motion_blur_max_length);
+	ClassDB::bind_method(D_METHOD("get_motion_blur_max_length"), &CameraAttributes::get_motion_blur_max_length);
+
+	ADD_GROUP("Motion Blur", "motion_blur_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "motion_blur_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_motion_blur_enabled", "is_motion_blur_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "motion_blur_intensity", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), "set_motion_blur_intensity", "get_motion_blur_intensity");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "motion_blur_camera_motion", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_motion_blur_camera_motion", "get_motion_blur_camera_motion");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "motion_blur_max_length", PROPERTY_HINT_RANGE, "0,0.25,0.001"), "set_motion_blur_max_length", "get_motion_blur_max_length");
+
+	ClassDB::bind_method(D_METHOD("set_image_chromatic_aberration", "amount"), &CameraAttributes::set_image_chromatic_aberration);
+	ClassDB::bind_method(D_METHOD("get_image_chromatic_aberration"), &CameraAttributes::get_image_chromatic_aberration);
+	ClassDB::bind_method(D_METHOD("set_image_lens_distortion", "amount"), &CameraAttributes::set_image_lens_distortion);
+	ClassDB::bind_method(D_METHOD("get_image_lens_distortion"), &CameraAttributes::get_image_lens_distortion);
+	ClassDB::bind_method(D_METHOD("set_image_film_grain", "amount"), &CameraAttributes::set_image_film_grain);
+	ClassDB::bind_method(D_METHOD("get_image_film_grain"), &CameraAttributes::get_image_film_grain);
+	ClassDB::bind_method(D_METHOD("set_image_film_grain_size", "size"), &CameraAttributes::set_image_film_grain_size);
+	ClassDB::bind_method(D_METHOD("get_image_film_grain_size"), &CameraAttributes::get_image_film_grain_size);
+	ClassDB::bind_method(D_METHOD("set_image_sharpening", "amount"), &CameraAttributes::set_image_sharpening);
+	ClassDB::bind_method(D_METHOD("get_image_sharpening"), &CameraAttributes::get_image_sharpening);
+
+	ADD_GROUP("Image", "image_");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "image_chromatic_aberration", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_image_chromatic_aberration", "get_image_chromatic_aberration");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "image_lens_distortion", PROPERTY_HINT_RANGE, "-1,1,0.01"), "set_image_lens_distortion", "get_image_lens_distortion");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "image_film_grain", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_image_film_grain", "get_image_film_grain");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "image_film_grain_size", PROPERTY_HINT_RANGE, "1,3.99,0.01,suffix:px"), "set_image_film_grain_size", "get_image_film_grain_size");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "image_sharpening", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_image_sharpening", "get_image_sharpening");
+
+	ClassDB::bind_method(D_METHOD("set_lens_flare_enabled", "enabled"), &CameraAttributes::set_lens_flare_enabled);
+	ClassDB::bind_method(D_METHOD("is_lens_flare_enabled"), &CameraAttributes::is_lens_flare_enabled);
+	ClassDB::bind_method(D_METHOD("set_lens_dirt_texture", "texture"), &CameraAttributes::set_lens_dirt_texture);
+	ClassDB::bind_method(D_METHOD("get_lens_dirt_texture"), &CameraAttributes::get_lens_dirt_texture);
+	ClassDB::bind_method(D_METHOD("set_lens_flare_intensity", "intensity"), &CameraAttributes::set_lens_flare_intensity);
+	ClassDB::bind_method(D_METHOD("get_lens_flare_intensity"), &CameraAttributes::get_lens_flare_intensity);
+	ClassDB::bind_method(D_METHOD("set_lens_flare_threshold", "threshold"), &CameraAttributes::set_lens_flare_threshold);
+	ClassDB::bind_method(D_METHOD("get_lens_flare_threshold"), &CameraAttributes::get_lens_flare_threshold);
+	ClassDB::bind_method(D_METHOD("set_lens_flare_ghosts", "ghosts"), &CameraAttributes::set_lens_flare_ghosts);
+	ClassDB::bind_method(D_METHOD("get_lens_flare_ghosts"), &CameraAttributes::get_lens_flare_ghosts);
+	ClassDB::bind_method(D_METHOD("set_lens_flare_ghost_spacing", "spacing"), &CameraAttributes::set_lens_flare_ghost_spacing);
+	ClassDB::bind_method(D_METHOD("get_lens_flare_ghost_spacing"), &CameraAttributes::get_lens_flare_ghost_spacing);
+	ClassDB::bind_method(D_METHOD("set_lens_flare_halo_width", "width"), &CameraAttributes::set_lens_flare_halo_width);
+	ClassDB::bind_method(D_METHOD("get_lens_flare_halo_width"), &CameraAttributes::get_lens_flare_halo_width);
+	ClassDB::bind_method(D_METHOD("set_lens_flare_chromatic", "amount"), &CameraAttributes::set_lens_flare_chromatic);
+	ClassDB::bind_method(D_METHOD("get_lens_flare_chromatic"), &CameraAttributes::get_lens_flare_chromatic);
+	ClassDB::bind_method(D_METHOD("set_lens_flare_sun_streaks", "intensity"), &CameraAttributes::set_lens_flare_sun_streaks);
+	ClassDB::bind_method(D_METHOD("get_lens_flare_sun_streaks"), &CameraAttributes::get_lens_flare_sun_streaks);
+	ClassDB::bind_method(D_METHOD("set_lens_flare_streak_count", "count"), &CameraAttributes::set_lens_flare_streak_count);
+	ClassDB::bind_method(D_METHOD("get_lens_flare_streak_count"), &CameraAttributes::get_lens_flare_streak_count);
+	ClassDB::bind_method(D_METHOD("set_lens_dirt_intensity", "intensity"), &CameraAttributes::set_lens_dirt_intensity);
+	ClassDB::bind_method(D_METHOD("get_lens_dirt_intensity"), &CameraAttributes::get_lens_dirt_intensity);
+
+	ADD_GROUP("Lens Flare", "lens_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "lens_flare_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_lens_flare_enabled", "is_lens_flare_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_flare_intensity", PROPERTY_HINT_RANGE, "0,1,0.001,or_greater"), "set_lens_flare_intensity", "get_lens_flare_intensity");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_flare_threshold", PROPERTY_HINT_RANGE, "0,64,0.01,or_greater"), "set_lens_flare_threshold", "get_lens_flare_threshold");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "lens_flare_ghosts", PROPERTY_HINT_RANGE, "0,8,1"), "set_lens_flare_ghosts", "get_lens_flare_ghosts");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_flare_ghost_spacing", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_lens_flare_ghost_spacing", "get_lens_flare_ghost_spacing");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_flare_halo_width", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_lens_flare_halo_width", "get_lens_flare_halo_width");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_flare_chromatic", PROPERTY_HINT_RANGE, "0,0.1,0.001"), "set_lens_flare_chromatic", "get_lens_flare_chromatic");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_flare_sun_streaks", PROPERTY_HINT_RANGE, "0,8,0.01,or_greater"), "set_lens_flare_sun_streaks", "get_lens_flare_sun_streaks");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "lens_flare_streak_count", PROPERTY_HINT_RANGE, "2,16,1"), "set_lens_flare_streak_count", "get_lens_flare_streak_count");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "lens_dirt_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_lens_dirt_texture", "get_lens_dirt_texture");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_dirt_intensity", PROPERTY_HINT_RANGE, "0,4,0.01,or_greater"), "set_lens_dirt_intensity", "get_lens_dirt_intensity");
 }
 
 CameraAttributes::CameraAttributes() {

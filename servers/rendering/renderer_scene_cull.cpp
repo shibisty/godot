@@ -35,6 +35,7 @@
 #include "core/math/geometry_3d.h"
 #include "core/object/callable_mp.h"
 #include "core/object/worker_thread_pool.h"
+#include "core/os/os.h"
 #include "servers/rendering/rendering_light_culler.h"
 #include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_default.h"
@@ -464,6 +465,18 @@ void RendererSceneCull::scenario_set_camera_attributes(RID p_scenario, RID p_cam
 	scenario->camera_attributes = p_camera_attributes;
 }
 
+void RendererSceneCull::scenario_set_ddgi_volume(RID p_scenario, bool p_enable, const Transform3D &p_transform, const Vector3 &p_size, float p_probe_spacing, int p_rays_per_probe, int p_probes_per_frame) {
+	Scenario *scenario = scenario_owner.get_or_null(p_scenario);
+	ERR_FAIL_NULL(scenario);
+	RendererSceneRender::DDGIVolumeData &v = scenario->ddgi_volume;
+	v.enabled = p_enable;
+	v.transform = p_transform.orthonormalized();
+	v.size = p_size.maxf(0.1);
+	v.probe_spacing = CLAMP(p_probe_spacing, 0.1f, 64.0f);
+	v.rays_per_probe = CLAMP((p_rays_per_probe + 31) / 32 * 32, 32, 256);
+	v.probes_per_frame = MAX(p_probes_per_frame, 0);
+}
+
 void RendererSceneCull::scenario_set_compositor(RID p_scenario, RID p_compositor) {
 	Scenario *scenario = scenario_owner.get_or_null(p_scenario);
 	ERR_FAIL_NULL(scenario);
@@ -587,7 +600,7 @@ void RendererSceneCull::instance_set_base(RID p_instance, RID p_base) {
 	if (instance->base_type != RSE::INSTANCE_NONE) {
 		//free anything related to that base
 
-		if (scenario && instance->indexer_id.is_valid()) {
+		if (scenario && (instance->indexer_id.is_valid() || instance->gpu_batch)) { // Mariner E25a: batched too.
 			_unpair_instance(instance);
 		}
 
@@ -724,6 +737,8 @@ void RendererSceneCull::instance_set_base(RID p_instance, RID p_base) {
 				geom->geometry_instance = scene_render->geometry_instance_create(p_base);
 
 				ERR_FAIL_NULL(geom->geometry_instance);
+				geom->geometry_instance->set_raytracing_data(instance->raytracing_mode == RSE::RAYTRACING_MODE_ONLY, instance->raytracing_opacity); // Mariner E12 DG-F.
+				geom->geometry_instance->set_ignore_occlusion_culling(instance->ignore_occlusion_culling); // Mariner E25b.
 
 				geom->geometry_instance->set_skeleton(instance->skeleton);
 				geom->geometry_instance->set_material_override(instance->material_override);
@@ -828,7 +843,7 @@ void RendererSceneCull::instance_set_scenario(RID p_instance, RID p_scenario) {
 	if (instance->scenario) {
 		instance->scenario->instances.remove(&instance->scenario_item);
 
-		if (instance->indexer_id.is_valid()) {
+		if (instance->indexer_id.is_valid() || instance->gpu_batch) { // Mariner E25a: batched too.
 			_unpair_instance(instance);
 		}
 
@@ -923,6 +938,7 @@ void RendererSceneCull::instance_set_scenario(RID p_instance, RID p_scenario) {
 void RendererSceneCull::instance_set_layer_mask(RID p_instance, uint32_t p_mask) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 
 	if (instance->layer_mask == p_mask) {
 		return;
@@ -958,6 +974,7 @@ void RendererSceneCull::instance_set_layer_mask(RID p_instance, uint32_t p_mask)
 void RendererSceneCull::instance_set_pivot_data(RID p_instance, float p_sorting_offset, bool p_use_aabb_center) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 
 	instance->sorting_offset = p_sorting_offset;
 	instance->use_aabb_center = p_use_aabb_center;
@@ -975,6 +992,7 @@ void RendererSceneCull::instance_set_pivot_data(RID p_instance, float p_sorting_
 void RendererSceneCull::instance_geometry_set_transparency(RID p_instance, float p_transparency) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 
 	instance->transparency = p_transparency;
 
@@ -1030,6 +1048,7 @@ void RendererSceneCull::instance_set_blend_shape_weight(RID p_instance, int p_sh
 void RendererSceneCull::instance_set_surface_override_material(RID p_instance, int p_surface, RID p_material) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 
 	if (instance->base_type == RSE::INSTANCE_MESH) {
 		//may not have been updated yet, may also have not been set yet. When updated will be correcte, worst case
@@ -1057,7 +1076,7 @@ void RendererSceneCull::instance_set_visible(RID p_instance, bool p_visible) {
 		if (instance->scenario != nullptr) {
 			_instance_queue_update(instance, true, false);
 		}
-	} else if (instance->indexer_id.is_valid()) {
+	} else if (instance->indexer_id.is_valid() || instance->gpu_batch) { // Mariner E25a: batched too.
 		_unpair_instance(instance);
 	}
 
@@ -1156,6 +1175,7 @@ void RendererSceneCull::instance_set_extra_visibility_margin(RID p_instance, rea
 void RendererSceneCull::instance_set_ignore_culling(RID p_instance, bool p_enabled) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 	instance->ignore_all_culling = p_enabled;
 
 	if (instance->scenario && instance->array_index >= 0) {
@@ -1189,6 +1209,7 @@ Vector<ObjectID> RendererSceneCull::instances_cull_aabb(const AABB &p_aabb, RID 
 	CullAABB cull_aabb;
 	scenario->indexers[Scenario::INDEXER_GEOMETRY].aabb_query(p_aabb, cull_aabb);
 	scenario->indexers[Scenario::INDEXER_VOLUMES].aabb_query(p_aabb, cull_aabb);
+	scenario->gpu_static_indexer.aabb_query(p_aabb, cull_aabb); // Mariner E25a.
 	return cull_aabb.instances;
 }
 
@@ -1212,6 +1233,7 @@ Vector<ObjectID> RendererSceneCull::instances_cull_ray(const Vector3 &p_from, co
 	CullRay cull_ray;
 	scenario->indexers[Scenario::INDEXER_GEOMETRY].ray_query(p_from, p_to, cull_ray);
 	scenario->indexers[Scenario::INDEXER_VOLUMES].ray_query(p_from, p_to, cull_ray);
+	scenario->gpu_static_indexer.ray_query(p_from, p_to, cull_ray); // Mariner E25a.
 	return cull_ray.instances;
 }
 
@@ -1237,12 +1259,14 @@ Vector<ObjectID> RendererSceneCull::instances_cull_convex(const Vector<Plane> &p
 	CullConvex cull_convex;
 	scenario->indexers[Scenario::INDEXER_GEOMETRY].convex_query(p_convex.ptr(), p_convex.size(), points.ptr(), points.size(), cull_convex);
 	scenario->indexers[Scenario::INDEXER_VOLUMES].convex_query(p_convex.ptr(), p_convex.size(), points.ptr(), points.size(), cull_convex);
+	scenario->gpu_static_indexer.convex_query(p_convex.ptr(), p_convex.size(), points.ptr(), points.size(), cull_convex); // Mariner E25a.
 	return cull_convex.instances;
 }
 
 void RendererSceneCull::instance_geometry_set_flag(RID p_instance, RSE::InstanceFlags p_flags, bool p_enabled) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 
 	//ERR_FAIL_COND(((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK));
 
@@ -1302,6 +1326,12 @@ void RendererSceneCull::instance_geometry_set_flag(RID p_instance, RSE::Instance
 		} break;
 		case RSE::INSTANCE_FLAG_IGNORE_OCCLUSION_CULLING: {
 			instance->ignore_occlusion_culling = p_enabled;
+			if (((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) && instance->base_data) {
+				InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(instance->base_data);
+				if (geom->geometry_instance) {
+					geom->geometry_instance->set_ignore_occlusion_culling(p_enabled); // Mariner E25b.
+				}
+			}
 
 			if (instance->scenario && instance->array_index >= 0) {
 				InstanceData &idata = instance->scenario->instance_data[instance->array_index];
@@ -1317,9 +1347,121 @@ void RendererSceneCull::instance_geometry_set_flag(RID p_instance, RSE::Instance
 	}
 }
 
+uint64_t RendererSceneCull::shadow_cache_mix(uint64_t p_value) {
+	// splitmix64 finalizer: a 64-bit mixer for the order-independent hash of a cascade's static set.
+	p_value += 0x9e3779b97f4a7c15ULL;
+	p_value = (p_value ^ (p_value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+	p_value = (p_value ^ (p_value >> 27)) * 0x94d049bb133111ebULL;
+	return p_value ^ (p_value >> 31);
+}
+
+real_t RendererSceneCull::shadow_cache_quantize_radius(real_t p_radius, real_t p_previous) {
+	// The radius depends only on the camera projection and the splits, but its float value jitters with the camera
+	// orientation. Keep the previous value while it still covers the radius and is less than 1/64 larger (no flip at
+	// a grid line); otherwise round up to the next multiple of 1/256 of the radius' power of two (at most 1/128
+	// larger).
+	if (p_previous > 0.0 && p_radius <= p_previous && p_radius > p_previous * (1.0 - 1.0 / 64.0)) {
+		return p_previous;
+	}
+	const real_t step = Math::pow(real_t(2.0), Math::floor(Math::log2(MAX(p_radius, real_t(1e-4)))) - real_t(8.0));
+	return Math::ceil(p_radius / step) * step;
+}
+
+void RendererSceneCull::instance_geometry_set_shadow_cache_mode(RID p_instance, RSE::ShadowCacheMode p_mode) {
+	Instance *instance = instance_owner.get_or_null(p_instance);
+	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
+	ERR_FAIL_INDEX(int(p_mode), int(RSE::SHADOW_CACHE_MODE_DYNAMIC) + 1);
+	if (instance->shadow_cache_mode == p_mode) {
+		return;
+	}
+	instance->shadow_cache_mode = p_mode;
+	// The static set of the cascades changes: count it as a change of the instance.
+	instance->version++;
+	instance->version_frame = RSG::rasterizer->get_frame_number();
+}
+
+void RendererSceneCull::instance_geometry_set_raytracing(RID p_instance, RSE::RaytracingMode p_mode, float p_opacity) {
+	Instance *instance = instance_owner.get_or_null(p_instance);
+	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
+	ERR_FAIL_INDEX(int(p_mode), int(RSE::RAYTRACING_MODE_DISABLED) + 1);
+	const bool only_changed = (instance->raytracing_mode == RSE::RAYTRACING_MODE_ONLY) != (p_mode == RSE::RAYTRACING_MODE_ONLY);
+	instance->raytracing_mode = p_mode;
+	instance->raytracing_opacity = CLAMP(p_opacity, 0.0f, 1.0f);
+	if (instance->scenario && instance->array_index >= 0) {
+		_update_instance_data_raytracing_flags(instance, instance->scenario->instance_data[instance->array_index]);
+	}
+	if (((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) && instance->base_data) {
+		InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(instance->base_data);
+		if (geom->geometry_instance) {
+			geom->geometry_instance->set_raytracing_data(instance->raytracing_mode == RSE::RAYTRACING_MODE_ONLY, instance->raytracing_opacity);
+		}
+	}
+	if (only_changed) {
+		_instance_queue_update(instance, false, true); // Shadow casting (can_cast_shadows) depends on the mode.
+	}
+}
+
+void RendererSceneCull::instance_geometry_set_shadow_translucent(RID p_instance, bool p_enabled) {
+	Instance *instance = instance_owner.get_or_null(p_instance);
+	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
+	instance->shadow_translucent = p_enabled;
+	if (instance->scenario && instance->array_index >= 0) {
+		_update_instance_data_raytracing_flags(instance, instance->scenario->instance_data[instance->array_index]);
+	}
+}
+
+void RendererSceneCull::_update_instance_data_raytracing_flags(const Instance *p_instance, InstanceData &r_idata) {
+	r_idata.flags &= ~(InstanceData::FLAG_RAYTRACING_ONLY | InstanceData::FLAG_RAYTRACING_DISABLED | InstanceData::FLAG_SHADOW_TRANSLUCENT);
+	if (p_instance->shadow_translucent) {
+		r_idata.flags |= InstanceData::FLAG_SHADOW_TRANSLUCENT; // Mariner E21.
+	}
+	if (p_instance->raytracing_mode == RSE::RAYTRACING_MODE_ONLY) {
+		r_idata.flags |= InstanceData::FLAG_RAYTRACING_ONLY;
+		r_idata.flags &= ~(InstanceData::FLAG_CAST_SHADOWS | InstanceData::FLAG_CAST_SHADOWS_ONLY);
+	} else {
+		if (p_instance->raytracing_mode == RSE::RAYTRACING_MODE_DISABLED) {
+			r_idata.flags |= InstanceData::FLAG_RAYTRACING_DISABLED;
+		}
+		if (p_instance->cast_shadows != RSE::SHADOW_CASTING_SETTING_OFF) {
+			r_idata.flags |= InstanceData::FLAG_CAST_SHADOWS;
+		}
+		if (p_instance->cast_shadows == RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY) {
+			r_idata.flags |= InstanceData::FLAG_CAST_SHADOWS_ONLY;
+		}
+	}
+}
+
+void RendererSceneCull::_update_instance_shadow_cache_class(Instance *p_instance) const {
+	bool dynamic = false;
+	if (((1 << p_instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) && p_instance->base_data) {
+		if (p_instance->base_type != RSE::INSTANCE_MESH && p_instance->base_type != RSE::INSTANCE_MULTIMESH) {
+			dynamic = true; // Particles.
+		} else if (p_instance->mesh_instance.is_valid()) {
+			dynamic = true; // Skeleton or blend shapes.
+		} else if (static_cast<InstanceGeometryData *>(p_instance->base_data)->material_is_animated) {
+			dynamic = true; // TIME in the vertex shader, or in the fragment shader with discard.
+		} else if (p_instance->base_type == RSE::INSTANCE_MULTIMESH && RSG::mesh_storage->multimesh_get_command_buffer_rd_rid(p_instance->base).is_valid()) {
+			dynamic = true; // Indirect multimesh: instance data and count are written on the GPU.
+		}
+	}
+	p_instance->shadow_cache_dynamic = dynamic;
+}
+
+void RendererSceneCull::directional_shadow_cache_set_enabled(bool p_enabled) {
+	shadow_cache_enabled = p_enabled; // The renderer follows at the next frame (_render_scene).
+}
+
+Dictionary RendererSceneCull::directional_shadow_cache_get_stats() const {
+	return scene_render->directional_shadow_cache_get_stats();
+}
+
 void RendererSceneCull::instance_geometry_set_cast_shadows_setting(RID p_instance, RSE::ShadowCastingSetting p_shadow_casting_setting) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 
 	instance->cast_shadows = p_shadow_casting_setting;
 
@@ -1337,6 +1479,7 @@ void RendererSceneCull::instance_geometry_set_cast_shadows_setting(RID p_instanc
 		} else {
 			idata.flags &= ~InstanceData::FLAG_CAST_SHADOWS_ONLY;
 		}
+		_update_instance_data_raytracing_flags(instance, idata);
 	}
 
 	if ((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK && instance->base_data) {
@@ -1352,6 +1495,7 @@ void RendererSceneCull::instance_geometry_set_cast_shadows_setting(RID p_instanc
 void RendererSceneCull::instance_geometry_set_material_override(RID p_instance, RID p_material) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 
 	instance->material_override = p_material;
 	_instance_queue_update(instance, false, true);
@@ -1366,6 +1510,7 @@ void RendererSceneCull::instance_geometry_set_material_override(RID p_instance, 
 void RendererSceneCull::instance_geometry_set_material_overlay(RID p_instance, RID p_material) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 
 	instance->material_overlay = p_material;
 	_instance_queue_update(instance, false, true);
@@ -1380,6 +1525,7 @@ void RendererSceneCull::instance_geometry_set_material_overlay(RID p_instance, R
 void RendererSceneCull::instance_geometry_set_visibility_range(RID p_instance, float p_min, float p_max, float p_min_margin, float p_max_margin, RSE::VisibilityRangeFadeMode p_fade_mode) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 
 	instance->visibility_range_begin = p_min;
 	instance->visibility_range_end = p_max;
@@ -1522,6 +1668,7 @@ void RendererSceneCull::_update_instance_visibility_dependencies(Instance *p_ins
 void RendererSceneCull::instance_geometry_set_lightmap(RID p_instance, RID p_lightmap, const Rect2 &p_lightmap_uv_scale, int p_slice_index) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 
 	if (instance->lightmap) {
 		InstanceLightmapData *lightmap_data = static_cast<InstanceLightmapData *>(((Instance *)instance->lightmap)->base_data);
@@ -1553,6 +1700,7 @@ void RendererSceneCull::instance_geometry_set_lightmap(RID p_instance, RID p_lig
 void RendererSceneCull::instance_geometry_set_lod_bias(RID p_instance, float p_lod_bias) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 
 	instance->lod_bias = p_lod_bias;
 
@@ -1566,6 +1714,7 @@ void RendererSceneCull::instance_geometry_set_lod_bias(RID p_instance, float p_l
 void RendererSceneCull::instance_geometry_set_shader_parameter(RID p_instance, const StringName &p_parameter, const Variant &p_value) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key or eligibility may change.
 
 	instance->instance_uniforms.set(instance->self, p_parameter, p_value);
 }
@@ -1604,6 +1753,7 @@ void RendererSceneCull::instance_geometry_get_shader_parameter_list(RID p_instan
 
 void RendererSceneCull::_update_instance(Instance *p_instance) const {
 	p_instance->version++;
+	p_instance->version_frame = RSG::rasterizer->get_frame_number(); // Mariner E10.
 
 	// When not using interpolation the transform is used straight.
 	const Transform3D *instance_xform = &p_instance->transform;
@@ -1737,8 +1887,24 @@ void RendererSceneCull::_update_instance(Instance *p_instance) const {
 
 	// note: we had to remove is equal approx check here, it meant that det == 0.000004 won't work, which is the case for some of our scenes.
 	if (p_instance->scenario == nullptr || !p_instance->visible || instance_xform->basis.determinant() == 0) {
+		if (p_instance->gpu_batch) {
+			_gpu_static_remove(p_instance); // Mariner E25a.
+		}
 		p_instance->prev_transformed_aabb = p_instance->transformed_aabb;
 		return;
+	}
+
+	// Mariner E25a: drawn by a GPU static batch instead of on its own (out of the culled instances and the pairing).
+	if (_gpu_static_eligible(p_instance)) {
+		if (p_instance->indexer_id.is_valid()) {
+			const_cast<RendererSceneCull *>(this)->_unpair_instance(p_instance);
+		}
+		_gpu_static_add(p_instance);
+		p_instance->prev_transformed_aabb = p_instance->transformed_aabb;
+		return;
+	}
+	if (p_instance->gpu_batch) {
+		_gpu_static_remove(p_instance); // Drawn on its own again (below).
 	}
 
 	//quantize to improve moving object performance
@@ -1829,6 +1995,7 @@ void RendererSceneCull::_update_instance(Instance *p_instance) const {
 		if (p_instance->redraw_if_visible) {
 			idata.flags |= InstanceData::FLAG_REDRAW_IF_VISIBLE;
 		}
+		_update_instance_data_raytracing_flags(p_instance, idata); // Mariner E12 DG-F.
 		// dirty flags should not be set here, since no pairing has happened
 		if (p_instance->baked_light) {
 			idata.flags |= InstanceData::FLAG_USES_BAKED_LIGHT;
@@ -1914,6 +2081,9 @@ void RendererSceneCull::_update_instance(Instance *p_instance) const {
 }
 
 void RendererSceneCull::_unpair_instance(Instance *p_instance) {
+	if (p_instance->gpu_batch) {
+		_gpu_static_remove(p_instance); // Mariner E25a.
+	}
 	if (!p_instance->indexer_id.is_valid()) {
 		return; //nothing to do
 	}
@@ -2152,6 +2322,20 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 	Transform3D light_transform = p_instance->transform;
 	light_transform.orthonormalize(); //scale does not count on lights
 
+	// Mariner E10: with the shadow cache the cascades are drawn with an orientation that follows the light only
+	// once it turned by more than the threshold, and with positions, sizes and depth ranges on a fixed grid, so that
+	// the same static casters give the same depth from frame to frame.
+	const bool stable = cull.shadow_cache;
+	if (stable) {
+		if (!light->shadow_cache_basis_valid || light->shadow_cache_basis.get_column(Vector3::AXIS_Z).angle_to(light_transform.basis.get_column(Vector3::AXIS_Z)) > shadow_cache_light_angle || light->shadow_cache_basis.get_column(Vector3::AXIS_X).angle_to(light_transform.basis.get_column(Vector3::AXIS_X)) > shadow_cache_light_angle) {
+			light->shadow_cache_basis = light_transform.basis;
+			light->shadow_cache_basis_valid = true;
+		}
+		light_transform.basis = light->shadow_cache_basis;
+	} else {
+		light->shadow_cache_basis_valid = false;
+	}
+
 	real_t max_distance = p_cam_projection.get_z_far();
 	real_t shadow_max = RSG::light_storage->light_get_param(p_instance->base, RSE::LIGHT_PARAM_SHADOW_MAX_DISTANCE);
 	if (shadow_max > 0 && !p_cam_orthogonal) { //its impractical (and leads to unwanted behaviors) to set max distance in orthogonal camera
@@ -2194,6 +2378,10 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 	cull.shadows[p_shadow_index].cascade_count = splits;
 	cull.shadows[p_shadow_index].light_instance = light->instance;
 	cull.shadows[p_shadow_index].caster_mask = RSG::light_storage->light_get_shadow_caster_mask(p_instance->base);
+	cull.shadows[p_shadow_index].object_layers = scene_render->directional_object_shadow_is_supported() ? RSG::light_storage->light_directional_get_object_shadow_layers(p_instance->base) : 0;
+	cull.shadows[p_shadow_index].object_from_cascade = RSG::light_storage->light_directional_get_object_shadow_from_cascade(p_instance->base);
+	cull.shadows[p_shadow_index].object_size = RSG::light_storage->light_directional_get_object_shadow_size(p_instance->base);
+	cull.shadows[p_shadow_index].basis = light_transform.basis;
 
 	for (int i = 0; i < splits; i++) {
 		RENDER_TIMESTAMP("Cull DirectionalLight3D, Split " + itos(i));
@@ -2293,6 +2481,13 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 
 			radius *= texture_size / (texture_size - 2.0); //add a texel by each side
 
+			if (stable) {
+				// Mariner E10: the radius depends only on the camera projection and the splits, but its float value
+				// jitters with the camera orientation. Round it up on a grid of 1/256 of its power of two.
+				radius = shadow_cache_quantize_radius(radius, light->shadow_cache_radius[i]);
+				light->shadow_cache_radius[i] = radius;
+			}
+
 			z_min_cam = z_vec.dot(center) - radius;
 
 			{
@@ -2317,6 +2512,11 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 			x_min_cam = Math::snapped(x_vec.dot(center) - radius - soft_shadow_expand, unit);
 			y_max_cam = Math::snapped(y_vec.dot(center) + radius + soft_shadow_expand, unit);
 			y_min_cam = Math::snapped(y_vec.dot(center) - radius - soft_shadow_expand, unit);
+			if (stable) {
+				// Mariner E10: the same size every frame (snapping both ends separately can differ by a step).
+				x_max_cam = x_min_cam + 2.0 * (radius + soft_shadow_expand);
+				y_max_cam = y_min_cam + 2.0 * (radius + soft_shadow_expand);
+			}
 		}
 
 		//now that we know all ranges, we can proceed to make the light frustum planes, for culling octree
@@ -2337,6 +2537,14 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 		// a pre pass will need to be needed to determine the actual z-near to be used
 
 		z_max = z_vec.dot(center) + radius + pancake_size;
+
+		if (stable) {
+			// Mariner E10: the near plane on the same grid as x / y (4 texels) and a constant depth range, one grid
+			// step longer, so that it still covers [z_min_cam, z_max] (depth values of static casters stay the same).
+			const real_t unit = (radius + soft_shadow_expand) * 4.0 / texture_size;
+			z_max = Math::ceil(z_max / unit) * unit;
+			z_min_cam = z_max - (2.0 * radius + pancake_size + unit);
+		}
 
 		{
 			Projection ortho_camera;
@@ -2668,6 +2876,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 }
 
 void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_camera, RID p_scenario, RID p_viewport, Size2 p_viewport_size, uint32_t p_jitter_phase_count, float p_screen_mesh_lod_threshold, RID p_shadow_atlas, Ref<XRInterface> &p_xr_interface, float p_window_output_max_value, RenderingServerTypes::RenderInfo *r_render_info) {
+	texture_streaming_view_height = p_viewport_size.y; // Mariner E17.
 #ifndef _3D_DISABLED
 
 	Camera *camera = camera_owner.get_or_null(p_camera);
@@ -2779,6 +2988,16 @@ void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_bu
 	RENDER_TIMESTAMP("Update Occlusion Buffer")
 	// For now just cull on the first camera
 	RendererSceneOcclusionCull::get_singleton()->buffer_update(p_viewport, camera_data.main_transform, camera_data.main_projection, camera_data.is_orthogonal);
+
+	if (p_render_buffers.is_valid()) {
+		// Mariner E13: the depth of an earlier frame of this viewport, reprojected into this camera.
+		RendererSceneHiZOcclusion::State &hiz = p_render_buffers->hiz_occlusion;
+		hiz.ready = false;
+		if (hiz.enabled && camera_data.view_count == 1 && !camera_data.is_orthogonal && hiz.snapshot.valid && hiz.snapshot.frame + RendererSceneHiZOcclusion::MAX_SNAPSHOT_AGE >= RSG::rasterizer->get_frame_number()) {
+			RENDER_TIMESTAMP("Reproject Hi-Z Occlusion");
+			hiz.ready = hiz.buffer.reproject(hiz.snapshot, camera_data.main_transform, camera_data.main_projection, hiz.reference, hiz.reference_radius);
+		}
+	}
 
 	_render_scene(&camera_data, p_render_buffers, environment, camera->attributes, compositor, camera->visible_layers, p_scenario, p_viewport, p_shadow_atlas, RID(), -1, p_screen_mesh_lod_threshold, p_window_output_max_value, true, r_render_info);
 #endif
@@ -2928,7 +3147,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 #define OCCLUSION_CULLED (cull_data.occlusion_buffer != nullptr && (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_OCCLUSION_CULLING) == 0 && cull_data.occlusion_buffer->is_occluded(cull_data.scenario->instance_aabbs[i].bounds, cull_data.cam_transform.origin, inv_cam_transform, *cull_data.camera_matrix, z_near, is_orthogonal, cull_data.scenario->instance_data[i].occlusion_timeout))
 
 		if (!HIDDEN_BY_VISIBILITY_CHECKS) {
-			if ((LAYER_CHECK && IN_FRUSTUM(cull_data.cull->frustum) && VIS_CHECK && !OCCLUSION_CULLED) || (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_ALL_CULLING)) {
+			if (!(idata.flags & InstanceData::FLAG_RAYTRACING_ONLY) && ((LAYER_CHECK && IN_FRUSTUM(cull_data.cull->frustum) && VIS_CHECK && !OCCLUSION_CULLED) || (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_ALL_CULLING))) {
 				in_frustum = true;
 				uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
 				if (base_type == RSE::INSTANCE_LIGHT) {
@@ -3235,12 +3454,60 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 
 					if (keep) {
 						cull_result.geometry_instances.push_back(idata.instance_geometry);
+						if (cull_data.texture_streaming && (idata.instance->base_type == RSE::INSTANCE_MESH || idata.instance->base_type == RSE::INSTANCE_MULTIMESH)) {
+							cull_result.streaming_instances.push_back(idata.instance);
+						}
 					}
 				}
 			}
 
 			for (uint32_t j = 0; j < cull_data.cull->shadow_count; j++) {
+				// Mariner E21: translucent casters tint the light instead of shadowing it; they go to their own map when
+				// they are in one of the cascades (the shadowed range around the camera).
+				if (idata.flags & InstanceData::FLAG_SHADOW_TRANSLUCENT) {
+					uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
+					if (j == 0 && ((1 << base_type) & RSE::INSTANCE_GEOMETRY_MASK) && (idata.flags & InstanceData::FLAG_CAST_SHADOWS) && (LAYER_CHECK & cull_data.cull->shadows[j].caster_mask) && VIS_CHECK) {
+						for (uint32_t k = 0; k < cull_data.cull->shadows[j].cascade_count; k++) {
+							if (IN_FRUSTUM(cull_data.cull->shadows[j].cascades[k].frustum)) {
+								cull_result.directional_shadows[j].translucent_instances.push_back(idata.instance_geometry);
+								mesh_visible = true;
+								const real_t *b = cull_data.scenario->instance_aabbs[i].bounds;
+								const AABB bounds(Vector3(b[0], b[1], b[2]), Vector3(b[3] - b[0], b[4] - b[1], b[5] - b[2]));
+								if (cull_result.directional_shadows[j].translucent_aabb_valid) {
+									cull_result.directional_shadows[j].translucent_aabb.merge_with(bounds);
+								} else {
+									cull_result.directional_shadows[j].translucent_aabb = bounds;
+									cull_result.directional_shadows[j].translucent_aabb_valid = true;
+								}
+								break;
+							}
+						}
+					}
+					continue;
+				}
+				// Mariner E10b: casters on the object shadow layers go to the object shadow (wherever they are) and
+				// are left out of the cascades from object_from_cascade on.
+				bool object_caster = false;
+				if (cull_data.cull->shadows[j].object_layers != 0 && (LAYER_CHECK & cull_data.cull->shadows[j].object_layers & cull_data.cull->shadows[j].caster_mask)) {
+					uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
+					if (((1 << base_type) & RSE::INSTANCE_GEOMETRY_MASK) && (idata.flags & InstanceData::FLAG_CAST_SHADOWS) && VIS_CHECK) {
+						object_caster = true;
+						cull_result.directional_shadows[j].object_instances.push_back(idata.instance_geometry);
+						mesh_visible = true;
+						const real_t *b = cull_data.scenario->instance_aabbs[i].bounds;
+						const AABB bounds(Vector3(b[0], b[1], b[2]), Vector3(b[3] - b[0], b[4] - b[1], b[5] - b[2]));
+						if (cull_result.directional_shadows[j].object_aabb_valid) {
+							cull_result.directional_shadows[j].object_aabb.merge_with(bounds);
+						} else {
+							cull_result.directional_shadows[j].object_aabb = bounds;
+							cull_result.directional_shadows[j].object_aabb_valid = true;
+						}
+					}
+				}
 				for (uint32_t k = 0; k < cull_data.cull->shadows[j].cascade_count; k++) {
+					if (object_caster && k >= cull_data.cull->shadows[j].object_from_cascade) {
+						break;
+					}
 					if (!light_culler->cull_directional_light(cull_data.scenario->instance_aabbs[i], j, k)) { // pass the cascade index
 						continue;
 					}
@@ -3250,6 +3517,19 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 						if (((1 << base_type) & RSE::INSTANCE_GEOMETRY_MASK) && idata.flags & InstanceData::FLAG_CAST_SHADOWS && (LAYER_CHECK & cull_data.cull->shadows[j].caster_mask)) {
 							cull_result.directional_shadows[j].cascade_geometry_instances[k].push_back(idata.instance_geometry);
 							mesh_visible = true;
+							if (cull_data.cull->shadow_cache) {
+								// Mariner E10: split into the cached (static) and the per-frame (dynamic) part.
+								const Instance *inst = idata.instance;
+								const bool is_static = inst->shadow_cache_mode == RSE::SHADOW_CACHE_MODE_STATIC || (inst->shadow_cache_mode == RSE::SHADOW_CACHE_MODE_AUTO && !inst->shadow_cache_dynamic && cull_data.cull->shadow_cache_frame >= inst->version_frame + shadow_cache_settle_frames);
+								if (is_static) {
+									cull_result.directional_shadows[j].cascade_static_instances[k].push_back(idata.instance_geometry);
+									const uint64_t h = shadow_cache_mix(uint64_t(uintptr_t(idata.instance_geometry)) ^ shadow_cache_mix(inst->version));
+									cull_result.directional_shadows[j].cascade_static_hash_sum[k] += h;
+									cull_result.directional_shadows[j].cascade_static_hash_xor[k] ^= shadow_cache_mix(h);
+								} else {
+									cull_result.directional_shadows[j].cascade_dynamic_instances[k].push_back(idata.instance_geometry);
+								}
+							}
 						}
 					}
 				}
@@ -3261,7 +3541,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 			// cull mask are skipped; visibility ranges are respected like for drawing.
 			if (cull_data.cull->rt_enabled && (idata.layer_mask & cull_data.cull->rt_cull_mask)) {
 				uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
-				if ((base_type == RSE::INSTANCE_MESH || base_type == RSE::INSTANCE_MULTIMESH) && !(idata.flags & InstanceData::FLAG_CAST_SHADOWS_ONLY)) {
+				if ((base_type == RSE::INSTANCE_MESH || base_type == RSE::INSTANCE_MULTIMESH) && !(idata.flags & (InstanceData::FLAG_CAST_SHADOWS_ONLY | InstanceData::FLAG_RAYTRACING_DISABLED))) {
 					bool rt_in_range = in_frustum || (cull_data.scenario->instance_aabbs[i].in_aabb(cull_data.cull->rt_aabb) && VIS_CHECK);
 					// When a visibility parent is still cross-fading its children, keep only the parent (a ray hits one LOD).
 					if (rt_in_range && idata.parent_array_index >= 0 && (cull_data.scenario->instance_data[idata.parent_array_index].flags & InstanceData::FLAG_VISIBILITY_DEPENDENCY_FADE_CHILDREN)) {
@@ -3271,6 +3551,11 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 						cull_result.rt_geometry_instances.push_back(idata.instance_geometry);
 						mesh_visible = true; // Skinned / blend shape meshes must be deformed for the TLAS too.
 					}
+				}
+				// Mariner E12: positional lights within the raytracing range light the GI probes (DDGI), also when they
+				// are outside the view frustum.
+				if (base_type == RSE::INSTANCE_LIGHT && (in_frustum || (cull_data.scenario->instance_aabbs[i].in_aabb(cull_data.cull->rt_aabb) && VIS_CHECK))) {
+					cull_result.rt_light_instances.push_back(RID::from_uint64(idata.instance_data_rid));
 				}
 			}
 		}
@@ -3297,7 +3582,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 						}
 					}
 				} else if ((1 << base_type) & RSE::INSTANCE_GEOMETRY_MASK) {
-					if ((idata.flags & InstanceData::FLAG_USES_BAKED_LIGHT) && (cull_data.visible_layers & idata.layer_mask)) {
+					if ((idata.flags & InstanceData::FLAG_USES_BAKED_LIGHT) && !(idata.flags & InstanceData::FLAG_RAYTRACING_ONLY) && (cull_data.visible_layers & idata.layer_mask)) {
 						cull_result.sdfgi_region_geometry_instances[j].push_back(idata.instance_geometry);
 						mesh_visible = true;
 					}
@@ -3313,6 +3598,60 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 
 void RendererSceneCull::_scene_particles_set_view_axis(RID p_particles, const Vector3 &p_axis, const Vector3 &p_up_axis) {
 	RSG::particles_storage->particles_set_view_axis(p_particles, p_axis, p_up_axis);
+}
+
+void RendererSceneCull::_texture_streaming_collect(const RendererSceneRender::CameraData *p_camera_data, const InstanceCullResult &p_cull_result) {
+	// Mariner E17: screen pixels per UV unit at the nearest point of each visible instance, kept per material.
+	texture_streaming.begin_view();
+	const Vector3 eye = p_camera_data->main_transform.origin;
+	const Projection &projection = p_camera_data->main_projection;
+	for (uint64_t i = 0; i < p_cull_result.streaming_instances.size(); i++) {
+		const Instance *instance = p_cull_result.streaming_instances[i];
+		RID mesh = instance->base;
+		if (instance->base_type == RSE::INSTANCE_MULTIMESH) {
+			mesh = RSG::mesh_storage->multimesh_get_mesh(instance->base);
+		}
+		if (mesh.is_null()) {
+			continue;
+		}
+		const float distance = RendererTextureStreaming::distance_to_aabb(eye, instance->transformed_aabb);
+		const float pixels = RendererTextureStreaming::pixels_per_unit(projection, texture_streaming_view_height, distance);
+		const Basis &basis = instance->transform.basis;
+		const float scale = MAX(basis.get_column(0).length(), MAX(basis.get_column(1).length(), basis.get_column(2).length()));
+		const int surface_count = RSG::mesh_storage->mesh_get_surface_count(mesh);
+		float fallback_density = -1.0f;
+		for (int s = 0; s < surface_count; s++) {
+			float density = RSG::mesh_storage->mesh_surface_get_uv_density(mesh, s);
+			if (density <= 0.0f) {
+				// Unknown density: assume the UV square spans the longest side of the mesh, as on quads, sprites and boxes.
+				if (fallback_density < 0.0f) {
+					fallback_density = RSG::mesh_storage->mesh_get_aabb(mesh, RID()).get_longest_axis_size();
+				}
+				density = fallback_density;
+			}
+			const float demand = pixels * density * scale;
+			if (instance->material_override.is_valid()) {
+				texture_streaming.add_material(instance->material_override, demand);
+			} else if (s < instance->materials.size() && instance->materials[s].is_valid()) {
+				texture_streaming.add_material(instance->materials[s], demand);
+			} else {
+				texture_streaming.add_material(RSG::mesh_storage->mesh_surface_get_material(mesh, s), demand);
+			}
+			if (instance->material_overlay.is_valid()) {
+				texture_streaming.add_material(instance->material_overlay, demand);
+			}
+		}
+	}
+	static const StringName uv1_scale_name = "uv1_scale";
+	texture_streaming.end_view(RSG::rasterizer->get_frame_number(), [](RID p_material, LocalVector<RID> &r_textures, float &r_scale) {
+		RSG::material_storage->material_get_textures(p_material, r_textures);
+		// Tiling of the standard material multiplies the texels a UV unit holds.
+		const Variant uv1_scale = RSG::material_storage->material_get_param(p_material, uv1_scale_name);
+		if (uv1_scale.get_type() == Variant::VECTOR3) {
+			const Vector3 tiling = uv1_scale;
+			r_scale = MAX(1e-3f, MAX(Math::abs(tiling.x), Math::abs(tiling.y)));
+		}
+	});
 }
 
 void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_camera_data, const Ref<RenderSceneBuffers> &p_render_buffers, RID p_environment, RID p_force_camera_attributes, RID p_compositor, uint32_t p_visible_layers, RID p_scenario, RID p_viewport, RID p_shadow_atlas, RID p_reflection_probe, int p_reflection_probe_pass, float p_screen_mesh_lod_threshold, float p_window_output_max_value, bool p_using_shadows, RenderingServerTypes::RenderInfo *r_render_info) {
@@ -3390,6 +3729,13 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	// directional lights
 	{
 		cull.shadow_count = 0;
+		// Mariner E10: the cache is only for shadows drawn by a renderer that keeps it (Forward+).
+		if (shadow_cache_render_enabled != shadow_cache_enabled) {
+			shadow_cache_render_enabled = shadow_cache_enabled;
+			scene_render->directional_shadow_cache_set_enabled(shadow_cache_enabled);
+		}
+		cull.shadow_cache = shadow_cache_enabled && p_using_shadows;
+		cull.shadow_cache_frame = RSG::rasterizer->get_frame_number();
 
 		Vector<Instance *> lights_with_shadow;
 
@@ -3449,6 +3795,9 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 
 	scene_cull_result.clear();
 
+	// Mariner E25b: the occlusion buffer this render is culled with, for the renderer's GPU instance culling.
+	RendererSceneRender::GPUOcclusionData gpu_occlusion;
+
 	{
 		uint64_t cull_from = 0;
 		uint64_t cull_to = scenario->instance_data.size();
@@ -3463,8 +3812,21 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		cull_data.visible_layers = p_visible_layers;
 		cull_data.render_reflection_probe = render_reflection_probe;
 		cull_data.occlusion_buffer = RendererSceneOcclusionCull::get_singleton()->buffer_get_ptr(p_viewport);
+		if (p_reflection_probe.is_null() && p_render_buffers.is_valid() && p_render_buffers->hiz_occlusion.enabled) {
+			// Mariner E13: the reprojected depth of earlier frames replaces the occluder raster of this viewport.
+			cull_data.occlusion_buffer = p_render_buffers->hiz_occlusion.ready ? &p_render_buffers->hiz_occlusion.buffer : nullptr;
+		}
 		cull_data.camera_matrix = &p_camera_data->main_projection;
+		if (p_reflection_probe.is_null() && cull_data.occlusion_buffer && !cull_data.occlusion_buffer->is_empty()) {
+			gpu_occlusion.buffer = cull_data.occlusion_buffer;
+			gpu_occlusion.cam_transform = p_camera_data->main_transform;
+			gpu_occlusion.cam_projection = p_camera_data->main_projection;
+			gpu_occlusion.z_near = p_camera_data->main_projection.get_z_near();
+			gpu_occlusion.is_orthogonal = p_camera_data->main_projection.is_orthogonal();
+			gpu_occlusion.jitter = RendererSceneOcclusionCull::HZBuffer::occlusion_jitter_enabled;
+		}
 		cull_data.visibility_viewport_mask = scenario->viewport_visibility_masks.has(p_viewport) ? scenario->viewport_visibility_masks[p_viewport] : 0;
+		cull_data.texture_streaming = p_reflection_probe.is_null() && texture_streaming_view_height > 0.0f && texture_streaming.is_active();
 #ifdef DEBUG_CULL_TIME
 		uint64_t time_from = OS::get_singleton()->get_ticks_usec();
 #endif
@@ -3495,6 +3857,10 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		print_line("time taken: " + rtos(time_avg / time_count));
 #endif
 
+		if (cull_data.texture_streaming) {
+			_texture_streaming_collect(p_camera_data, scene_cull_result);
+		}
+
 		if (scene_cull_result.mesh_instances.size()) {
 			for (uint64_t i = 0; i < scene_cull_result.mesh_instances.size(); i++) {
 				RSG::mesh_storage->mesh_instance_check_for_update(scene_cull_result.mesh_instances[i]);
@@ -3522,8 +3888,100 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 				render_shadow_data[max_shadows_used].light = cull.shadows[i].light_instance;
 				render_shadow_data[max_shadows_used].pass = j;
 				render_shadow_data[max_shadows_used].instances.merge_unordered(scene_cull_result.directional_shadows[i].cascade_geometry_instances[j]);
+				render_shadow_data[max_shadows_used].cache = cull.shadow_cache;
+				if (cull.shadow_cache) {
+					render_shadow_data[max_shadows_used].static_instances.merge_unordered(scene_cull_result.directional_shadows[i].cascade_static_instances[j]);
+					render_shadow_data[max_shadows_used].dynamic_instances.merge_unordered(scene_cull_result.directional_shadows[i].cascade_dynamic_instances[j]);
+					const uint64_t sum = scene_cull_result.directional_shadows[i].cascade_static_hash_sum[j];
+					const uint64_t x = scene_cull_result.directional_shadows[i].cascade_static_hash_xor[j];
+					render_shadow_data[max_shadows_used].static_hash = shadow_cache_mix(sum ^ shadow_cache_mix(x ^ shadow_cache_mix(render_shadow_data[max_shadows_used].static_instances.size())));
+				}
 				max_shadows_used++;
 			}
+
+			// Mariner E10b: object shadow - an orthographic map along the light fitted to the bounds of its casters.
+			bool object_shadow = false;
+			const InstanceCullResult::DirectionalShadow &ds = scene_cull_result.directional_shadows[i];
+			if (cull.shadows[i].object_layers != 0 && ds.object_aabb_valid && ds.object_instances.size() > 0 && max_shadows_used < MAX_UPDATE_SHADOWS) {
+				const Basis &basis = cull.shadows[i].basis;
+				const Vector3 x_vec = basis.get_column(Vector3::AXIS_X).normalized();
+				const Vector3 y_vec = basis.get_column(Vector3::AXIS_Y).normalized();
+				const Vector3 z_vec = basis.get_column(Vector3::AXIS_Z).normalized(); // Towards the light.
+				real_t mn[3] = { 1e30, 1e30, 1e30 };
+				real_t mx[3] = { -1e30, -1e30, -1e30 };
+				for (int c = 0; c < 8; c++) {
+					const Vector3 p = ds.object_aabb.get_endpoint(c);
+					const real_t d[3] = { x_vec.dot(p), y_vec.dot(p), z_vec.dot(p) };
+					for (int a = 0; a < 3; a++) {
+						mn[a] = MIN(mn[a], d[a]);
+						mx[a] = MAX(mx[a], d[a]);
+					}
+				}
+				const int size = MAX(64, cull.shadows[i].object_size);
+				// A texel of margin on each side; receivers up to the size of the casters again (and at least 50 m)
+				// beyond them along the light (the sea under a ship). Farther receivers clamp to the far plane.
+				const real_t extent = MAX(mx[0] - mn[0], mx[1] - mn[1]);
+				const real_t margin = extent / size * 2.0 + 0.05;
+				const real_t half_x = (mx[0] - mn[0]) * 0.5 + margin;
+				const real_t half_y = (mx[1] - mn[1]) * 0.5 + margin;
+				const real_t z_top = mx[2] + margin;
+				const real_t zfar = (mx[2] - mn[2]) + margin + MAX(real_t(50.0), mx[2] - mn[2]);
+				Projection ortho;
+				ortho.set_orthogonal(-half_x, half_x, -half_y, half_y, 0, zfar);
+				Transform3D xform;
+				xform.basis = Basis(x_vec, y_vec, z_vec);
+				xform.origin = x_vec * ((mn[0] + mx[0]) * 0.5) + y_vec * ((mn[1] + mx[1]) * 0.5) + z_vec * z_top;
+				const real_t texel = MAX(half_x, half_y) * 2.0 / size;
+				RSG::light_storage->light_instance_set_shadow_transform(cull.shadows[i].light_instance, ortho, xform, zfar, 0, 4, texel, zfar, 0, Vector2(1.0 / (2.0 * half_x), 1.0 / (2.0 * half_y)));
+				render_shadow_data[max_shadows_used].light = cull.shadows[i].light_instance;
+				render_shadow_data[max_shadows_used].pass = 4;
+				render_shadow_data[max_shadows_used].instances.merge_unordered(scene_cull_result.directional_shadows[i].object_instances);
+				render_shadow_data[max_shadows_used].cache = false;
+				max_shadows_used++;
+				object_shadow = true;
+			}
+			RSG::light_storage->light_instance_set_directional_object_shadow(cull.shadows[i].light_instance, object_shadow);
+
+			// Mariner E21: translucent shadow - the nearest translucent caster along the light, its transmitted colour and
+			// distance, in an orthographic map fitted to the bounds of the translucent casters.
+			bool translucent_shadow = false;
+			if (ds.translucent_aabb_valid && ds.translucent_instances.size() > 0 && max_shadows_used < MAX_UPDATE_SHADOWS) {
+				const Basis &basis = cull.shadows[i].basis;
+				const Vector3 x_vec = basis.get_column(Vector3::AXIS_X).normalized();
+				const Vector3 y_vec = basis.get_column(Vector3::AXIS_Y).normalized();
+				const Vector3 z_vec = basis.get_column(Vector3::AXIS_Z).normalized(); // Towards the light.
+				real_t mn[3] = { 1e30, 1e30, 1e30 };
+				real_t mx[3] = { -1e30, -1e30, -1e30 };
+				for (int c = 0; c < 8; c++) {
+					const Vector3 p = ds.translucent_aabb.get_endpoint(c);
+					const real_t d[3] = { x_vec.dot(p), y_vec.dot(p), z_vec.dot(p) };
+					for (int a = 0; a < 3; a++) {
+						mn[a] = MIN(mn[a], d[a]);
+						mx[a] = MAX(mx[a], d[a]);
+					}
+				}
+				const int size = MAX(64, int(GLOBAL_GET_CACHED(int, "rendering/lights_and_shadows/directional_shadow/translucent_shadow_size")));
+				const real_t extent = MAX(mx[0] - mn[0], mx[1] - mn[1]);
+				const real_t margin = extent / size * 2.0 + 0.05;
+				const real_t half_x = (mx[0] - mn[0]) * 0.5 + margin;
+				const real_t half_y = (mx[1] - mn[1]) * 0.5 + margin;
+				const real_t z_top = mx[2] + margin;
+				const real_t zfar = (mx[2] - mn[2]) + margin * 2.0;
+				Projection ortho;
+				ortho.set_orthogonal(-half_x, half_x, -half_y, half_y, 0, zfar);
+				Transform3D xform;
+				xform.basis = Basis(x_vec, y_vec, z_vec);
+				xform.origin = x_vec * ((mn[0] + mx[0]) * 0.5) + y_vec * ((mn[1] + mx[1]) * 0.5) + z_vec * z_top;
+				const real_t texel = MAX(half_x, half_y) * 2.0 / size;
+				RSG::light_storage->light_instance_set_shadow_transform(cull.shadows[i].light_instance, ortho, xform, zfar, 0, 5, texel, zfar, 0, Vector2(1.0 / (2.0 * half_x), 1.0 / (2.0 * half_y)));
+				render_shadow_data[max_shadows_used].light = cull.shadows[i].light_instance;
+				render_shadow_data[max_shadows_used].pass = 5;
+				render_shadow_data[max_shadows_used].instances.merge_unordered(scene_cull_result.directional_shadows[i].translucent_instances);
+				render_shadow_data[max_shadows_used].cache = false;
+				max_shadows_used++;
+				translucent_shadow = true;
+			}
+			RSG::light_storage->light_instance_set_directional_translucent_shadow(cull.shadows[i].light_instance, translucent_shadow);
 		}
 
 		// Positional Shadows
@@ -3738,8 +4196,14 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 
 	RENDER_TIMESTAMP("Render 3D Scene");
 	scene_render->raytracing_instances = cull.rt_enabled ? &scene_cull_result.rt_geometry_instances : nullptr;
+	scene_render->gpu_occlusion = gpu_occlusion.buffer ? &gpu_occlusion : nullptr; // Mariner E25b.
+	scene_render->raytracing_lights = cull.rt_enabled ? &scene_cull_result.rt_light_instances : nullptr;
+	scene_render->ddgi_volume = p_reflection_probe.is_null() ? &scenario->ddgi_volume : nullptr;
 	scene_render->render_scene(p_render_buffers, p_camera_data, prev_camera_data, scene_cull_result.geometry_instances, scene_cull_result.light_instances, scene_cull_result.reflections, scene_cull_result.voxel_gi_instances, scene_cull_result.decals, scene_cull_result.lightmaps, scene_cull_result.fog_volumes, p_environment, camera_attributes, p_compositor, p_shadow_atlas, occluders_tex, p_reflection_probe.is_valid() ? RID() : scenario->reflection_atlas, p_reflection_probe, p_reflection_probe_pass, p_screen_mesh_lod_threshold, render_shadow_data, max_shadows_used, render_sdfgi_data, cull.sdfgi.region_count, p_window_output_max_value, &sdfgi_update_data, r_render_info);
 	scene_render->raytracing_instances = nullptr;
+	scene_render->gpu_occlusion = nullptr;
+	scene_render->raytracing_lights = nullptr;
+	scene_render->ddgi_volume = nullptr;
 
 	if (p_viewport.is_valid()) {
 		RSG::viewport->viewport_set_prev_camera_data(p_viewport, p_camera_data);
@@ -3747,6 +4211,9 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 
 	for (uint32_t i = 0; i < max_shadows_used; i++) {
 		render_shadow_data[i].instances.clear();
+		render_shadow_data[i].static_instances.clear();
+		render_shadow_data[i].dynamic_instances.clear();
+		render_shadow_data[i].cache = false;
 	}
 	max_shadows_used = 0;
 
@@ -4232,7 +4699,7 @@ void RendererSceneCull::_update_dirty_instance(Instance *p_instance) const {
 
 			p_instance->instance_uniforms.materials_start();
 
-			if (p_instance->cast_shadows == RSE::SHADOW_CASTING_SETTING_OFF) {
+			if (p_instance->cast_shadows == RSE::SHADOW_CASTING_SETTING_OFF || p_instance->raytracing_mode == RSE::RAYTRACING_MODE_ONLY) {
 				can_cast_shadows = false;
 			}
 
@@ -4383,6 +4850,7 @@ void RendererSceneCull::_update_dirty_instance(Instance *p_instance) const {
 
 	_instance_update_list.remove(&p_instance->update_item);
 
+	_update_instance_shadow_cache_class(p_instance); // Mariner E10 (materials, mesh instance, indirect multimesh).
 	_update_instance(p_instance);
 
 	p_instance->teleported = false;
@@ -4390,9 +4858,264 @@ void RendererSceneCull::_update_dirty_instance(Instance *p_instance) const {
 	p_instance->update_dependencies = false;
 }
 
+/* Mariner E25a: GPU static batches */
+
+bool RendererSceneCull::GPUStaticKey::operator==(const GPUStaticKey &p_other) const {
+	return mesh == p_other.mesh && material_override == p_other.material_override && material_overlay == p_other.material_overlay && materials == p_other.materials && layer_mask == p_other.layer_mask && cast_shadows == p_other.cast_shadows && shadow_cache_mode == p_other.shadow_cache_mode && raytracing_mode == p_other.raytracing_mode && raytracing_opacity == p_other.raytracing_opacity && lod_bias == p_other.lod_bias && sorting_offset == p_other.sorting_offset && use_aabb_center == p_other.use_aabb_center && baked_light == p_other.baked_light && dynamic_gi == p_other.dynamic_gi && ignore_occlusion_culling == p_other.ignore_occlusion_culling && shadow_translucent == p_other.shadow_translucent && visibility_range_begin == p_other.visibility_range_begin && visibility_range_end == p_other.visibility_range_end && visibility_range_begin_margin == p_other.visibility_range_begin_margin && visibility_range_end_margin == p_other.visibility_range_end_margin;
+}
+
+uint32_t RendererSceneCull::GPUStaticKey::hash() const {
+	uint32_t h = hash_murmur3_one_64(mesh.get_id());
+	h = hash_murmur3_one_64(material_override.get_id(), h);
+	h = hash_murmur3_one_64(material_overlay.get_id(), h);
+	for (const RID &m : materials) {
+		h = hash_murmur3_one_64(m.get_id(), h);
+	}
+	h = hash_murmur3_one_32(layer_mask, h);
+	h = hash_murmur3_one_32(uint32_t(cast_shadows) | (uint32_t(shadow_cache_mode) << 4) | (uint32_t(raytracing_mode) << 8) | (uint32_t(use_aabb_center) << 12) | (uint32_t(baked_light) << 13) | (uint32_t(dynamic_gi) << 14) | (uint32_t(ignore_occlusion_culling) << 15) | (uint32_t(shadow_translucent) << 16), h);
+	h = hash_murmur3_one_float(raytracing_opacity, h);
+	h = hash_murmur3_one_float(lod_bias, h);
+	h = hash_murmur3_one_float(sorting_offset, h);
+	h = hash_murmur3_one_float(visibility_range_begin, h);
+	h = hash_murmur3_one_float(visibility_range_end, h);
+	h = hash_murmur3_one_float(visibility_range_begin_margin, h);
+	h = hash_murmur3_one_float(visibility_range_end_margin, h);
+	return hash_fmix32(h);
+}
+
+bool RendererSceneCull::_gpu_static_eligible(const Instance *p_instance) const {
+	// Mariner E25c: a visibility range without fade is culled per instance by the renderer's GPU culling (Forward+ only;
+	// elsewhere batches are drawn whole). Fades and dependencies (HLOD) stay on the CPU.
+	static const bool gpu_visibility_range = ::OS::get_singleton()->get_current_rendering_method() == "forward_plus";
+	const bool has_range = p_instance->visibility_range_begin > 0.0f || p_instance->visibility_range_end > 0.0f;
+	const bool range_ok = !has_range || (gpu_visibility_range && p_instance->visibility_range_fade_mode == RSE::VISIBILITY_RANGE_FADE_DISABLED);
+	return p_instance->gpu_static && p_instance->scenario && p_instance->visible && p_instance->base_type == RSE::INSTANCE_MESH && p_instance->base.is_valid() && p_instance->base_data && p_instance->skeleton.is_null() && p_instance->mesh_instance.is_null() && !p_instance->instance_uniforms.is_allocated() && range_ok && p_instance->visibility_parent == nullptr && p_instance->visibility_dependencies.is_empty() && p_instance->transparency == 0.0f && p_instance->lightmap == nullptr && !p_instance->ignore_all_culling && p_instance->transform.basis.determinant() > 0.0f;
+}
+
+void RendererSceneCull::_gpu_static_make_key(const Instance *p_instance, GPUStaticKey &r_key) const {
+	r_key.mesh = p_instance->base;
+	r_key.material_override = p_instance->material_override;
+	r_key.material_overlay = p_instance->material_overlay;
+	r_key.materials = p_instance->materials;
+	r_key.layer_mask = p_instance->layer_mask;
+	r_key.cast_shadows = p_instance->cast_shadows;
+	r_key.shadow_cache_mode = p_instance->shadow_cache_mode;
+	r_key.raytracing_mode = p_instance->raytracing_mode;
+	r_key.raytracing_opacity = p_instance->raytracing_opacity;
+	r_key.lod_bias = p_instance->lod_bias;
+	r_key.sorting_offset = p_instance->sorting_offset;
+	r_key.use_aabb_center = p_instance->use_aabb_center;
+	r_key.baked_light = p_instance->baked_light;
+	r_key.dynamic_gi = p_instance->dynamic_gi;
+	r_key.ignore_occlusion_culling = p_instance->ignore_occlusion_culling;
+	r_key.shadow_translucent = p_instance->shadow_translucent;
+	if (p_instance->visibility_range_begin > 0.0f || p_instance->visibility_range_end > 0.0f) {
+		r_key.visibility_range_begin = p_instance->visibility_range_begin;
+		r_key.visibility_range_end = p_instance->visibility_range_end;
+		r_key.visibility_range_begin_margin = p_instance->visibility_range_begin_margin;
+		r_key.visibility_range_end_margin = p_instance->visibility_range_end_margin;
+	}
+}
+
+void RendererSceneCull::_gpu_static_mark_dirty(GPUStaticBatch *p_batch) const {
+	p_batch->dirty = true;
+	if (!p_batch->queued) {
+		p_batch->queued = true;
+		gpu_static_dirty.push_back(p_batch);
+	}
+}
+
+void RendererSceneCull::_gpu_static_add(Instance *p_instance) const {
+	Scenario *scenario = p_instance->scenario;
+	GPUStaticKey key;
+	_gpu_static_make_key(p_instance, key);
+	if (p_instance->gpu_batch && (p_instance->gpu_batch->scenario != scenario || !(p_instance->gpu_batch->key == key))) {
+		_gpu_static_remove(p_instance);
+	}
+	if (!p_instance->gpu_batch) {
+		GPUStaticBatch **found = scenario->gpu_static_batches.getptr(key);
+		GPUStaticBatch *batch = found ? *found : nullptr;
+		if (!batch) {
+			batch = memnew(GPUStaticBatch);
+			batch->key = key;
+			batch->scenario = scenario;
+			scenario->gpu_static_batches.insert(key, batch);
+		}
+		p_instance->gpu_batch = batch;
+		p_instance->gpu_slot = batch->members.size();
+		batch->members.push_back(p_instance);
+	}
+	if (p_instance->gpu_query_id.is_valid()) {
+		scenario->gpu_static_indexer.update(p_instance->gpu_query_id, p_instance->transformed_aabb);
+	} else {
+		p_instance->gpu_query_id = scenario->gpu_static_indexer.insert(p_instance->transformed_aabb, p_instance);
+	}
+	_gpu_static_mark_dirty(p_instance->gpu_batch);
+}
+
+void RendererSceneCull::_gpu_static_remove(Instance *p_instance) const {
+	GPUStaticBatch *batch = p_instance->gpu_batch;
+	if (!batch) {
+		return;
+	}
+	const uint32_t slot = p_instance->gpu_slot;
+	const uint32_t last = batch->members.size() - 1;
+	if (slot != last) {
+		batch->members[slot] = batch->members[last];
+		batch->members[slot]->gpu_slot = slot;
+	}
+	batch->members.resize(last);
+	if (p_instance->gpu_query_id.is_valid()) {
+		batch->scenario->gpu_static_indexer.remove(p_instance->gpu_query_id);
+		p_instance->gpu_query_id = DynamicBVH::ID();
+	}
+	p_instance->gpu_batch = nullptr;
+	_gpu_static_mark_dirty(batch);
+}
+
+void RendererSceneCull::_gpu_static_touch(Instance *p_instance) const {
+	if (p_instance->gpu_static || p_instance->gpu_batch) {
+		_instance_queue_update(p_instance, false, false);
+	}
+}
+
+void RendererSceneCull::_gpu_static_flush() const {
+	RendererSceneCull *self = const_cast<RendererSceneCull *>(this);
+	LocalVector<GPUStaticBatch *> batches;
+	batches.reserve(gpu_static_dirty.size());
+	for (GPUStaticBatch *b : gpu_static_dirty) {
+		batches.push_back(b);
+	}
+	gpu_static_dirty.clear();
+	for (GPUStaticBatch *batch : batches) {
+		batch->queued = false;
+		batch->dirty = false;
+		Scenario *scenario = batch->scenario;
+		if (batch->members.is_empty()) {
+			if (batch->instance.is_valid()) {
+				self->free(batch->instance);
+			}
+			if (batch->multimesh.is_valid()) {
+				RSG::utilities->free(batch->multimesh);
+			}
+			scenario->gpu_static_batches.erase(batch->key);
+			memdelete(batch);
+			continue;
+		}
+		const uint32_t count = batch->members.size();
+		if (batch->multimesh.is_null()) {
+			batch->multimesh = RSG::mesh_storage->multimesh_allocate();
+			RSG::mesh_storage->multimesh_initialize(batch->multimesh);
+		}
+		if (count > batch->capacity) {
+			batch->capacity = MAX(count + count / 2, 64u);
+			RSG::mesh_storage->multimesh_allocate_data(batch->multimesh, batch->capacity, RSE::MULTIMESH_TRANSFORM_3D, false, false, true);
+			RSG::mesh_storage->multimesh_set_mesh(batch->multimesh, batch->key.mesh);
+			RSG::mesh_storage->multimesh_set_indirect_view_culling(batch->multimesh, true);
+			RSG::mesh_storage->multimesh_set_indirect_shadow_culling(batch->multimesh, true);
+		}
+		Vector<float> data;
+		data.resize(batch->capacity * 12);
+		float *w = data.ptrw();
+		memset(w, 0, sizeof(float) * data.size());
+		AABB aabb;
+		for (uint32_t i = 0; i < count; i++) {
+			const Instance *member = batch->members[i];
+			const Transform3D &t = member->transform;
+			float *d = w + i * 12;
+			d[0] = t.basis.rows[0][0];
+			d[1] = t.basis.rows[0][1];
+			d[2] = t.basis.rows[0][2];
+			d[3] = t.origin.x;
+			d[4] = t.basis.rows[1][0];
+			d[5] = t.basis.rows[1][1];
+			d[6] = t.basis.rows[1][2];
+			d[7] = t.origin.y;
+			d[8] = t.basis.rows[2][0];
+			d[9] = t.basis.rows[2][1];
+			d[10] = t.basis.rows[2][2];
+			d[11] = t.origin.z;
+			aabb = i == 0 ? member->transformed_aabb : aabb.merge(member->transformed_aabb);
+		}
+		RSG::mesh_storage->multimesh_set_buffer(batch->multimesh, data);
+		RSG::mesh_storage->multimesh_set_visible_instances(batch->multimesh, count);
+		RSG::mesh_storage->multimesh_set_custom_aabb(batch->multimesh, aabb);
+		if (batch->instance.is_null()) {
+			const GPUStaticKey &k = batch->key;
+			RID instance = self->instance_allocate();
+			self->instance_initialize(instance);
+			self->instance_set_base(instance, batch->multimesh);
+			self->instance_set_layer_mask(instance, k.layer_mask);
+			self->instance_geometry_set_cast_shadows_setting(instance, k.cast_shadows);
+			self->instance_geometry_set_material_override(instance, k.material_override);
+			self->instance_geometry_set_material_overlay(instance, k.material_overlay);
+			for (int i = 0; i < k.materials.size(); i++) {
+				if (k.materials[i].is_valid()) {
+					self->instance_set_surface_override_material(instance, i, k.materials[i]);
+				}
+			}
+			self->instance_geometry_set_flag(instance, RSE::INSTANCE_FLAG_USE_BAKED_LIGHT, k.baked_light);
+			self->instance_geometry_set_flag(instance, RSE::INSTANCE_FLAG_USE_DYNAMIC_GI, k.dynamic_gi);
+			self->instance_geometry_set_flag(instance, RSE::INSTANCE_FLAG_IGNORE_OCCLUSION_CULLING, k.ignore_occlusion_culling);
+			self->instance_geometry_set_lod_bias(instance, k.lod_bias);
+			self->instance_geometry_set_shadow_cache_mode(instance, k.shadow_cache_mode);
+			self->instance_geometry_set_raytracing(instance, k.raytracing_mode, k.raytracing_opacity);
+			self->instance_geometry_set_shadow_translucent(instance, k.shadow_translucent);
+			self->instance_set_pivot_data(instance, k.sorting_offset, k.use_aabb_center);
+			self->instance_set_scenario(instance, scenario->self);
+			Instance *internal = instance_owner.get_or_null(instance);
+			if (internal && internal->base_data) {
+				// Mariner E25c: the members' visibility range, per instance on the GPU (the batch itself has none).
+				InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(internal->base_data);
+				geom->geometry_instance->set_gpu_visibility_range(k.visibility_range_begin, k.visibility_range_end, k.visibility_range_begin_margin, k.visibility_range_end_margin);
+			}
+			batch->instance = instance;
+		}
+	}
+}
+
+void RendererSceneCull::instance_geometry_set_gpu_static(RID p_instance, bool p_enabled) {
+	Instance *instance = instance_owner.get_or_null(p_instance);
+	ERR_FAIL_NULL(instance);
+	if (instance->gpu_static == p_enabled) {
+		return;
+	}
+	instance->gpu_static = p_enabled;
+	_instance_queue_update(instance, true, false);
+}
+
+bool RendererSceneCull::instance_geometry_is_gpu_static_active(RID p_instance) const {
+	const Instance *instance = instance_owner.get_or_null(p_instance);
+	ERR_FAIL_NULL_V(instance, false);
+	return instance->gpu_batch != nullptr;
+}
+
+Dictionary RendererSceneCull::scenario_get_gpu_static_info(RID p_scenario) const {
+	const Scenario *scenario = scenario_owner.get_or_null(p_scenario);
+	ERR_FAIL_NULL_V(scenario, Dictionary());
+	int instances = 0;
+	Array multimeshes;
+	for (const KeyValue<GPUStaticKey, GPUStaticBatch *> &E : scenario->gpu_static_batches) {
+		instances += E.value->members.size();
+		multimeshes.push_back(E.value->multimesh);
+	}
+	Dictionary d;
+	d["batches"] = scenario->gpu_static_batches.size();
+	d["instances"] = instances;
+	d["multimeshes"] = multimeshes; // Per batch: the indirect multimesh (multimesh_get_view_command_buffer_rd_rid etc.).
+	return d;
+}
+
 void RendererSceneCull::update_dirty_instances() const {
 	while (_instance_update_list.first()) {
 		_update_dirty_instance(_instance_update_list.first()->self());
+	}
+	// Mariner E25a: rebuild the changed GPU static batches (their own instances update below).
+	if (!gpu_static_dirty.is_empty()) {
+		_gpu_static_flush();
+		while (_instance_update_list.first()) {
+			_update_dirty_instance(_instance_update_list.first()->self());
+		}
 	}
 
 	// Update dirty resources after dirty instances as instance updates may affect resources.
@@ -4433,6 +5156,22 @@ bool RendererSceneCull::free(RID p_rid) {
 		while (scenario->instances.first()) {
 			instance_set_scenario(scenario->instances.first()->self()->self, RID());
 		}
+		// Mariner E25a: the scenario's GPU static batches (their members and own instances have left it).
+		for (KeyValue<GPUStaticKey, GPUStaticBatch *> &E : scenario->gpu_static_batches) {
+			GPUStaticBatch *batch = E.value;
+			gpu_static_dirty.erase(batch);
+			for (Instance *member : batch->members) {
+				member->gpu_batch = nullptr;
+			}
+			if (batch->instance.is_valid()) {
+				free(batch->instance);
+			}
+			if (batch->multimesh.is_valid()) {
+				RSG::utilities->free(batch->multimesh);
+			}
+			memdelete(batch);
+		}
+		scenario->gpu_static_batches.clear();
 		scenario->instance_aabbs.reset();
 		scenario->instance_data.reset();
 		scenario->instance_visibility.reset();
@@ -4537,6 +5276,8 @@ RendererSceneCull::RendererSceneCull() {
 
 	for (uint32_t i = 0; i < MAX_UPDATE_SHADOWS; i++) {
 		render_shadow_data[i].instances.set_page_pool(&geometry_instance_cull_page_pool);
+		render_shadow_data[i].static_instances.set_page_pool(&geometry_instance_cull_page_pool);
+		render_shadow_data[i].dynamic_instances.set_page_pool(&geometry_instance_cull_page_pool);
 	}
 	for (uint32_t i = 0; i < SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE; i++) {
 		render_sdfgi_data[i].instances.set_page_pool(&geometry_instance_cull_page_pool);
@@ -4553,6 +5294,11 @@ RendererSceneCull::RendererSceneCull() {
 	thread_cull_threshold = MAX(thread_cull_threshold, (uint32_t)WorkerThreadPool::get_singleton()->get_thread_count()); //make sure there is at least one thread per CPU
 	RendererSceneOcclusionCull::HZBuffer::occlusion_jitter_enabled = GLOBAL_GET("rendering/occlusion_culling/jitter_projection");
 
+	// Mariner E10: directional shadow cache.
+	shadow_cache_enabled = GLOBAL_GET("rendering/lights_and_shadows/directional_shadow/cache");
+	shadow_cache_settle_frames = MAX(1, int(GLOBAL_GET("rendering/lights_and_shadows/directional_shadow/cache_static_after_frames")));
+	shadow_cache_light_angle = Math::deg_to_rad(MAX(0.0, double(GLOBAL_GET("rendering/lights_and_shadows/directional_shadow/cache_light_angle_threshold"))));
+
 	dummy_occlusion_culling = memnew(RendererSceneOcclusionCull);
 
 	light_culler = memnew(RenderingLightCuller);
@@ -4568,6 +5314,8 @@ RendererSceneCull::~RendererSceneCull() {
 
 	for (uint32_t i = 0; i < MAX_UPDATE_SHADOWS; i++) {
 		render_shadow_data[i].instances.reset();
+		render_shadow_data[i].static_instances.reset();
+		render_shadow_data[i].dynamic_instances.reset();
 	}
 	for (uint32_t i = 0; i < SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE; i++) {
 		render_sdfgi_data[i].instances.reset();

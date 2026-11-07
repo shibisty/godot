@@ -357,6 +357,7 @@ void MeshStorage::mesh_add_surface(RID p_mesh, const RenderingServerTypes::Surfa
 	s->mesh_to_skeleton_xform = p_surface.mesh_to_skeleton_xform;
 
 	s->uv_scale = new_surface.uv_scale;
+	s->uv_density = new_surface.uv_density;
 
 	if (new_surface.skin_data.size() || mesh->blend_shape_count > 0) {
 		// Size must match the size of the vertex array.
@@ -614,6 +615,14 @@ RID MeshStorage::mesh_surface_get_material(RID p_mesh, int p_surface) const {
 	return mesh->surfaces[p_surface]->material;
 }
 
+float MeshStorage::mesh_surface_get_uv_density(RID p_mesh, int p_surface) const {
+	Mesh *mesh = mesh_owner.get_or_null(p_mesh);
+	ERR_FAIL_NULL_V(mesh, 0.0f);
+	ERR_FAIL_UNSIGNED_INDEX_V((uint32_t)p_surface, mesh->surface_count, 0.0f);
+
+	return mesh->surfaces[p_surface]->uv_density;
+}
+
 RenderingServerTypes::SurfaceData MeshStorage::mesh_get_surface(RID p_mesh, int p_surface) const {
 	Mesh *mesh = mesh_owner.get_or_null(p_mesh);
 	ERR_FAIL_NULL_V(mesh, RenderingServerTypes::SurfaceData());
@@ -667,6 +676,7 @@ RenderingServerTypes::SurfaceData MeshStorage::mesh_get_surface(RID p_mesh, int 
 	}
 
 	sd.uv_scale = s.uv_scale;
+	sd.uv_density = s.uv_density;
 
 	return sd;
 }

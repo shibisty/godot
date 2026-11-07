@@ -70,6 +70,7 @@ public:
 
 	virtual void scenario_set_environment(RID p_scenario, RID p_environment) = 0;
 	virtual void scenario_set_camera_attributes(RID p_scenario, RID p_attributes) = 0;
+	virtual void scenario_set_ddgi_volume(RID p_scenario, bool p_enable, const Transform3D &p_transform, const Vector3 &p_size, float p_probe_spacing, int p_rays_per_probe, int p_probes_per_frame) = 0;
 	virtual void scenario_set_fallback_environment(RID p_scenario, RID p_environment) = 0;
 	virtual void scenario_set_compositor(RID p_scenario, RID p_compositor) = 0;
 	virtual void scenario_set_reflection_atlas_size(RID p_scenario, int p_reflection_size, int p_reflection_count) = 0;
@@ -110,6 +111,13 @@ public:
 
 	virtual void instance_geometry_set_flag(RID p_instance, RSE::InstanceFlags p_flags, bool p_enabled) = 0;
 	virtual void instance_geometry_set_cast_shadows_setting(RID p_instance, RSE::ShadowCastingSetting p_shadow_casting_setting) = 0;
+	virtual void instance_geometry_set_shadow_cache_mode(RID p_instance, RSE::ShadowCacheMode p_mode) = 0; // Mariner E10.
+	virtual void instance_geometry_set_raytracing(RID p_instance, RSE::RaytracingMode p_mode, float p_opacity) = 0; // Mariner E12 DG-F.
+	virtual void instance_geometry_set_shadow_translucent(RID p_instance, bool p_enabled) = 0; // Mariner E21.
+	// Mariner E25a: GPU static batches.
+	virtual void instance_geometry_set_gpu_static(RID p_instance, bool p_enabled) = 0;
+	virtual bool instance_geometry_is_gpu_static_active(RID p_instance) const = 0;
+	virtual Dictionary scenario_get_gpu_static_info(RID p_scenario) const = 0;
 	virtual void instance_geometry_set_material_override(RID p_instance, RID p_material) = 0;
 	virtual void instance_geometry_set_material_overlay(RID p_instance, RID p_material) = 0;
 
@@ -325,8 +333,19 @@ public:
 	// Path tracing (Mariner E5c)
 	virtual void environment_set_pathtracing(RID p_env, bool p_enable, int p_debug_mode, int p_samples_per_pixel, int p_max_bounces, RSE::PathtracingDenoiser p_denoiser) = 0;
 	virtual void environment_set_pathtracing_accumulation(RID p_env, bool p_accumulate, int p_max_samples, float p_firefly_clamp) = 0;
+	virtual void environment_set_ddgi(RID p_env, bool p_enable, const Vector3i &p_probe_count, float p_probe_spacing, int p_rays_per_probe, float p_hysteresis, float p_energy, float p_bias, float p_specular_occlusion) = 0;
+	virtual void environment_set_ddgi_update(RID p_env, int p_probes_per_frame, bool p_relocation) = 0;
+	virtual void environment_set_ddgi_channels(RID p_env, float p_sky_energy, float p_lights_energy) = 0;
+	virtual void environment_set_ddgi_sea(RID p_env, bool p_enable, float p_level, const Color &p_color) = 0;
+	virtual void environment_set_ssao_gtao(RID p_env, bool p_enable, bool p_bent_normals, float p_thickness = 0.5) = 0;
+	virtual void environment_set_color_grading(RID p_env, bool p_enable, float p_temperature, float p_tint, const Color &p_shadows, const Color &p_midtones, const Color &p_highlights, const Vector4 &p_tonal_ranges, const Vector3 &p_slope, const Vector3 &p_offset, const Vector3 &p_power, float p_saturation, bool p_gamut_mapping) = 0; // Mariner F3.
+	virtual void environment_set_restir(RID p_env, bool p_enable, int p_candidates, int p_spatial_samples, bool p_temporal, bool p_denoise) = 0; // Mariner E20.
 	virtual bool environment_get_pathtracing_enabled(RID p_env) const = 0;
 	virtual bool pathtracing_is_supported() const = 0;
+
+	// Mariner E10.
+	virtual void directional_shadow_cache_set_enabled(bool p_enabled) = 0;
+	virtual Dictionary directional_shadow_cache_get_stats() const = 0;
 
 	virtual Ref<Image> environment_bake_panorama(RID p_env, bool p_bake_irradiance, const Size2i &p_size) = 0;
 

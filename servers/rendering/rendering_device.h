@@ -33,6 +33,7 @@
 #include "core/object/worker_thread_pool.h"
 #include "core/os/condition_variable.h"
 #include "core/os/thread_safe.h"
+#include "core/templates/hash_set.h"
 #include "core/templates/local_vector.h"
 #include "core/templates/rb_map.h"
 #include "core/templates/rb_set.h"
@@ -268,6 +269,8 @@ public:
 	Error buffer_update(RID p_buffer, uint32_t p_offset, uint32_t p_size, const void *p_data, bool p_skip_check = false);
 	Error buffer_clear(RID p_buffer, uint32_t p_offset, uint32_t p_size);
 	Vector<uint8_t> buffer_get_data(RID p_buffer, uint32_t p_offset = 0, uint32_t p_size = 0); // This causes stall, only use to retrieve large buffers for saving.
+	// Mariner: true while p_buffer is a live storage, uniform or texture buffer of this device (RIDs are never reused).
+	bool buffer_is_valid(RID p_buffer) const { return storage_buffer_owner.owns(p_buffer) || uniform_buffer_owner.owns(p_buffer) || texture_buffer_owner.owns(p_buffer); }
 	Error buffer_get_data_async(RID p_buffer, const Callable &p_callback, uint32_t p_offset = 0, uint32_t p_size = 0);
 	uint64_t buffer_get_device_address(RID p_buffer);
 	uint8_t *buffer_persistent_map_advance(RID p_buffer);
@@ -469,6 +472,10 @@ public:
 	Error texture_update(RID p_texture, uint32_t p_layer, const Vector<uint8_t> &p_data);
 	Vector<uint8_t> texture_get_data(RID p_texture, uint32_t p_layer); // CPU textures will return immediately, while GPU textures will most likely force a flush
 	Error texture_get_data_async(RID p_texture, uint32_t p_layer, const Callable &p_callback);
+	// Mariner fix: forgets the callbacks of pending buffer_get_data_async() / texture_get_data_async() requests (the copies
+	// still complete, nobody is called). Main::cleanup() calls it before the script languages finish: a pending
+	// callback that is a GDScript lambda must not outlive GDScript (heap corruption on exit).
+	void discard_pending_data_callbacks();
 
 	bool texture_is_format_supported_for_usage(DataFormat p_format, BitField<TextureUsageBits> p_usage) const;
 	bool texture_is_shared(RID p_texture);
@@ -1308,6 +1315,8 @@ private:
 	/****************/
 	HashMap<DisplayServerEnums::WindowID, RDD::SwapChainID> screen_swap_chains;
 	HashMap<DisplayServerEnums::WindowID, RDD::FramebufferID> screen_framebuffers;
+	HashMap<DisplayServerEnums::WindowID, RDD::FramebufferID> screen_extra_framebuffers; // Mariner E24b.
+	HashSet<DisplayServerEnums::WindowID> screen_extra_present_enabled; // Mariner E24b: one more swap chain image.
 
 	uint32_t _get_swap_chain_desired_count() const;
 
@@ -1323,6 +1332,14 @@ public:
 	ColorSpace screen_get_color_space(DisplayServerEnums::WindowID p_screen = DisplayServerEnums::MAIN_WINDOW_ID) const;
 	bool screen_get_hdr_output_supported(DisplayServerEnums::WindowID p_screen = DisplayServerEnums::MAIN_WINDOW_ID) const;
 	Error screen_free(DisplayServerEnums::WindowID p_screen = DisplayServerEnums::MAIN_WINDOW_ID);
+
+	// Mariner E24b (frame generation): a screen can show an extra image per frame, presented before the frame's own
+	// (pacing: the present mode; FIFO shows each for a vertical blank). Enabling it gives the swap chain one more
+	// image (recreated on the next acquisition). After screen_prepare_for_drawing(), screen_prepare_extra_for_drawing()
+	// acquires the extra image and draw_list_begin_for_screen_extra() draws it. Vulkan only for now (ERR_UNAVAILABLE).
+	void screen_set_extra_present_enabled(DisplayServerEnums::WindowID p_screen, bool p_enabled);
+	bool screen_is_extra_present_enabled(DisplayServerEnums::WindowID p_screen) const;
+	Error screen_prepare_extra_for_drawing(DisplayServerEnums::WindowID p_screen = DisplayServerEnums::MAIN_WINDOW_ID);
 
 private:
 	/********************************/
@@ -1554,6 +1571,7 @@ public:
 	 * @param p_clear_color Must use linear encoding when HDR 2D is active.
 	 */
 	DrawListID draw_list_begin_for_screen(DisplayServerEnums::WindowID p_screen = 0, const Color &p_clear_color = Color());
+	DrawListID draw_list_begin_for_screen_extra(DisplayServerEnums::WindowID p_screen = 0, const Color &p_clear_color = Color()); // Mariner E24b.
 	/**
 	 * @param p_clear_color_values Color values must use linear encoding when HDR 2D is active.
 	 */

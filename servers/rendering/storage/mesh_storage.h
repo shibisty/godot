@@ -64,6 +64,8 @@ public:
 
 	virtual void mesh_surface_set_material(RID p_mesh, int p_surface, RID p_material) = 0;
 	virtual RID mesh_surface_get_material(RID p_mesh, int p_surface) const = 0;
+	// Mariner E17: world units per unit of the first UV channel, 0 when unknown.
+	virtual float mesh_surface_get_uv_density(RID p_mesh, int p_surface) const { return 0.0f; }
 
 	virtual RenderingServerTypes::SurfaceData mesh_get_surface(RID p_mesh, int p_surface) const = 0;
 
@@ -149,6 +151,14 @@ public:
 
 	virtual void multimesh_set_buffer(RID p_multimesh, const Vector<float> &p_buffer);
 	virtual RID multimesh_get_command_buffer_rd_rid(RID p_multimesh) const;
+	// Mariner E14b: shadow passes draw only the instances of an indirect multimesh inside the pass (renderer side).
+	virtual void multimesh_set_indirect_shadow_culling(RID p_multimesh, bool p_enable) {}
+	virtual bool multimesh_get_indirect_shadow_culling(RID p_multimesh) const { return false; }
+	virtual RID multimesh_get_shadow_command_buffer_rd_rid(RID p_multimesh) const { return RID(); }
+	// Mariner E25a.
+	virtual void multimesh_set_indirect_view_culling(RID p_multimesh, bool p_enable) {}
+	virtual bool multimesh_get_indirect_view_culling(RID p_multimesh) const { return false; }
+	virtual RID multimesh_get_view_command_buffer_rd_rid(RID p_multimesh) const { return RID(); }
 	virtual RID multimesh_get_buffer_rd_rid(RID p_multimesh) const;
 	virtual Vector<float> multimesh_get_buffer(RID p_multimesh) const;
 

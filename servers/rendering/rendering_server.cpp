@@ -1388,8 +1388,72 @@ Error RenderingServer::mesh_create_surface_data_from_arrays(RenderingServerTypes
 	surface_data.bone_aabbs = bone_aabb;
 	surface_data.lods = lods;
 	surface_data.uv_scale = uv_scale;
+	surface_data.uv_density = 0.0f;
+	if (p_arrays[RSE::ARRAY_VERTEX].get_type() == Variant::PACKED_VECTOR3_ARRAY && p_arrays[RSE::ARRAY_TEX_UV].get_type() == Variant::PACKED_VECTOR2_ARRAY) {
+		Vector<int> indices;
+		if (p_arrays[RSE::ARRAY_INDEX].get_type() == Variant::PACKED_INT32_ARRAY) {
+			indices = p_arrays[RSE::ARRAY_INDEX];
+		}
+		surface_data.uv_density = mesh_compute_uv_density(p_arrays[RSE::ARRAY_VERTEX], p_arrays[RSE::ARRAY_TEX_UV], indices, p_primitive);
+	}
 
 	return OK;
+}
+
+float RenderingServer::mesh_compute_uv_density(const Vector<Vector3> &p_vertices, const Vector<Vector2> &p_uvs, const Vector<int> &p_indices, RSE::PrimitiveType p_primitive) {
+	if (p_primitive != RSE::PRIMITIVE_TRIANGLES && p_primitive != RSE::PRIMITIVE_TRIANGLE_STRIP) {
+		return 0.0f;
+	}
+	if (p_vertices.size() != p_uvs.size() || p_vertices.size() < 3) {
+		return 0.0f;
+	}
+	const Vector3 *v = p_vertices.ptr();
+	const Vector2 *uv = p_uvs.ptr();
+	const int *idx = p_indices.ptr();
+	const int vertex_count = p_vertices.size();
+	const int element_count = p_indices.is_empty() ? vertex_count : p_indices.size();
+	const bool strip = p_primitive == RSE::PRIMITIVE_TRIANGLE_STRIP;
+	const int triangle_count = strip ? element_count - 2 : element_count / 3;
+
+	double world_area = 0.0;
+	double uv_area = 0.0;
+	for (int t = 0; t < triangle_count; t++) {
+		int e[3] = { strip ? t : t * 3, strip ? t + 1 : t * 3 + 1, strip ? t + 2 : t * 3 + 2 };
+		int i[3];
+		bool valid = true;
+		for (int k = 0; k < 3; k++) {
+			i[k] = idx ? idx[e[k]] : e[k];
+			valid = valid && i[k] >= 0 && i[k] < vertex_count;
+		}
+		if (!valid) {
+			continue;
+		}
+		const double a_uv = 0.5 * Math::abs((uv[i[1]] - uv[i[0]]).cross(uv[i[2]] - uv[i[0]]));
+		if (a_uv <= 1e-12) {
+			continue; // Triangles without UV area carry no texels.
+		}
+		world_area += 0.5 * (v[i[1]] - v[i[0]]).cross(v[i[2]] - v[i[0]]).length();
+		uv_area += a_uv;
+	}
+	if (uv_area <= 0.0 || world_area <= 0.0) {
+		return 0.0f;
+	}
+	return float(Math::sqrt(world_area / uv_area));
+}
+
+float RenderingServer::mesh_surface_data_compute_uv_density(const RenderingServerTypes::SurfaceData &p_data) const {
+	if (!(p_data.format & RSE::ARRAY_FORMAT_TEX_UV) || (p_data.format & RSE::ARRAY_FLAG_USE_2D_VERTICES)) {
+		return 0.0f;
+	}
+	Array arrays = mesh_create_arrays_from_surface_data(p_data);
+	if (arrays.size() != RSE::ARRAY_MAX || arrays[RSE::ARRAY_VERTEX].get_type() != Variant::PACKED_VECTOR3_ARRAY || arrays[RSE::ARRAY_TEX_UV].get_type() != Variant::PACKED_VECTOR2_ARRAY) {
+		return 0.0f;
+	}
+	Vector<int> indices;
+	if (arrays[RSE::ARRAY_INDEX].get_type() == Variant::PACKED_INT32_ARRAY) {
+		indices = arrays[RSE::ARRAY_INDEX];
+	}
+	return mesh_compute_uv_density(arrays[RSE::ARRAY_VERTEX], arrays[RSE::ARRAY_TEX_UV], indices, p_data.primitive);
 }
 
 void RenderingServer::mesh_add_surface_from_arrays(RID p_mesh, RSE::PrimitiveType p_primitive, const Array &p_arrays, const Array &p_blend_shapes, const Dictionary &p_lods, BitField<RSE::ArrayFormat> p_compress_format) {
@@ -2501,6 +2565,10 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("multimesh_get_visible_instances", "multimesh"), &RenderingServer::multimesh_get_visible_instances);
 	ClassDB::bind_method(D_METHOD("multimesh_set_buffer", "multimesh", "buffer"), &RenderingServer::multimesh_set_buffer);
 	ClassDB::bind_method(D_METHOD("multimesh_get_command_buffer_rd_rid", "multimesh"), &RenderingServer::multimesh_get_command_buffer_rd_rid);
+	ClassDB::bind_method(D_METHOD("multimesh_set_indirect_shadow_culling", "multimesh", "enable"), &RenderingServer::multimesh_set_indirect_shadow_culling);
+	ClassDB::bind_method(D_METHOD("multimesh_get_shadow_command_buffer_rd_rid", "multimesh"), &RenderingServer::multimesh_get_shadow_command_buffer_rd_rid);
+	ClassDB::bind_method(D_METHOD("multimesh_set_indirect_view_culling", "multimesh", "enable"), &RenderingServer::multimesh_set_indirect_view_culling);
+	ClassDB::bind_method(D_METHOD("multimesh_get_view_command_buffer_rd_rid", "multimesh"), &RenderingServer::multimesh_get_view_command_buffer_rd_rid);
 	ClassDB::bind_method(D_METHOD("multimesh_get_buffer_rd_rid", "multimesh"), &RenderingServer::multimesh_get_buffer_rd_rid);
 	ClassDB::bind_method(D_METHOD("multimesh_get_buffer", "multimesh"), &RenderingServer::multimesh_get_buffer);
 
@@ -2542,6 +2610,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("light_set_distance_fade", "decal", "enabled", "begin", "shadow", "length"), &RenderingServer::light_set_distance_fade);
 	ClassDB::bind_method(D_METHOD("light_set_reverse_cull_face_mode", "light", "enabled"), &RenderingServer::light_set_reverse_cull_face_mode);
 	ClassDB::bind_method(D_METHOD("light_set_shadow_caster_mask", "light", "mask"), &RenderingServer::light_set_shadow_caster_mask);
+	ClassDB::bind_method(D_METHOD("light_set_restir", "light", "enable"), &RenderingServer::light_set_restir);
 	ClassDB::bind_method(D_METHOD("light_set_bake_mode", "light", "bake_mode"), &RenderingServer::light_set_bake_mode);
 	ClassDB::bind_method(D_METHOD("light_set_max_sdfgi_cascade", "light", "cascade"), &RenderingServer::light_set_max_sdfgi_cascade);
 
@@ -2549,6 +2618,9 @@ void RenderingServer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("light_directional_set_shadow_mode", "light", "mode"), &RenderingServer::light_directional_set_shadow_mode);
 	ClassDB::bind_method(D_METHOD("light_directional_set_blend_splits", "light", "enable"), &RenderingServer::light_directional_set_blend_splits);
+	ClassDB::bind_method(D_METHOD("light_directional_set_object_shadow", "light", "layers", "size", "from_cascade"), &RenderingServer::light_directional_set_object_shadow);
+	ClassDB::bind_method(D_METHOD("light_directional_set_contact_shadow", "light", "length"), &RenderingServer::light_directional_set_contact_shadow);
+	ClassDB::bind_method(D_METHOD("light_directional_set_restir_shadow_mode", "light", "mode"), &RenderingServer::light_directional_set_restir_shadow_mode);
 	ClassDB::bind_method(D_METHOD("light_directional_set_sky_mode", "light", "mode"), &RenderingServer::light_directional_set_sky_mode);
 
 	ClassDB::bind_method(D_METHOD("light_area_set_size", "light", "size"), &RenderingServer::light_area_set_size);
@@ -2742,6 +2814,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("particles_set_interpolate", "particles", "enable"), &RenderingServer::particles_set_interpolate);
 	ClassDB::bind_method(D_METHOD("particles_set_fractional_delta", "particles", "enable"), &RenderingServer::particles_set_fractional_delta);
 	ClassDB::bind_method(D_METHOD("particles_set_collision_base_size", "particles", "size"), &RenderingServer::particles_set_collision_base_size);
+	ClassDB::bind_method(D_METHOD("particles_set_screen_space_collision", "particles", "enable"), &RenderingServer::particles_set_screen_space_collision);
 	ClassDB::bind_method(D_METHOD("particles_set_transform_align", "particles", "align"), &RenderingServer::particles_set_transform_align);
 	ClassDB::bind_method(D_METHOD("particles_set_transform_align_channel_filter", "particles", "channel_filter"), &RenderingServer::particles_set_transform_align_channel_filter);
 	ClassDB::bind_method(D_METHOD("particles_set_transform_align_axis", "particles", "rotation_axis"), &RenderingServer::particles_set_transform_align_axis);
@@ -2876,6 +2949,8 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("viewport_set_scaling_3d_mode", "viewport", "scaling_3d_mode"), &RenderingServer::viewport_set_scaling_3d_mode);
 	ClassDB::bind_method(D_METHOD("viewport_set_frame_generation", "viewport", "frame_generation"), &RenderingServer::viewport_set_frame_generation);
 	ClassDB::bind_method(D_METHOD("viewport_set_scaling_3d_scale", "viewport", "scale"), &RenderingServer::viewport_set_scaling_3d_scale);
+	ClassDB::bind_method(D_METHOD("viewport_set_dynamic_resolution", "viewport", "enable", "target_ms", "min_scale"), &RenderingServer::viewport_set_dynamic_resolution);
+	ClassDB::bind_method(D_METHOD("viewport_get_dynamic_resolution_scale", "viewport"), &RenderingServer::viewport_get_dynamic_resolution_scale);
 	ClassDB::bind_method(D_METHOD("viewport_set_fsr_sharpness", "viewport", "sharpness"), &RenderingServer::viewport_set_fsr_sharpness);
 	ClassDB::bind_method(D_METHOD("viewport_set_texture_mipmap_bias", "viewport", "mipmap_bias"), &RenderingServer::viewport_set_texture_mipmap_bias);
 	ClassDB::bind_method(D_METHOD("viewport_set_anisotropic_filtering_level", "viewport", "anisotropic_filtering_level"), &RenderingServer::viewport_set_anisotropic_filtering_level);
@@ -2914,6 +2989,9 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("viewport_set_use_taa", "viewport", "enable"), &RenderingServer::viewport_set_use_taa);
 	ClassDB::bind_method(D_METHOD("viewport_set_use_debanding", "viewport", "enable"), &RenderingServer::viewport_set_use_debanding);
 	ClassDB::bind_method(D_METHOD("viewport_set_use_occlusion_culling", "viewport", "enable"), &RenderingServer::viewport_set_use_occlusion_culling);
+	ClassDB::bind_method(D_METHOD("viewport_set_use_hiz_occlusion_culling", "viewport", "enable"), &RenderingServer::viewport_set_use_hiz_occlusion_culling);
+	ClassDB::bind_method(D_METHOD("viewport_set_force_motion_vectors", "viewport", "force_motion_vectors"), &RenderingServer::viewport_set_force_motion_vectors); // Mariner E15a: motion blur without TAA / DLSS.
+	ClassDB::bind_method(D_METHOD("viewport_set_hiz_occlusion_reference", "viewport", "reference", "radius"), &RenderingServer::viewport_set_hiz_occlusion_reference);
 	ClassDB::bind_method(D_METHOD("viewport_set_raytracing_scene", "viewport", "enable", "cull_mask", "distance"), &RenderingServer::viewport_set_raytracing_scene, DEFVAL(0xFFFFF), DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("viewport_get_pathtracing_sample_count", "viewport"), &RenderingServer::viewport_get_pathtracing_sample_count);
 	ClassDB::bind_method(D_METHOD("viewport_reset_pathtracing", "viewport"), &RenderingServer::viewport_reset_pathtracing);
@@ -2939,6 +3017,7 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_SCALING_3D_MODE_NEAREST);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_SCALING_3D_MODE_DLSS);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_SCALING_3D_MODE_FSR3);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_SCALING_3D_MODE_MAX);
 
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_UPDATE_DISABLED);
@@ -3094,7 +3173,16 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("environment_set_adjustment", "env", "enable", "brightness", "contrast", "saturation", "use_1d_color_correction", "color_correction"), &RenderingServer::environment_set_adjustment);
 	ClassDB::bind_method(D_METHOD("environment_set_pathtracing", "env", "enable", "debug_mode", "samples_per_pixel", "max_bounces", "denoiser"), &RenderingServer::environment_set_pathtracing);
 	ClassDB::bind_method(D_METHOD("environment_set_pathtracing_accumulation", "env", "accumulate", "max_samples", "firefly_clamp"), &RenderingServer::environment_set_pathtracing_accumulation);
+	ClassDB::bind_method(D_METHOD("environment_set_ddgi", "env", "enable", "probe_count", "probe_spacing", "rays_per_probe", "hysteresis", "energy", "bias", "specular_occlusion"), &RenderingServer::environment_set_ddgi);
+	ClassDB::bind_method(D_METHOD("environment_set_ddgi_update", "env", "probes_per_frame", "relocation"), &RenderingServer::environment_set_ddgi_update);
+	ClassDB::bind_method(D_METHOD("environment_set_ddgi_channels", "env", "sky_energy", "lights_energy"), &RenderingServer::environment_set_ddgi_channels);
+	ClassDB::bind_method(D_METHOD("environment_set_ddgi_sea", "env", "enable", "level", "color"), &RenderingServer::environment_set_ddgi_sea);
+	ClassDB::bind_method(D_METHOD("environment_set_ssao_gtao", "env", "enable", "bent_normals", "thickness"), &RenderingServer::environment_set_ssao_gtao, DEFVAL(0.5));
+	ClassDB::bind_method(D_METHOD("environment_set_color_grading", "env", "enable", "temperature", "tint", "shadows", "midtones", "highlights", "tonal_ranges", "slope", "offset", "power", "saturation", "gamut_mapping"), &RenderingServer::environment_set_color_grading);
+	ClassDB::bind_method(D_METHOD("environment_set_restir", "env", "enable", "candidates", "spatial_samples", "temporal", "denoise"), &RenderingServer::environment_set_restir);
 	ClassDB::bind_method(D_METHOD("pathtracing_is_supported"), &RenderingServer::pathtracing_is_supported);
+	ClassDB::bind_method(D_METHOD("directional_shadow_cache_set_enabled", "enabled"), &RenderingServer::directional_shadow_cache_set_enabled);
+	ClassDB::bind_method(D_METHOD("directional_shadow_cache_get_stats"), &RenderingServer::directional_shadow_cache_get_stats);
 	ClassDB::bind_method(D_METHOD("environment_set_ssr", "env", "enable", "max_steps", "fade_in", "fade_out", "depth_tolerance"), &RenderingServer::environment_set_ssr);
 	ClassDB::bind_method(D_METHOD("environment_set_ssao", "env", "enable", "radius", "intensity", "power", "detail", "horizon", "sharpness", "light_affect", "ao_channel_affect"), &RenderingServer::environment_set_ssao);
 	ClassDB::bind_method(D_METHOD("environment_set_fog", "env", "enable", "light_color", "light_energy", "sun_scatter", "density", "height", "height_density", "aerial_perspective", "sky_affect", "fog_mode"), &RenderingServer::environment_set_fog, DEFVAL(RSE::ENV_FOG_MODE_EXPONENTIAL));
@@ -3153,6 +3241,7 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::ENV_TONE_MAPPER_FILMIC);
 	BIND_ENUM_CONSTANT(RSE::ENV_TONE_MAPPER_ACES);
 	BIND_ENUM_CONSTANT(RSE::ENV_TONE_MAPPER_AGX);
+	BIND_ENUM_CONSTANT(RSE::ENV_TONE_MAPPER_GT7);
 
 	BIND_ENUM_CONSTANT(RSE::ENV_SSR_ROUGHNESS_QUALITY_DISABLED);
 	BIND_ENUM_CONSTANT(RSE::ENV_SSR_ROUGHNESS_QUALITY_LOW);
@@ -3211,6 +3300,10 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_dof_blur_quality", "quality", "use_jitter"), &RenderingServer::camera_attributes_set_dof_blur_quality);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_dof_blur_bokeh_shape", "shape"), &RenderingServer::camera_attributes_set_dof_blur_bokeh_shape);
 
+	ClassDB::bind_method(D_METHOD("camera_attributes_set_lens_flare", "camera_attributes", "enable", "intensity", "threshold", "ghosts", "ghost_spacing", "halo_width", "chromatic", "sun_streaks", "streak_count"), &RenderingServer::camera_attributes_set_lens_flare);
+	ClassDB::bind_method(D_METHOD("camera_attributes_set_lens_dirt", "camera_attributes", "texture", "intensity"), &RenderingServer::camera_attributes_set_lens_dirt);
+	ClassDB::bind_method(D_METHOD("camera_attributes_set_image_effects", "camera_attributes", "chromatic_aberration", "lens_distortion", "film_grain", "film_grain_size", "sharpening"), &RenderingServer::camera_attributes_set_image_effects);
+	ClassDB::bind_method(D_METHOD("camera_attributes_set_motion_blur", "camera_attributes", "enable", "intensity", "camera_motion", "max_length"), &RenderingServer::camera_attributes_set_motion_blur);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_dof_blur", "camera_attributes", "far_enable", "far_distance", "far_transition", "near_enable", "near_distance", "near_transition", "amount"), &RenderingServer::camera_attributes_set_dof_blur);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_exposure", "camera_attributes", "multiplier", "normalization"), &RenderingServer::camera_attributes_set_exposure);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure", "camera_attributes", "enable", "min_sensitivity", "max_sensitivity", "speed", "scale"), &RenderingServer::camera_attributes_set_auto_exposure);
@@ -3230,6 +3323,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("scenario_set_environment", "scenario", "environment"), &RenderingServer::scenario_set_environment);
 	ClassDB::bind_method(D_METHOD("scenario_set_fallback_environment", "scenario", "environment"), &RenderingServer::scenario_set_fallback_environment);
 	ClassDB::bind_method(D_METHOD("scenario_set_camera_attributes", "scenario", "effects"), &RenderingServer::scenario_set_camera_attributes);
+	ClassDB::bind_method(D_METHOD("scenario_set_ddgi_volume", "scenario", "enable", "transform", "size", "probe_spacing", "rays_per_probe", "probes_per_frame"), &RenderingServer::scenario_set_ddgi_volume);
 	ClassDB::bind_method(D_METHOD("scenario_set_compositor", "scenario", "compositor"), &RenderingServer::scenario_set_compositor);
 
 	/* INSTANCE */
@@ -3258,6 +3352,12 @@ void RenderingServer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("instance_geometry_set_flag", "instance", "flag", "enabled"), &RenderingServer::instance_geometry_set_flag);
 	ClassDB::bind_method(D_METHOD("instance_geometry_set_cast_shadows_setting", "instance", "shadow_casting_setting"), &RenderingServer::instance_geometry_set_cast_shadows_setting);
+	ClassDB::bind_method(D_METHOD("instance_geometry_set_shadow_cache_mode", "instance", "mode"), &RenderingServer::instance_geometry_set_shadow_cache_mode);
+	ClassDB::bind_method(D_METHOD("instance_geometry_set_raytracing", "instance", "mode", "opacity"), &RenderingServer::instance_geometry_set_raytracing);
+	ClassDB::bind_method(D_METHOD("instance_geometry_set_shadow_translucent", "instance", "enabled"), &RenderingServer::instance_geometry_set_shadow_translucent);
+	ClassDB::bind_method(D_METHOD("instance_geometry_set_gpu_static", "instance", "enabled"), &RenderingServer::instance_geometry_set_gpu_static);
+	ClassDB::bind_method(D_METHOD("instance_geometry_is_gpu_static_active", "instance"), &RenderingServer::instance_geometry_is_gpu_static_active);
+	ClassDB::bind_method(D_METHOD("scenario_get_gpu_static_info", "scenario"), &RenderingServer::scenario_get_gpu_static_info);
 	ClassDB::bind_method(D_METHOD("instance_geometry_set_material_override", "instance", "material"), &RenderingServer::instance_geometry_set_material_override);
 	ClassDB::bind_method(D_METHOD("instance_geometry_set_material_overlay", "instance", "material"), &RenderingServer::instance_geometry_set_material_overlay);
 	ClassDB::bind_method(D_METHOD("instance_geometry_set_visibility_range", "instance", "min", "max", "min_margin", "max_margin", "fade_mode"), &RenderingServer::instance_geometry_set_visibility_range);
@@ -3300,6 +3400,14 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::SHADOW_CASTING_SETTING_ON);
 	BIND_ENUM_CONSTANT(RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED);
 	BIND_ENUM_CONSTANT(RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY);
+
+	BIND_ENUM_CONSTANT(RSE::SHADOW_CACHE_MODE_AUTO);
+	BIND_ENUM_CONSTANT(RSE::SHADOW_CACHE_MODE_STATIC);
+	BIND_ENUM_CONSTANT(RSE::SHADOW_CACHE_MODE_DYNAMIC);
+
+	BIND_ENUM_CONSTANT(RSE::RAYTRACING_MODE_DEFAULT);
+	BIND_ENUM_CONSTANT(RSE::RAYTRACING_MODE_ONLY);
+	BIND_ENUM_CONSTANT(RSE::RAYTRACING_MODE_DISABLED);
 
 	BIND_ENUM_CONSTANT(RSE::VISIBILITY_RANGE_FADE_DISABLED);
 	BIND_ENUM_CONSTANT(RSE::VISIBILITY_RANGE_FADE_SELF);
@@ -3562,6 +3670,8 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_render_loop_enabled", "enabled"), &RenderingServer::set_render_loop_enabled);
 
 	ClassDB::bind_method(D_METHOD("get_frame_setup_time_cpu"), &RenderingServer::get_frame_setup_time_cpu);
+	ClassDB::bind_method(D_METHOD("get_frame_generation_presented_count", "window_id"), &RenderingServer::get_frame_generation_presented_count, DEFVAL(DisplayServerEnums::MAIN_WINDOW_ID));
+	ClassDB::bind_method(D_METHOD("get_frame_generation_output_texture", "window_id"), &RenderingServer::get_frame_generation_output_texture, DEFVAL(DisplayServerEnums::MAIN_WINDOW_ID));
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "render_loop_enabled"), "set_render_loop_enabled", "is_render_loop_enabled");
 
@@ -3698,10 +3808,19 @@ void RenderingServer::init() {
 	GLOBAL_DEF_RST("rendering/lights_and_shadows/use_physical_light_units", false);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/size", PROPERTY_HINT_RANGE, "256,16384"), 4096);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/translucent_shadow_size", PROPERTY_HINT_RANGE, "64,8192"), 1024); // Mariner E21.
 	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/size.mobile", 2048);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality", PROPERTY_HINT_ENUM, "Hard (Fastest),Soft Very Low (Faster),Soft Low (Fast),Soft Medium (Average),Soft High (Slow),Soft Ultra (Slowest)"), 2);
 	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile", 0);
 	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/16_bits", true);
+	// Mariner E10: directional shadow cache (Forward+).
+	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/cache", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/cache_static_after_frames", PROPERTY_HINT_RANGE, "1,600,1"), 30);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/lights_and_shadows/directional_shadow/cache_light_angle_threshold", PROPERTY_HINT_RANGE, "0,5,0.01,degrees"), 0.1);
+	// Mariner E11: screen space contact shadows (Forward+).
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/contact_shadows/steps", PROPERTY_HINT_RANGE, "4,64,1"), 16);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/lights_and_shadows/contact_shadows/thickness", PROPERTY_HINT_RANGE, "0.001,0.2,0.001"), 0.02);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/lights_and_shadows/contact_shadows/max_distance", PROPERTY_HINT_RANGE, "1,1000,0.1,suffix:m"), 60.0);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/positional_shadow/soft_shadow_filter_quality", PROPERTY_HINT_ENUM, "Hard (Fastest),Soft Very Low (Faster),Soft Low (Fast),Soft Medium (Average),Soft High (Slow),Soft Ultra (Slowest)"), 2);
 	GLOBAL_DEF("rendering/lights_and_shadows/positional_shadow/soft_shadow_filter_quality.mobile", 0);
@@ -3738,6 +3857,10 @@ void RenderingServer::init() {
 	GLOBAL_DEF_RST("rendering/shading/overrides/force_vertex_shading", false);
 	GLOBAL_DEF("rendering/shading/overrides/force_lambert_over_burley", false);
 	GLOBAL_DEF("rendering/shading/overrides/force_lambert_over_burley.mobile", true);
+	// Mariner M1-M3.
+	GLOBAL_DEF_RST("rendering/shading/overrides/multiscatter_diffuse", true);
+	GLOBAL_DEF_RST("rendering/shading/overrides/micro_shadowing", true);
+	GLOBAL_DEF_RST("rendering/shading/overrides/multi_bounce_ao", true);
 
 	GLOBAL_DEF_RST("rendering/driver/depth_prepass/enable", true);
 	GLOBAL_DEF_RST("rendering/driver/depth_prepass/disable_for_vendors", "PowerVR,Mali,Adreno,Apple");
@@ -3781,7 +3904,7 @@ void RenderingServer::init() {
 		String mode_hints;
 		String mode_hints_metal;
 		{
-			Vector<String> mode_hints_arr = { "Nearest (Fastest):5", "Bilinear (Fastest):0", "FSR 1.0 (Fast):1", "FSR 2.2 (Slow):2" };
+			Vector<String> mode_hints_arr = { "Nearest (Fastest):5", "Bilinear (Fastest):0", "FSR 1.0 (Fast):1", "FSR 2.2 (Slow):2", "FSR 3.1 (Slow):7" };
 			// NVIDIA DLSS (via Streamline) is only available on Windows with D3D12 or Vulkan (Forward+).
 			mode_hints = String(",").join(mode_hints_arr) + ",NVIDIA DLSS (Temporal):6";
 
@@ -3795,19 +3918,35 @@ void RenderingServer::init() {
 		GLOBAL_DEF_NOVAL(PropertyInfo(Variant::INT, "rendering/scaling_3d/mode.macos", PROPERTY_HINT_ENUM, mode_hints_metal), 0);
 	}
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/scaling_3d/scale", PROPERTY_HINT_RANGE, "0.1,2.0,0.0001"), 1.0);
+	// Mariner E19: dynamic resolution of the root viewport.
+	GLOBAL_DEF("rendering/scaling_3d/dynamic_resolution/enabled", false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/scaling_3d/dynamic_resolution/target_ms", PROPERTY_HINT_RANGE, "1,100,0.01,suffix:ms"), 16.6667);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/scaling_3d/dynamic_resolution/min_scale", PROPERTY_HINT_RANGE, "0.25,1.0,0.01"), 0.5);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/scaling_3d/fsr_sharpness", PROPERTY_HINT_RANGE, "0,2,0.01"), 0.2f);
 
 	// Raytracing scene (TLAS of the visible scene for compositor effects, Forward+ on Vulkan with ray query support).
 	GLOBAL_DEF_RST("rendering/raytracing/scene_acceleration_structures", false);
+	GLOBAL_DEF("rendering/raytracing/include_indirect_multimesh", false); // Mariner E12 DG2.
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/raytracing/multimesh_merged_blas_max_triangles", PROPERTY_HINT_RANGE, "0,16777216,1"), 1048576);
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/raytracing/deformed_mesh_cache_ttl_frames", PROPERTY_HINT_RANGE, "1,3600,1"), 60);
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/raytracing/multimesh_blas_cache_ttl_frames", PROPERTY_HINT_RANGE, "1,18000,1"), 3600);
 
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/textures/default_filters/texture_mipmap_bias", PROPERTY_HINT_RANGE, "-2,2,0.001"), 0.0f);
+
+	// Mariner E17: texture mip streaming.
+	GLOBAL_DEF_RST("rendering/textures/streaming/enabled", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/streaming/budget_mb", PROPERTY_HINT_RANGE, "16,16384,1,suffix:MiB"), 1024);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/streaming/min_texture_size", PROPERTY_HINT_RANGE, "64,16384,1,suffix:px"), 512);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/streaming/resident_size", PROPERTY_HINT_RANGE, "4,4096,1,suffix:px"), 64);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/textures/streaming/mip_bias", PROPERTY_HINT_RANGE, "-2,4,0.01"), 0.0f);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/textures/streaming/drop_delay", PROPERTY_HINT_RANGE, "0,60,0.1,suffix:s"), 3.0f);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/streaming/max_loads_in_flight", PROPERTY_HINT_RANGE, "1,64,1"), 4);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/decals/filter", PROPERTY_HINT_ENUM, "Nearest (Fast),Linear (Fast),Nearest Mipmap (Fast),Linear Mipmap (Fast),Nearest Mipmap Anisotropic (Average),Linear Mipmap Anisotropic (Average)"), RSE::DECAL_FILTER_LINEAR_MIPMAPS);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/light_projectors/filter", PROPERTY_HINT_ENUM, "Nearest (Fast),Linear (Fast),Nearest Mipmap (Fast),Linear Mipmap (Fast),Nearest Mipmap Anisotropic (Average),Linear Mipmap Anisotropic (Average)"), RSE::LIGHT_PROJECTOR_FILTER_LINEAR_MIPMAPS);
 
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/occlusion_culling/occlusion_rays_per_thread", PROPERTY_HINT_RANGE, "1,2048,1,or_greater"), 512);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/camera/motion_blur/samples", PROPERTY_HINT_RANGE, "4,32,1"), 12); // Mariner E15a.
+	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/occlusion_culling/hiz_buffer_width", PROPERTY_HINT_RANGE, "32,1024,1"), 256); // Mariner E13.
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/glow/upscale_mode", PROPERTY_HINT_ENUM, "Linear (Fast),Bicubic (Slow)"), 1);
 	GLOBAL_DEF("rendering/environment/glow/upscale_mode.mobile", 0);

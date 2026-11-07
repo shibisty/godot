@@ -38,6 +38,7 @@ void InstanceUniforms::free(RID p_self) {
 	if (is_allocated()) {
 		RSG::material_storage->global_shader_parameters_instance_free(p_self);
 		_location = -1;
+		_elements = 0;
 	}
 
 	_invalidate_items();
@@ -84,10 +85,33 @@ bool InstanceUniforms::materials_finish(RID p_self) {
 		return false;
 	}
 
-	const bool should_alloc = !is_allocated();
+	// Mariner E14a: allocate the slots the materials use (highest instance uniform index + 1), not always 16; more
+	// slots if the materials changed and need them.
+	uint32_t needed = 0;
+	for (const KeyValue<StringName, Item> &kv : _parameters) {
+		if (kv.value.is_valid()) {
+			needed = MAX(needed, uint32_t(kv.value.index) + 1);
+		}
+	}
+	if (needed == 0) {
+		if (is_allocated()) {
+			free(p_self);
+			return true;
+		}
+		return false;
+	}
+
+	bool should_alloc = !is_allocated();
+	if (is_allocated() && _elements < needed) {
+		RSG::material_storage->global_shader_parameters_instance_free(p_self);
+		_location = -1;
+		_elements = 0;
+		should_alloc = true;
+	}
 
 	if (should_alloc) {
-		_location = RSG::material_storage->global_shader_parameters_instance_allocate(p_self);
+		_location = RSG::material_storage->global_shader_parameters_instance_allocate(p_self, needed);
+		_elements = _location >= 0 ? needed : 0;
 	}
 
 	for (KeyValue<StringName, Item> &kv : _parameters) {

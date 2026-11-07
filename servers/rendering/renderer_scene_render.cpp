@@ -745,6 +745,54 @@ void RendererSceneRender::environment_set_pathtracing_accumulation(RID p_env, bo
 	environment_storage.environment_set_pathtracing_accumulation(p_env, p_accumulate, p_max_samples, p_firefly_clamp);
 }
 
+void RendererSceneRender::environment_set_ddgi(RID p_env, bool p_enable, const Vector3i &p_probe_count, float p_probe_spacing, int p_rays_per_probe, float p_hysteresis, float p_energy, float p_bias, float p_specular_occlusion) {
+	environment_storage.environment_set_ddgi(p_env, p_enable, p_probe_count, p_probe_spacing, p_rays_per_probe, p_hysteresis, p_energy, p_bias, p_specular_occlusion);
+}
+
+void RendererSceneRender::environment_set_ddgi_update(RID p_env, int p_probes_per_frame, bool p_relocation) {
+	environment_storage.environment_set_ddgi_update(p_env, p_probes_per_frame, p_relocation);
+}
+
+void RendererSceneRender::environment_set_ddgi_channels(RID p_env, float p_sky_energy, float p_lights_energy) {
+	environment_storage.environment_set_ddgi_channels(p_env, p_sky_energy, p_lights_energy);
+}
+
+void RendererSceneRender::environment_set_ssao_gtao(RID p_env, bool p_enable, bool p_bent_normals, float p_thickness) {
+	environment_storage.environment_set_ssao_gtao(p_env, p_enable, p_bent_normals, p_thickness);
+}
+
+void RendererSceneRender::environment_set_restir(RID p_env, bool p_enable, int p_candidates, int p_spatial_samples, bool p_temporal, bool p_denoise) {
+	environment_storage.environment_set_restir(p_env, p_enable, p_candidates, p_spatial_samples, p_temporal, p_denoise);
+}
+
+bool RendererSceneRender::environment_get_ssao_gtao(RID p_env) const {
+	return environment_storage.environment_get_ssao_gtao(p_env);
+}
+
+bool RendererSceneRender::environment_get_ssao_bent_normals(RID p_env) const {
+	return environment_storage.environment_get_ssao_bent_normals(p_env);
+}
+
+void RendererSceneRender::environment_set_color_grading(RID p_env, bool p_enable, float p_temperature, float p_tint, const Color &p_shadows, const Color &p_midtones, const Color &p_highlights, const Vector4 &p_tonal_ranges, const Vector3 &p_slope, const Vector3 &p_offset, const Vector3 &p_power, float p_saturation, bool p_gamut_mapping) {
+	environment_storage.environment_set_color_grading(p_env, p_enable, p_temperature, p_tint, p_shadows, p_midtones, p_highlights, p_tonal_ranges, p_slope, p_offset, p_power, p_saturation, p_gamut_mapping);
+}
+
+RendererEnvironmentStorage::ColorGrading RendererSceneRender::environment_get_color_grading(RID p_env) const {
+	return environment_storage.environment_get_color_grading(p_env);
+}
+
+float RendererSceneRender::environment_get_ssao_gtao_thickness(RID p_env) const {
+	return environment_storage.environment_get_ssao_gtao_thickness(p_env);
+}
+
+void RendererSceneRender::environment_set_ddgi_sea(RID p_env, bool p_enable, float p_level, const Color &p_color) {
+	environment_storage.environment_set_ddgi_sea(p_env, p_enable, p_level, p_color);
+}
+
+bool RendererSceneRender::environment_get_ddgi_enabled(RID p_env) const {
+	return environment_storage.environment_get_ddgi_enabled(p_env);
+}
+
 bool RendererSceneRender::environment_get_pathtracing_enabled(RID p_env) const {
 	return environment_storage.environment_get_pathtracing_enabled(p_env);
 }

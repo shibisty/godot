@@ -127,9 +127,9 @@ void RenderPathtracer::_initialize(RendererSceneRenderRD *p_owner) {
 	}
 }
 
-uint32_t RenderPathtracer::_gather_lights(RendererSceneRenderRD *p_owner, const RenderDataRD *p_render_data, uint32_t &r_sun_index) {
+uint32_t RenderPathtracer::gather_lights(RendererSceneRenderRD *p_owner, const RenderDataRD *p_render_data, LocalVector<RT_LightData> &light_data, uint32_t &r_sun_index) {
 	// Ported from the fork (RenderRaytracing::gather_lights): directional lights first, then the strongest positional
-	// lights. Only the lights culled for the view are known here (the fork also gathers lights around the camera).
+	// lights (around the camera within the raytracing range, see RenderDataRD::rt_lights).
 	light_data.clear();
 	r_sun_index = 0xFFFFFFFF;
 	if (!p_render_data->lights) {
@@ -161,6 +161,31 @@ uint32_t RenderPathtracer::_gather_lights(RendererSceneRenderRD *p_owner, const 
 	};
 	LocalVector<Scored> positional;
 
+	auto add_positional = [&](RID instance, RID base) {
+		Transform3D xform = ls->light_instance_get_base_transform(instance);
+		float dist_sq = MAX((xform.origin - cam_pos).length_squared(), 0.01f);
+		Color c = ls->light_get_color(base);
+		float range = ls->light_get_param(base, RSE::LIGHT_PARAM_RANGE);
+		Scored s;
+		s.instance = instance;
+		s.score = ls->light_get_param(base, RSE::LIGHT_PARAM_ENERGY) * (c.r * 0.2126f + c.g * 0.7152f + c.b * 0.0722f) * (range > 0.0f ? range * range : 1e12f) / dist_sq;
+		positional.push_back(s);
+	};
+	const PagedArray<RID> *rt_lights = p_render_data->rt_lights;
+	if (rt_lights) {
+		for (uint32_t i = 0; i < (uint32_t)rt_lights->size(); i++) {
+			RID instance = (*rt_lights)[i];
+			if (!ls->owns_light_instance(instance)) {
+				continue;
+			}
+			RID base = ls->light_instance_get_base_light(instance);
+			RSE::LightType type = ls->light_get_type(base);
+			if (type == RSE::LIGHT_OMNI || type == RSE::LIGHT_SPOT) {
+				add_positional(instance, base);
+			}
+		}
+	}
+
 	const PagedArray<RID> &lights = *p_render_data->lights;
 	for (uint32_t i = 0; i < (uint32_t)lights.size(); i++) {
 		RID instance = lights[i];
@@ -170,14 +195,9 @@ uint32_t RenderPathtracer::_gather_lights(RendererSceneRenderRD *p_owner, const 
 			continue; // Not supported by the path tracer.
 		}
 		if (type != RSE::LIGHT_DIRECTIONAL) {
-			Transform3D xform = ls->light_instance_get_base_transform(instance);
-			float dist_sq = MAX((xform.origin - cam_pos).length_squared(), 0.01f);
-			Color c = ls->light_get_color(base);
-			float range = ls->light_get_param(base, RSE::LIGHT_PARAM_RANGE);
-			Scored s;
-			s.instance = instance;
-			s.score = ls->light_get_param(base, RSE::LIGHT_PARAM_ENERGY) * (c.r * 0.2126f + c.g * 0.7152f + c.b * 0.0722f) * (range > 0.0f ? range * range : 1e12f) / dist_sq;
-			positional.push_back(s);
+			if (!rt_lights) {
+				add_positional(instance, base);
+			}
 			continue;
 		}
 		if (ls->light_directional_get_sky_mode(base) == RSE::LIGHT_DIRECTIONAL_SKY_MODE_SKY_ONLY || light_data.size() >= RT_LIGHTS_MAX) {
@@ -296,7 +316,7 @@ bool RenderPathtracer::render(RendererSceneRenderRD *p_owner, const RenderDataRD
 	const uint32_t settings_hash = settings.hash();
 
 	uint32_t sun_index = 0xFFFFFFFF;
-	const uint32_t light_count = _gather_lights(p_owner, p_render_data, sun_index);
+	const uint32_t light_count = gather_lights(p_owner, p_render_data, light_data, sun_index);
 	const uint32_t light_hash = light_count > 0 ? hash_murmur3_buffer(light_data.ptr(), light_count * sizeof(RT_LightData)) : 0;
 
 	const Transform3D &cam_transform = p_render_data->scene_data->cam_transform;

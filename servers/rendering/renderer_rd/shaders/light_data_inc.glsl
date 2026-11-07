@@ -20,7 +20,8 @@ struct LightData { //this structure needs to be as packed as possible
 
 	float specular_amount;
 	float shadow_opacity;
-	float pad[2];
+	float restir; // Mariner E20: 1.0 if the opaque pass gets this light from ReSTIR DI (it skips it).
+	float pad;
 
 	vec4 atlas_rect; // rect in the shadow atlas
 	mat4 shadow_matrix;
@@ -89,4 +90,9 @@ struct DirectionalLightData {
 	vec2 uv_scale2;
 	vec2 uv_scale3;
 	vec2 uv_scale4;
+	mat4 object_shadow_matrix; // Mariner E10b: view space -> object shadow map.
+	vec4 object_shadow_params; // Mariner E10b: x enabled, y bias, z normal bias, w pixel size.
+	vec4 contact_shadow_params; // Mariner E11: x reads the contact shadow mask; E20b: y channel of the ray traced shadow (index + 1); E20d: z traced only beyond the shadow maps.
+	mat4 translucent_shadow_matrix; // Mariner E21: view space -> translucent shadow map (uv, distance / far).
+	vec4 translucent_shadow_params; // Mariner E21: x enabled, y far distance, z bias, w texel size.
 };

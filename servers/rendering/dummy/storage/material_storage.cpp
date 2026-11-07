@@ -36,14 +36,18 @@ using namespace RendererDummy;
 
 MaterialStorage *MaterialStorage::singleton = nullptr;
 
-MaterialStorage::MaterialStorage() {
-	singleton = this;
+MaterialStorage::MaterialStorage(bool p_singleton) {
+	if (p_singleton) {
+		singleton = this;
+	}
 	ShaderCompiler::DefaultIdentifierActions actions;
 	dummy_compiler.initialize(actions);
 }
 
 MaterialStorage::~MaterialStorage() {
-	singleton = nullptr;
+	if (singleton == this) {
+		singleton = nullptr;
+	}
 	global_shader_variables.clear();
 }
 
@@ -161,6 +165,7 @@ void MaterialStorage::shader_free(RID p_rid) {
 void MaterialStorage::shader_set_code(RID p_shader, const String &p_code) {
 	DummyShader *shader = shader_owner.get_or_null(p_shader);
 	ERR_FAIL_NULL(shader);
+	shader->code = p_code;
 	if (p_code.is_empty()) {
 		return;
 	}

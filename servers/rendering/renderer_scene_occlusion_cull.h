@@ -164,6 +164,14 @@ public:
 			return sizes.is_empty();
 		}
 
+		// Mariner E25b: the pyramid for the renderer's GPU occlusion culling (same test as _is_occluded()). All mips
+		// are in get_data(), mip i starting get_mip_offset(i) floats in; rows from the bottom of the view; perspective
+		// views hold distances from the camera, orthogonal views the depth along the view axis.
+		_FORCE_INLINE_ const LocalVector<float> &get_data() const { return data; }
+		_FORCE_INLINE_ const LocalVector<Size2i> &get_mip_sizes() const { return sizes; }
+		_FORCE_INLINE_ uint32_t get_mip_offset(uint32_t p_mip) const { return uint32_t(mips[p_mip] - data.ptr()); }
+		_FORCE_INLINE_ uint64_t get_occlusion_frame() const { return occlusion_frame; }
+
 		virtual void clear();
 		virtual void resize(const Size2i &p_size);
 

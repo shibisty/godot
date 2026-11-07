@@ -66,6 +66,12 @@
 				Returns an individual bit on the rendering layer mask.
 			</description>
 		</method>
+		<method name="get_dynamic_resolution_scale" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the 3D scale in use: the dynamic resolution scale when [member dynamic_resolution_enabled] is [code]true[/code], otherwise [member scaling_3d_scale].
+			</description>
+		</method>
 		<method name="get_embedded_subwindows" qualifiers="const">
 			<return type="Window[]" />
 			<description>
@@ -356,9 +362,19 @@
 		<member name="disable_3d" type="bool" setter="set_disable_3d" getter="is_3d_disabled" default="false">
 			Disable 3D rendering (but keep 2D rendering).
 		</member>
+		<member name="dynamic_resolution_enabled" type="bool" setter="set_dynamic_resolution_enabled" getter="is_dynamic_resolution_enabled" default="false">
+			If [code]true[/code], the 3D resolution scale follows the GPU time of this viewport: when the average time of at least eight frames is over [member dynamic_resolution_target_ms], the scale goes down (taking the pixel count as the cost, by as many 0.05 steps as needed); when it is under 85 % of the target, the scale goes up to the level predicted to stay under 90 % of it. The scale stays between [member dynamic_resolution_min_scale] and [member scaling_3d_scale] and changes at most every half second, since a change resizes the 3D buffers (and restarts the history of TAA and temporal upscalers). Works with every [member scaling_3d_mode]; [constant SCALING_3D_MODE_OFF] scales bilinearly when below 1. The GPU time is measured as with [method RenderingServer.viewport_set_measure_render_time].
+		</member>
+		<member name="dynamic_resolution_min_scale" type="float" setter="set_dynamic_resolution_min_scale" getter="get_dynamic_resolution_min_scale" default="0.5">
+			The lowest 3D scale dynamic resolution goes down to. See [member dynamic_resolution_enabled].
+		</member>
+		<member name="dynamic_resolution_target_ms" type="float" setter="set_dynamic_resolution_target_ms" getter="get_dynamic_resolution_target_ms" default="16.6667">
+			The GPU time per frame (in milliseconds) dynamic resolution keeps this viewport to. See [member dynamic_resolution_enabled].
+		</member>
 		<member name="frame_generation" type="bool" setter="set_frame_generation" getter="get_frame_generation" default="false">
 			If [code]true[/code], NVIDIA DLSS Frame Generation generates frames between the rendered frames of this viewport (Windows, NVIDIA RTX 40 series or newer, Streamline DLLs next to the executable; see [Streamline]). Only used together with [constant SCALING_3D_MODE_DLSS] (DLSS Super Resolution or DLAA), on the viewport that is drawn to a window, and only in the running project (never in the editor). Check [code]Streamline.get_capability(Streamline.STREAMLINE_CAPABILITY_DLSS_G)[/code] first.
 			The 3D image of the viewport is passed to DLSS Frame Generation as the HUD-less color before its 2D canvases (including [CanvasLayer] user interfaces) are drawn, so the user interface is not interpolated.
+			With [constant SCALING_3D_MODE_FSR3], AMD FSR 3 frame generation is used instead (any GPU, Vulkan rendering driver, Forward+): optical flow on the HUD-less image and frame interpolation between the previous and the current frame, using the FSR 3.1 upscaler's motion vectors and depth; the user interface of the current frame is put back on top of the generated frame. The generated frame is presented right before each rendered frame, so it should be used with V-Sync enabled (each image is then shown for one refresh). See [method RenderingServer.get_frame_generation_presented_count].
 			[b]Note:[/b] DLSS Frame Generation requires NVIDIA Reflex to be running. If [member ProjectSettings.rendering/streamline/reflex_mode] is [code]0[/code], Reflex is automatically enabled in low latency mode for as long as frame generation is active. The number of generated frames is set by [member ProjectSettings.rendering/streamline/frame_generation_frames].
 		</member>
 		<member name="fsr_sharpness" type="float" setter="set_fsr_sharpness" getter="get_fsr_sharpness" default="0.2">
@@ -384,6 +400,12 @@
 			If [code]true[/code], this viewport will mark incoming input events as handled by itself. If [code]false[/code], this is instead done by the first parent viewport that is set to handle input locally.
 			A [SubViewportContainer] will automatically set this property to [code]false[/code] for the [Viewport] contained inside of it.
 			See also [method set_input_as_handled] and [method is_input_handled].
+		</member>
+		<member name="hiz_occlusion_reference" type="Transform3D" setter="set_hiz_occlusion_reference" getter="get_hiz_occlusion_reference">
+			The global transform of the vehicle the camera is on (a ship), for [member use_hiz_occlusion_culling]: set it every frame. Surfaces nearer to the camera than [member hiz_occlusion_reference_radius] move with it between the frame they were rendered in and the frame being culled.
+		</member>
+		<member name="hiz_occlusion_reference_radius" type="float" setter="set_hiz_occlusion_reference_radius" getter="get_hiz_occlusion_reference_radius" default="0.0">
+			Distance from the camera within which surfaces move with [member hiz_occlusion_reference] (the size of the vehicle). [code]0.0[/code]: everything is treated as part of the static world.
 		</member>
 		<member name="mesh_lod_threshold" type="float" setter="set_mesh_lod_threshold" getter="get_mesh_lod_threshold" default="1.0">
 			The automatic LOD bias to use for meshes rendered within the [Viewport] (this is analogous to [member ReflectionProbe.mesh_lod_threshold]). Higher values will use less detailed versions of meshes that have LOD variations generated. If set to [code]0.0[/code], automatic LOD is disabled. Increase [member mesh_lod_threshold] to improve performance at the cost of geometry detail.
@@ -497,6 +519,10 @@
 			If [code]true[/code], 2D rendering will use a high dynamic range (HDR) [code]RGBA16[/code] format framebuffer. Additionally, 2D rendering will be performed on linear values and will be converted using the appropriate transfer function immediately before blitting to the screen (if the Viewport is attached to the screen).
 			Practically speaking, this means that the end result of the Viewport will not be clamped to the [code]0-1[/code] range and can be used in 3D rendering without color encoding adjustments. This allows 2D rendering to take advantage of effects requiring high dynamic range (e.g. 2D glow) as well as substantially improves the appearance of effects requiring highly detailed gradients.
 		</member>
+		<member name="use_hiz_occlusion_culling" type="bool" setter="set_use_hiz_occlusion_culling" getter="is_using_hiz_occlusion_culling" default="false">
+			If [code]true[/code], objects hidden behind what this viewport rendered in earlier frames are not drawn, without [OccluderInstance3D] nodes. The renderer reduces the depth buffer of each frame to a small grid ([member ProjectSettings.rendering/occlusion_culling/hiz_buffer_width]) and reads it back without waiting; before culling, the newest grid that arrived is reprojected into the current camera. Parts of the view that were hidden or outside the view then stay unknown and nothing is culled there, so moving the camera does not make objects pop in late; an object revealed by something that moves on its own (a door, another ship) may appear a few frames late. Replaces the [OccluderInstance3D] culling of this viewport ([member use_occlusion_culling]) while enabled. Forward+ only, one view (not XR), perspective cameras. Mariner engine patch E13.
+			[b]Note:[/b] For a camera on a moving vehicle, set [member hiz_occlusion_reference] to the vehicle's transform every frame and [member hiz_occlusion_reference_radius] to its size: surfaces nearer than the radius are then reprojected with the vehicle, not with the world.
+		</member>
 		<member name="use_occlusion_culling" type="bool" setter="set_use_occlusion_culling" getter="is_using_occlusion_culling" default="false">
 			If [code]true[/code], [OccluderInstance3D] nodes will be usable for occlusion culling in 3D for this viewport. For the root viewport, [member ProjectSettings.rendering/occlusion_culling/use_occlusion_culling] must be set to [code]true[/code] instead.
 			[b]Note:[/b] Enabling occlusion culling has a cost on the CPU. Only enable occlusion culling if you actually plan to use it, and think whether your scene can actually benefit from occlusion culling. Large, open scenes with few or no objects blocking the view will generally not benefit much from occlusion culling. Large open scenes generally benefit more from mesh LOD and visibility ranges ([member GeometryInstance3D.visibility_range_begin] and [member GeometryInstance3D.visibility_range_end]) compared to occlusion culling.
@@ -609,7 +635,11 @@
 			Use NVIDIA DLSS Super Resolution (through NVIDIA Streamline) for the viewport's 3D buffer. The amount of scaling can be set using [member Viewport.scaling_3d_scale]: DLSS picks the closest of its quality modes, e.g. [code]1.0[/code] - DLAA (antialiasing only), [code]0.66[/code] - Quality, [code]0.58[/code] - Balanced, [code]0.5[/code] - Performance, [code]0.33[/code] - Ultra Performance. Values greater than [code]1.0[/code] are not supported and bilinear downsampling will be used instead. Like FSR 2, it is a temporal upscaler, so TAA is disabled internally.
 			[b]Note:[/b] Only available in custom builds with Streamline support, on Windows with the Forward+ renderer (D3D12 or Vulkan), an NVIDIA RTX GPU and the Streamline runtime DLLs ([code]sl.interposer.dll[/code], [code]sl.common.dll[/code], [code]sl.dlss.dll[/code], [code]nvngx_dlss.dll[/code]) next to the executable. Use [method Streamline.get_capability] with [constant Streamline.STREAMLINE_CAPABILITY_DLSS] to check availability. When unavailable, bilinear scaling is used instead.
 		</constant>
-		<constant name="SCALING_3D_MODE_MAX" value="7" enum="Scaling3DMode">
+		<constant name="SCALING_3D_MODE_FSR3" value="7" enum="Scaling3DMode">
+			Use AMD FidelityFX Super Resolution 3.1 (the FSR 3.1.4 upscaler of the FidelityFX SDK 1.1.4) for the viewport's 3D buffer. The amount of scaling can be set using [member Viewport.scaling_3d_scale], e.g. [code]0.67[/code] - Quality, [code]0.59[/code] - Balanced, [code]0.5[/code] - Performance, [code]0.33[/code] - Ultra Performance; [code]1.0[/code] gives native AA. Values greater than [code]1.0[/code] are not supported and bilinear downsampling will be used instead. Compared to FSR 2.2 it handles thin and moving detail, particles and disocclusions better (less ghosting and shimmering) at a similar cost. [member Viewport.fsr_sharpness] controls its sharpening pass. Like FSR 2, it is a temporal upscaler, so TAA is disabled internally.
+			[b]Note:[/b] Only available with the Forward+ renderer; the shaders are compiled the first time a viewport uses this mode. With other renderers, bilinear scaling is used instead.
+		</constant>
+		<constant name="SCALING_3D_MODE_MAX" value="8" enum="Scaling3DMode">
 			Represents the size of the [enum Scaling3DMode] enum.
 		</constant>
 		<constant name="MSAA_DISABLED" value="0" enum="MSAA">

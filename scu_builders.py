@@ -410,7 +410,7 @@ def generate_scu_files(max_includes_per_scu):
     process_folder(["servers/rendering/dummy/storage"])
     process_folder(["servers/rendering/storage"])
     process_folder(["servers/rendering/renderer_rd"])
-    process_folder(["servers/rendering/renderer_rd/effects"])
+    process_folder(["servers/rendering/renderer_rd/effects"], ["fsr3_upscaler", "ffx3_backend", "ffx3_opticalflow_lib", "fsr3_frame_generation"])
     process_folder(["servers/rendering/renderer_rd/environment"])
     process_folder(["servers/rendering/renderer_rd/storage_rd"])
     process_folder(["servers/rendering/renderer_rd/forward_clustered"])
@@ -433,11 +433,13 @@ def generate_scu_files(max_includes_per_scu):
             "/core/templates",
             "/core/threads",
             "/core/variant",
+            "/mariner",
             "/scene",
             "/servers",
             "/servers/rendering",
         ],
-        ["test_macros", "test_main"],
+        # Mariner: tests that include the Vulkan context (X11 headers: "Window") need units of their own.
+        ["test_macros", "test_main", "test_mariner_fixes", "test_mariner_mesh_shaders", "test_mariner_second_gpu"],
     )
 
     # Finally change back the path to the calling folder

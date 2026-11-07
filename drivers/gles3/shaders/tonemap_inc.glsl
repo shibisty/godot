@@ -174,6 +174,10 @@ vec3 tonemap_agx(vec3 color) {
 #define TONEMAPPER_FILMIC 2
 #define TONEMAPPER_ACES 3
 #define TONEMAPPER_AGX 4
+#define TONEMAPPER_GT7 5
+
+// Mariner E23: shared with the RenderingDevice renderers.
+#include "../../../servers/rendering/renderer_rd/shaders/effects/tonemap_gt7_inc.glsl"
 
 vec3 apply_tonemapping(vec3 color) { // inputs are LINEAR
 	if (tonemapper == TONEMAPPER_LINEAR) {
@@ -190,6 +194,8 @@ vec3 apply_tonemapping(vec3 color) { // inputs are LINEAR
 		return tonemap_filmic(color);
 	} else if (tonemapper == TONEMAPPER_ACES) {
 		return tonemap_aces(color);
+	} else if (tonemapper == TONEMAPPER_GT7) {
+		return tonemap_gt7(color, tonemapper_params.x, tonemapper_params.y);
 	} else { // TONEMAPPER_AGX
 		return tonemap_agx(color);
 	}

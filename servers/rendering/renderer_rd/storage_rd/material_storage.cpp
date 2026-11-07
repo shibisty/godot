@@ -982,6 +982,17 @@ void MaterialStorage::MaterialData::update_textures(const HashMap<StringName, Va
 				RID rd_texture;
 
 				if (tex) {
+					if (tex->rd_texture.is_valid() && !RD::get_singleton()->texture_is_valid(tex->rd_texture)) {
+						// The RenderingDevice texture under this texture was freed while still in use (a Texture2DRD
+						// and similar whose RD texture was freed before being unbound): the uniform set could not be
+						// created and the material would not be drawn at all. Stand in a view of the default texture;
+						// it is a texture of its own, so replacing the texture (rebinding the Texture2DRD) frees it and
+						// that invalidates this uniform set again, which picks up the new texture.
+						WARN_PRINT(vformat("Shader uniform '%s' uses a texture whose RenderingDevice texture was freed while still in use (unbind or rebind a Texture2DRD before freeing its RD texture). Using the default texture until the texture is replaced.", String(p_texture_uniforms[i].name)));
+						RID fallback = get_default_texture_id(p_texture_uniforms[i].type, p_texture_uniforms[i].hint);
+						tex->rd_texture = RD::get_singleton()->texture_create_shared(RD::TextureView(), fallback);
+						tex->rd_texture_srgb = RID();
+					}
 					rd_texture = (srgb && tex->rd_texture_srgb.is_valid()) ? tex->rd_texture_srgb : tex->rd_texture;
 #ifdef TOOLS_ENABLED
 					if (tex->detect_3d_callback && p_3d_material) {
@@ -1538,8 +1549,24 @@ bool MaterialStorage::free(RID p_rid) {
 /* GLOBAL SHADER UNIFORM API */
 
 int32_t MaterialStorage::_global_shader_uniform_allocate(uint32_t p_elements) {
-	int32_t idx = 0;
-	while (idx + p_elements <= global_shader_uniforms.buffer_size) {
+	// Mariner E14a: first fit from a hint (just past the last allocation, or the lowest freed instance block), then from
+	// the start: allocating many instances was quadratic (each search walked all the blocks before it).
+	const uint32_t hint = MIN(global_shader_uniforms.allocate_hint, global_shader_uniforms.buffer_size);
+	int32_t found = _global_shader_uniform_find(hint, global_shader_uniforms.buffer_size, p_elements);
+	if (found < 0 && hint > 0) {
+		found = _global_shader_uniform_find(0, MIN(global_shader_uniforms.buffer_size, hint + p_elements), p_elements);
+	}
+	if (found >= 0) {
+		global_shader_uniforms.allocate_hint = found + p_elements;
+	}
+	return found;
+}
+
+int32_t MaterialStorage::_global_shader_uniform_find(uint32_t p_from, uint32_t p_to, uint32_t p_elements) {
+	// p_from is a block boundary: the hint is always the start of a freed block or the end of an allocated one, and no
+	// block allocated later can cover it without moving it to its own end.
+	int32_t idx = p_from;
+	while (idx + p_elements <= p_to) {
 		if (global_shader_uniforms.buffer_usage[idx].elements == 0) {
 			bool valid = true;
 			for (uint32_t i = 1; i < p_elements; i++) {
@@ -2024,12 +2051,21 @@ RID MaterialStorage::global_shader_uniforms_get_storage_buffer() const {
 	return global_shader_uniforms.buffer;
 }
 
-int32_t MaterialStorage::global_shader_parameters_instance_allocate(RID p_instance) {
+int32_t MaterialStorage::global_shader_parameters_instance_allocate(RID p_instance, uint32_t p_elements) {
 	ERR_FAIL_COND_V(global_shader_uniforms.instance_buffer_pos.has(p_instance), -1);
-	int32_t pos = _global_shader_uniform_allocate(ShaderLanguage::MAX_INSTANCE_UNIFORM_INDICES);
-	global_shader_uniforms.instance_buffer_pos[p_instance] = pos; //save anyway
-	ERR_FAIL_COND_V_MSG(pos < 0, -1, "Too many instances using shader instance variables. Increase buffer size in Project Settings.");
-	global_shader_uniforms.buffer_usage[pos].elements = ShaderLanguage::MAX_INSTANCE_UNIFORM_INDICES;
+	// Mariner E14a: only the slots the instance's materials use (was always 16: at most buffer_size / 16 instances).
+	const uint32_t elements = CLAMP(p_elements, 1u, uint32_t(ShaderLanguage::MAX_INSTANCE_UNIFORM_INDICES));
+	int32_t pos = _global_shader_uniform_allocate(elements);
+	if (pos < 0) {
+		// Not recorded: a later attempt (when the materials change) may succeed. Before, the failure was recorded and
+		// every later attempt failed with "has(p_instance)".
+		if (global_shader_uniforms.failed_instances++ == 0) {
+			ERR_PRINT(vformat("Too many instances using shader instance variables (%d slots in use of %d). Increase rendering/limits/global_shader_variables/buffer_size in the Project Settings. Further failures are counted, not printed.", int64_t(global_shader_parameters_instance_slots_used()), int64_t(global_shader_uniforms.buffer_size)));
+		}
+		return -1;
+	}
+	global_shader_uniforms.instance_buffer_pos[p_instance] = pos;
+	global_shader_uniforms.buffer_usage[pos].elements = elements;
 	return pos;
 }
 
@@ -2038,8 +2074,23 @@ void MaterialStorage::global_shader_parameters_instance_free(RID p_instance) {
 	int32_t pos = global_shader_uniforms.instance_buffer_pos[p_instance];
 	if (pos >= 0) {
 		global_shader_uniforms.buffer_usage[pos].elements = 0;
+		global_shader_uniforms.allocate_hint = MIN(global_shader_uniforms.allocate_hint, uint32_t(pos));
 	}
 	global_shader_uniforms.instance_buffer_pos.erase(p_instance);
+}
+
+uint32_t MaterialStorage::global_shader_parameters_instance_slots_used() const {
+	uint32_t used = 0;
+	for (const KeyValue<RID, int32_t> &E : global_shader_uniforms.instance_buffer_pos) {
+		if (E.value >= 0) {
+			used += global_shader_uniforms.buffer_usage[E.value].elements;
+		}
+	}
+	return used;
+}
+
+uint32_t MaterialStorage::global_shader_parameters_instance_failed_count() const {
+	return global_shader_uniforms.failed_instances;
 }
 
 void MaterialStorage::global_shader_parameters_instance_update(RID p_instance, int p_index, const Variant &p_value, int p_flags_count) {
@@ -2051,7 +2102,7 @@ void MaterialStorage::global_shader_parameters_instance_update(RID p_instance, i
 	if (pos < 0) {
 		return; //again, not allocated, ignore
 	}
-	ERR_FAIL_INDEX(p_index, ShaderLanguage::MAX_INSTANCE_UNIFORM_INDICES);
+	ERR_FAIL_INDEX(p_index, int(global_shader_uniforms.buffer_usage[pos].elements)); // Mariner E14a: the slots allocated.
 
 	Variant::Type value_type = p_value.get_type();
 	ERR_FAIL_COND_MSG(p_value.get_type() > Variant::COLOR, "Unsupported variant type for instance parameter: " + Variant::get_type_name(value_type)); //anything greater not supported
@@ -2574,6 +2625,49 @@ Variant MaterialStorage::material_get_param(RID p_material, const StringName &p_
 		return material->params[p_param];
 	} else {
 		return Variant();
+	}
+}
+
+void MaterialStorage::material_get_textures(RID p_material, LocalVector<RID> &r_textures) const {
+	// Mariner E17: walks the parameters, the shader defaults and the next passes; the depth limit guards against pass loops.
+	RID current = p_material;
+	for (int depth = 0; depth < 8 && current.is_valid(); depth++) {
+		const Material *material = material_owner.get_or_null(current);
+		if (!material) {
+			return;
+		}
+		TextureStorage *texture_storage = TextureStorage::get_singleton();
+		for (const KeyValue<StringName, Variant> &E : material->params) {
+			if (E.value.get_type() == Variant::RID) {
+				RID rid = E.value;
+				if (texture_storage->owns_texture(rid)) {
+					r_textures.push_back(rid);
+				}
+			} else if (E.value.get_type() == Variant::ARRAY) {
+				const Array array = E.value;
+				for (int i = 0; i < array.size(); i++) {
+					if (array[i].get_type() == Variant::RID) {
+						RID rid = array[i];
+						if (texture_storage->owns_texture(rid)) {
+							r_textures.push_back(rid);
+						}
+					}
+				}
+			}
+		}
+		if (material->shader) {
+			for (const KeyValue<StringName, HashMap<int, RID>> &E : material->shader->default_texture_parameter) {
+				if (material->params.has(E.key)) {
+					continue;
+				}
+				for (const KeyValue<int, RID> &F : E.value) {
+					if (texture_storage->owns_texture(F.value)) {
+						r_textures.push_back(F.value);
+					}
+				}
+			}
+		}
+		current = material->next_pass;
 	}
 }
 

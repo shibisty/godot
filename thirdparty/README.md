@@ -47,6 +47,35 @@ Patches:
 - `0002-godot-fsr2-options.patch` ([GH-81197](https://github.com/godotengine/godot/pull/81197))
 
 
+## amd-fsr3
+
+- Upstream: https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK
+- Version: FidelityFX SDK 1.1.4: FSR 3.1.4 upscaler, frame interpolation 1.1.3, optical flow 1.1.2
+  (c6efa6bf7f2027b3ec94f28578bb5965eabb9e55, 2025)
+- License: MIT
+
+Files extracted from upstream source (flattened):
+
+- `ffx_assert.*`, `ffx_message.*`, `ffx_object_management.*`, `ffx_error.h`, `ffx_interface.h`, `ffx_types.h`,
+  `ffx_util.h`, `ffx_fsr3upscaler.h`, `ffx_frameinterpolation.h` and `ffx_opticalflow.h` from
+  `sdk/include/FidelityFX/host` and `sdk/src/shared`
+- `ffx_<component>.cpp` and `ffx_<component>_private.h` from `sdk/src/components/{fsr3upscaler,frameinterpolation,opticalflow}`
+- `shaders`: `ffx_core*.h`, `ffx_common_types.h`, `fsr1/ffx_fsr1.h`, `spd/ffx_spd.h` and `{fsr3upscaler,frameinterpolation,opticalflow}/*.h`
+  from `sdk/include/FidelityFX/gpu`, plus the GLSL passes from `sdk/src/backends/vk/shaders/{fsr3upscaler,frameinterpolation,opticalflow}`
+  (the SDK's Vulkan frame interpolation swap chain is not used: Godot presents the generated frame itself)
+- `LICENSE.txt`
+
+The host library is compiled inside `namespace FFX3` by `servers/rendering/renderer_rd/effects/ffx3_backend.cpp`,
+`fsr3_upscaler.cpp`, `fsr3_frame_generation.cpp` and `ffx3_opticalflow_lib.cpp` (it shares names with FSR 2).
+
+Patches:
+
+- `0001-build-fixes.patch` (flat include paths, no `#version` in the passes, no `windows.h`, C++ linkage, renamed
+  assert symbols, context sizes for 4-byte `wchar_t`, one FSR1 include in the RCAS pass)
+- `0002-godot-fsr3-options.patch` (reprojection matrix for invalid motion vectors, reactive mask clamp, luma history
+  storage format)
+
+
 ## angle
 
 - Upstream: https://chromium.googlesource.com/angle/angle/

@@ -44,6 +44,7 @@ struct Attractor {
 #define COLLIDER_TYPE_SDF 2
 #define COLLIDER_TYPE_HEIGHT_FIELD 3
 #define COLLIDER_TYPE_2D_SDF 4
+#define COLLIDER_TYPE_SCREEN_DEPTH 5 // Mariner E22: transform = world -> clip of the view, extents = camera position.
 
 struct Collider {
 	mat4 transform;
@@ -164,6 +165,7 @@ dst_particles;
 
 layout(set = 2, binding = 0) uniform texture3D sdf_vec_textures[MAX_3D_TEXTURES];
 layout(set = 2, binding = 1) uniform texture2D height_field_texture;
+layout(set = 2, binding = 2) uniform texture2D screen_collision_texture; // Mariner E22: xyz world normal, w view distance.
 
 /* SET 3: MATERIAL */
 
@@ -648,6 +650,46 @@ void main() {
 							depth = dot(normal, pos1) - dot(normal, local_pos_bottom);
 						}
 
+					} break;
+					case COLLIDER_TYPE_SCREEN_DEPTH: {
+						// Mariner E22: the depth of the previous frame's view (after Spartan Engine's particle depth
+						// collision, MIT, commit cb258a150: a particle that went behind the surface seen at its pixel by
+						// less than its own travel and a band is pushed back out along the surface normal).
+						vec3 pos = PARTICLE.xform[3].xyz;
+						vec4 clip = FRAME.colliders[i].transform * vec4(pos, 1.0);
+						if (clip.w <= 0.0) {
+							continue;
+						}
+						vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
+						if (any(lessThanEqual(uv, vec2(0.0))) || any(greaterThanEqual(uv, vec2(1.0)))) {
+							continue;
+						}
+						vec4 surface = textureLod(sampler2D(screen_collision_texture, SAMPLER_NEAREST_CLAMP), uv, 0.0);
+						if (surface.w <= 0.0) {
+							continue; // Sky.
+						}
+						// For a perspective view clip.w is the view distance of the particle.
+						float penetration = clip.w - surface.w + particle_size;
+						float band = max(particle_size * 0.75, 0.18);
+						float thickness = length(PARTICLE.velocity) * FRAME.delta + band + 0.35;
+						if (penetration <= 0.0 || penetration >= thickness) {
+							continue;
+						}
+						vec3 n = surface.xyz;
+						if (dot(n, n) < 0.01) {
+							continue;
+						}
+						n = normalize(n);
+						vec3 ray = pos - FRAME.colliders[i].extents;
+						float ray_length = length(ray);
+						if (dot(n, ray) > 0.0) {
+							n = -n; // Facing the camera.
+						}
+						// The penetration is along the view axis; along the normal it is shorter by the slant of the ray.
+						float along_ray = penetration * ray_length / clip.w;
+						col = true;
+						normal = n;
+						depth = max(along_ray * abs(dot(ray / max(ray_length, 1e-6), n)), EPSILON);
 					} break;
 				}
 

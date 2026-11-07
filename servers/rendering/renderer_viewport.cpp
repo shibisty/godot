@@ -158,8 +158,10 @@ void RendererViewport::_capture_frame_generation_hudless(Viewport *p_viewport) {
 	if (!p_viewport->frame_generation || p_viewport->viewport_to_screen == DisplayServerEnums::INVALID_WINDOW_ID || p_viewport->use_xr) {
 		return;
 	}
-	if (p_viewport->scaling_3d_mode != RSE::VIEWPORT_SCALING_3D_MODE_DLSS || !p_viewport->dlss_enabled || !_is_frame_generation_available()) {
-		return; // Frame generation runs with DLSS / DLAA only.
+	// Mariner E24b: AMD FSR 3 frame generation with the FSR 3.1 upscaler (any GPU, Vulkan).
+	const bool fsr3 = p_viewport->scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR3 && OS::get_singleton()->get_current_rendering_method() == "forward_plus";
+	if (!fsr3 && (p_viewport->scaling_3d_mode != RSE::VIEWPORT_SCALING_3D_MODE_DLSS || !p_viewport->dlss_enabled || !_is_frame_generation_available())) {
+		return; // Frame generation runs with DLSS / DLAA or FSR 3.1 only.
 	}
 	RenderingServerTypes::BlitToScreen blit;
 	blit.render_target = p_viewport->render_target;
@@ -169,7 +171,11 @@ void RendererViewport::_capture_frame_generation_hudless(Viewport *p_viewport) {
 		blit.dst_rect.position = Vector2();
 		blit.dst_rect.size = p_viewport->size;
 	}
-	RSG::rasterizer->frame_generation_capture_hudless(p_viewport->viewport_to_screen, blit);
+	if (fsr3) {
+		RSG::rasterizer->fsr3_frame_generation_capture(p_viewport->viewport_to_screen, blit, p_viewport->render_buffers);
+	} else {
+		RSG::rasterizer->frame_generation_capture_hudless(p_viewport->viewport_to_screen, blit);
+	}
 }
 
 void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
@@ -180,6 +186,13 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 			const float EPSILON = 0.0001;
 			float scaling_3d_scale = p_viewport->scaling_3d_scale;
 			RSE::ViewportScaling3DMode scaling_3d_mode = p_viewport->scaling_3d_mode;
+			if (p_viewport->dynamic_resolution) {
+				// Mariner E19: the dynamic scale, capped by the viewport's own scale; without a scaling mode, bilinear.
+				scaling_3d_scale = MIN(scaling_3d_scale, p_viewport->dynamic_resolution_scale);
+				if (scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_OFF && scaling_3d_scale < 1.0f - EPSILON) {
+					scaling_3d_mode = RSE::VIEWPORT_SCALING_3D_MODE_BILINEAR;
+				}
+			}
 			bool upscaler_available = p_viewport->fsr_enabled || p_viewport->dlss_enabled;
 
 			if (scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS && !(p_viewport->dlss_enabled && _is_dlss_available())) {
@@ -207,7 +220,7 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 				WARN_PRINT_ONCE("MetalFX and FSR upscaling are not supported in the Compatibility renderer. Falling back to bilinear scaling.");
 			}
 
-			if ((scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR || scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR2 || scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL) && OS::get_singleton()->get_current_rendering_method() == "mobile") {
+			if ((scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR || scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR2 || scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR3 || scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL) && OS::get_singleton()->get_current_rendering_method() == "mobile") {
 				scaling_3d_mode = RSE::VIEWPORT_SCALING_3D_MODE_BILINEAR;
 				scaling_type = RSE::scaling_3d_mode_type(scaling_3d_mode);
 				WARN_PRINT_ONCE("MetalFX temporal and FSR upscaling are not supported in the Mobile renderer. Falling back to bilinear scaling.");
@@ -291,6 +304,7 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 				case RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL:
 				case RSE::VIEWPORT_SCALING_3D_MODE_FSR:
 				case RSE::VIEWPORT_SCALING_3D_MODE_FSR2:
+				case RSE::VIEWPORT_SCALING_3D_MODE_FSR3:
 				case RSE::VIEWPORT_SCALING_3D_MODE_DLSS:
 					target_width = p_viewport->size.width;
 					target_height = p_viewport->size.height;
@@ -378,6 +392,15 @@ void RendererViewport::_draw_3d(Viewport *p_viewport) {
 		}
 	}
 
+	if (p_viewport->render_buffers.is_valid()) {
+		// Mariner E13: occlusion culling by the depth of earlier frames.
+		RendererSceneHiZOcclusion::State &hiz = p_viewport->render_buffers->hiz_occlusion;
+		hiz.enabled = p_viewport->use_hiz_occlusion_culling;
+		hiz.buffer_width = hiz_occlusion_buffer_width;
+		hiz.reference = p_viewport->hiz_occlusion_reference;
+		hiz.reference_radius = p_viewport->hiz_occlusion_reference_radius;
+	}
+
 	float screen_mesh_lod_threshold = p_viewport->mesh_lod_threshold / float(p_viewport->size.width);
 	RSG::scene->render_camera(p_viewport->render_buffers, p_viewport->camera, p_viewport->scenario, p_viewport->self, p_viewport->internal_size, p_viewport->jitter_phase_count, screen_mesh_lod_threshold, p_viewport->shadow_atlas, xr_interface, p_viewport->window_output_max_value, &p_viewport->render_info);
 
@@ -389,8 +412,66 @@ void RendererViewport::_draw_3d(Viewport *p_viewport) {
 #endif // _3D_DISABLED
 }
 
+float RendererViewport::dynamic_resolution_next_scale(float p_scale, float p_gpu_ms, float p_target_ms, float p_min, float p_max, float p_step) {
+	const float lo = CLAMP(MIN(p_min, p_max), 0.1f, 2.0f);
+	const float hi = CLAMP(p_max, lo, 2.0f);
+	const float scale = CLAMP(p_scale, lo, hi);
+	if (p_gpu_ms <= 0.0f || p_target_ms <= 0.0f || p_step <= 0.0f) {
+		return scale;
+	}
+	// Levels lo, lo + step, ... and hi itself.
+	auto level_at_or_below = [&](float p_value) {
+		if (p_value >= hi) {
+			return hi;
+		}
+		const float k = Math::floor((p_value - lo) / p_step + 1e-4f);
+		return CLAMP(lo + MAX(k, 0.0f) * p_step, lo, hi);
+	};
+	// The 3D cost grows with the pixel count: the scale for the target is scale * sqrt(target / time).
+	const float ideal = scale * Math::sqrt(p_target_ms / p_gpu_ms);
+	if (p_gpu_ms > p_target_ms * 1.05f) {
+		// Over the target: at least one level down.
+		return MIN(level_at_or_below(ideal), level_at_or_below(scale - p_step * 0.5f));
+	}
+	if (p_gpu_ms < p_target_ms * 0.85f) {
+		// Headroom: up to the level whose predicted time stays under 90 % of the target.
+		const float up = level_at_or_below(scale * Math::sqrt(p_target_ms * 0.9f / p_gpu_ms));
+		return MAX(scale, up);
+	}
+	return scale;
+}
+
+void RendererViewport::_dynamic_resolution_update(Viewport *p_viewport) {
+	// Mariner E19: GPU timestamps arrive a few frames late; each new measurement feeds a running average, and the scale
+	// changes at most every half second, from an average of at least eight frames at the current scale.
+	if (p_viewport->time_gpu_end <= p_viewport->time_gpu_begin || p_viewport->time_gpu_end == p_viewport->dynamic_resolution_last_gpu_end) {
+		return;
+	}
+	p_viewport->dynamic_resolution_last_gpu_end = p_viewport->time_gpu_end;
+	const uint64_t now = OS::get_singleton()->get_ticks_usec();
+	if (now - p_viewport->dynamic_resolution_changed_usec < 150000) {
+		return; // Measurements of frames rendered before the change.
+	}
+	const float gpu_ms = float(double(p_viewport->time_gpu_end - p_viewport->time_gpu_begin) / 1000000.0);
+	p_viewport->dynamic_resolution_samples++;
+	const float k = MAX(0.15f, 1.0f / float(p_viewport->dynamic_resolution_samples));
+	p_viewport->dynamic_resolution_gpu_ms = p_viewport->dynamic_resolution_samples == 1 ? gpu_ms : Math::lerp(p_viewport->dynamic_resolution_gpu_ms, gpu_ms, k);
+	if (p_viewport->dynamic_resolution_samples < 8 || now - p_viewport->dynamic_resolution_changed_usec < 500000) {
+		return;
+	}
+	const float max_scale = p_viewport->scaling_3d_scale;
+	const float current = MIN(p_viewport->dynamic_resolution_scale, max_scale);
+	const float next = dynamic_resolution_next_scale(current, p_viewport->dynamic_resolution_gpu_ms, p_viewport->dynamic_resolution_target_ms, p_viewport->dynamic_resolution_min_scale, max_scale);
+	if (!Math::is_equal_approx(next, current)) {
+		p_viewport->dynamic_resolution_scale = next;
+		p_viewport->dynamic_resolution_samples = 0;
+		p_viewport->dynamic_resolution_changed_usec = now;
+		_configure_3d_render_buffers(p_viewport);
+	}
+}
+
 void RendererViewport::_draw_viewport(Viewport *p_viewport) {
-	if (p_viewport->measure_render_time) {
+	if (p_viewport->measure_render_time || p_viewport->dynamic_resolution) {
 		String rt_id = "vp_begin_" + itos(p_viewport->self.get_id());
 		RSG::utilities->capture_timestamp(rt_id);
 		timestamp_vp_map[rt_id] = p_viewport->self;
@@ -811,7 +892,7 @@ void RendererViewport::_draw_viewport(Viewport *p_viewport) {
 		RSG::texture_storage->render_target_do_msaa_resolve(p_viewport->render_target);
 	}
 
-	if (p_viewport->measure_render_time) {
+	if (p_viewport->measure_render_time || p_viewport->dynamic_resolution) {
 		String rt_id = "vp_end_" + itos(p_viewport->self.get_id());
 		RSG::utilities->capture_timestamp(rt_id);
 		timestamp_vp_map[rt_id] = p_viewport->self;
@@ -921,6 +1002,10 @@ void RendererViewport::draw_viewports(bool p_swap_buffers) {
 
 		if (vp->last_pass != draw_viewports_pass) {
 			continue; //should not draw
+		}
+
+		if (vp->dynamic_resolution) {
+			_dynamic_resolution_update(vp); // Mariner E19.
 		}
 
 		RENDER_TIMESTAMP("> Render Viewport " + itos(i));
@@ -1101,6 +1186,10 @@ void RendererViewport::viewport_set_scaling_3d_mode(RID p_viewport, RSE::Viewpor
 		}
 		if (p_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR2) {
 			WARN_PRINT_ONCE_ED("FSR2 3D scaling is only available when using the Forward+ renderer.");
+			return;
+		}
+		if (p_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR3) {
+			WARN_PRINT_ONCE_ED("FSR 3.1 3D scaling is only available when using the Forward+ renderer.");
 			return;
 		}
 		if (p_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL) {
@@ -1317,6 +1406,11 @@ RID RendererViewport::viewport_get_occluder_debug_texture(RID p_viewport) const 
 	const Viewport *viewport = viewport_owner.get_or_null(p_viewport);
 	ERR_FAIL_NULL_V(viewport, RID());
 
+	if (viewport->use_hiz_occlusion_culling && viewport->debug_draw == RSE::VIEWPORT_DEBUG_DRAW_OCCLUDERS && viewport->render_buffers.is_valid()) {
+		// Mariner E13: the reprojected depth of earlier frames.
+		RendererSceneHiZOcclusion::State &hiz = viewport->render_buffers->hiz_occlusion;
+		return hiz.ready ? hiz.buffer.get_debug_texture() : RID();
+	}
 	if (viewport->use_occlusion_culling && viewport->debug_draw == RSE::VIEWPORT_DEBUG_DRAW_OCCLUDERS) {
 		return RendererSceneOcclusionCull::get_singleton()->buffer_get_debug_texture(p_viewport);
 	}
@@ -1635,6 +1729,19 @@ void RendererViewport::viewport_set_use_occlusion_culling(RID p_viewport, bool p
 	viewport->occlusion_buffer_dirty = true;
 }
 
+void RendererViewport::viewport_set_use_hiz_occlusion_culling(RID p_viewport, bool p_enable) {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL(viewport);
+	viewport->use_hiz_occlusion_culling = p_enable;
+}
+
+void RendererViewport::viewport_set_hiz_occlusion_reference(RID p_viewport, const Transform3D &p_reference, float p_radius) {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL(viewport);
+	viewport->hiz_occlusion_reference = p_reference.orthonormalized();
+	viewport->hiz_occlusion_reference_radius = MAX(p_radius, 0.0f);
+}
+
 void RendererViewport::viewport_set_occlusion_rays_per_thread(int p_rays_per_thread) {
 	if (occlusion_rays_per_thread == p_rays_per_thread) {
 		return;
@@ -1695,6 +1802,27 @@ float RendererViewport::viewport_get_measured_render_time_cpu(RID p_viewport) co
 	ERR_FAIL_NULL_V(viewport, 0);
 
 	return double(viewport->time_cpu_end - viewport->time_cpu_begin) / 1000.0;
+}
+
+void RendererViewport::viewport_set_dynamic_resolution(RID p_viewport, bool p_enable, float p_target_ms, float p_min_scale) {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL(viewport);
+	const bool was = viewport->dynamic_resolution;
+	viewport->dynamic_resolution = p_enable;
+	viewport->dynamic_resolution_target_ms = MAX(p_target_ms, 0.1f);
+	viewport->dynamic_resolution_min_scale = CLAMP(p_min_scale, 0.1f, 1.0f);
+	if (p_enable != was) {
+		viewport->dynamic_resolution_scale = viewport->scaling_3d_scale;
+		viewport->dynamic_resolution_samples = 0;
+		viewport->dynamic_resolution_changed_usec = OS::get_singleton()->get_ticks_usec();
+		_configure_3d_render_buffers(viewport);
+	}
+}
+
+float RendererViewport::viewport_get_dynamic_resolution_scale(RID p_viewport) const {
+	const Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL_V(viewport, 1.0f);
+	return viewport->dynamic_resolution ? MIN(viewport->scaling_3d_scale, viewport->dynamic_resolution_scale) : viewport->scaling_3d_scale;
 }
 
 float RendererViewport::viewport_get_measured_render_time_gpu(RID p_viewport) const {
@@ -1858,4 +1986,5 @@ int RendererViewport::get_num_viewports_with_motion_vectors() const {
 
 RendererViewport::RendererViewport() {
 	occlusion_rays_per_thread = GLOBAL_GET("rendering/occlusion_culling/occlusion_rays_per_thread");
+	hiz_occlusion_buffer_width = CLAMP(int(GLOBAL_GET("rendering/occlusion_culling/hiz_buffer_width")), 32, 1024);
 }

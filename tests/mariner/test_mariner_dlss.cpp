@@ -102,7 +102,7 @@ TEST_SUITE("[Mariner][DLSS]") {
 		CHECK(int(Viewport::SCALING_3D_MODE_METALFX_TEMPORAL) == 4);
 		CHECK(int(Viewport::SCALING_3D_MODE_NEAREST) == 5);
 		CHECK(int(Viewport::SCALING_3D_MODE_DLSS) == 6);
-		CHECK(int(Viewport::SCALING_3D_MODE_MAX) == 7);
+		CHECK(int(Viewport::SCALING_3D_MODE_MAX) == 8); // E24a appended FSR 3.1 (7).
 
 		CHECK(int(RSE::VIEWPORT_SCALING_3D_MODE_FSR2) == 2);
 		CHECK(int(RSE::VIEWPORT_SCALING_3D_MODE_NEAREST) == 5);
@@ -121,7 +121,7 @@ TEST_SUITE("[Mariner][DLSS]") {
 		CHECK(ClassDB::get_integer_constant("Viewport", "SCALING_3D_MODE_DLSS", &ok) == 6);
 		CHECK(ok);
 		CHECK(ClassDB::get_integer_constant_enum("Viewport", "SCALING_3D_MODE_DLSS") == StringName("Scaling3DMode"));
-		CHECK(ClassDB::get_integer_constant("Viewport", "SCALING_3D_MODE_MAX", &ok) == 7);
+		CHECK(ClassDB::get_integer_constant("Viewport", "SCALING_3D_MODE_MAX", &ok) == 8);
 		CHECK(ClassDB::get_integer_constant("RenderingServer", "VIEWPORT_SCALING_3D_MODE_DLSS", &ok) == 6);
 		CHECK(ok);
 		CHECK(ClassDB::get_integer_constant("RenderingServer", "VIEWPORT_SCALING_3D_MODE_FSR2", &ok) == 2);

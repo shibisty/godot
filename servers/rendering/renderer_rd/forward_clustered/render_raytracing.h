@@ -149,6 +149,14 @@ enum {
 	RT_GEOM_FLAG_DEFORMED = 4u, // Skinned / blend shape mesh (vertices copied each frame).
 	RT_GEOM_FLAG_MULTIMESH = 8u, // Merged MultiMesh (all instances in one BLAS, MultiMesh-space positions).
 	RT_GEOM_FLAG_MULTIMESH_INSTANCE = 16u, // One MultiMesh instance per TLAS instance (large MultiMeshes).
+	RT_GEOM_FLAG_RAYTRACING_ONLY = 32u, // Mariner E12 DG-F: stand-in that is not drawn (camera rays of the path tracer skip it).
+};
+
+// Mariner E12 DG-F: RT_InstanceData::layer_mask holds the render layers in bits 0-19 and the share of rays an instance
+// lets through (1 - GeometryInstance3D.raytracing_opacity, 0..255) in bits 24-31.
+enum {
+	RT_LAYER_MASK_LAYERS = 0xFFFFFu,
+	RT_LAYER_MASK_TRANSMISSION_SHIFT = 24u,
 };
 
 class RenderRaytracing {

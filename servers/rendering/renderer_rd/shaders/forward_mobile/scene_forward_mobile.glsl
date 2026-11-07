@@ -1139,6 +1139,9 @@ void main() {
 #endif
 	vec3 albedo_highp = vec3(1.0);
 	vec3 backlight_highp = vec3(0.0);
+	// Mariner E16: MAIN_LIGHT_DIRECTION / MAIN_LIGHT_SHADOW of the fragment function: the first directional light.
+	vec3 main_light_direction = scene_data.directional_light_count > 0 ? directional_lights.data[0].direction : vec3(0.0, 0.0, 1.0);
+	float main_light_shadow = 1.0;
 	vec4 transmittance_color_highp = vec4(0.0);
 	float transmittance_depth_highp = 0.0;
 	float transmittance_boost_highp = 0.0;
@@ -1288,6 +1291,9 @@ void main() {
 	hvec2 anisotropy_flow = hvec2(anisotropy_flow_highp);
 	half ao = half(ao_highp);
 	half ao_light_affect = half(ao_light_affect_highp);
+#ifdef MICRO_SHADOWING
+	micro_shadow_ao = ao; // Mariner M2.
+#endif
 	half alpha = half(alpha_highp);
 	half normal_map_depth = half(normal_map_depth_highp);
 	half sss_strength = half(sss_strength_highp);
@@ -1841,7 +1847,17 @@ void main() {
 	} //Reflection probes
 
 	// finalize ambient light here
+#ifdef MULTI_BOUNCE_AO
+	{
+		// Mariner M3: multiple bounces brighten the occlusion of light surfaces (Jimenez et al. 2016).
+		hvec3 a = half(2.0404) * albedo - half(0.3324);
+		hvec3 b = half(-4.7951) * albedo + half(0.6417);
+		hvec3 c = half(2.7552) * albedo + half(0.6903);
+		ambient_light *= max(hvec3(ao), ((ao * a + b) * ao + c) * ao);
+	}
+#else
 	ambient_light *= ao;
+#endif
 #ifndef SPECULAR_OCCLUSION_DISABLED
 #ifdef BENT_NORMAL_MAP_USED
 	// Simplified bent normal occlusion.
@@ -1981,10 +1997,10 @@ void main() {
 					hvec3 light_dir = hvec3(directional_lights.data[i].direction);
 					hvec3 base_normal_bias = geo_normal * (half(1.0) - max(half(0.0), dot(light_dir, -geo_normal)));
 
-#define BIAS_FUNC(m_var, m_idx)                                                                        \
+#define BIAS_FUNC(m_var, m_idx) \
 	hvec3 normal_bias = base_normal_bias * half(directional_lights.data[i].shadow_normal_bias[m_idx]); \
-	normal_bias -= light_dir * dot(light_dir, normal_bias);                                            \
-	normal_bias += light_dir * half(directional_lights.data[i].shadow_bias[m_idx]);                    \
+	normal_bias -= light_dir * dot(light_dir, normal_bias); \
+	normal_bias += light_dir * half(directional_lights.data[i].shadow_bias[m_idx]); \
 	m_var.xyz += vec3(normal_bias);
 
 					if (depth_z < directional_lights.data[i].shadow_split_offsets.x) {
@@ -2116,6 +2132,11 @@ void main() {
 			shadow = mix(half(1.0), shadows[i], half(directional_lights.data[i].shadow_opacity));
 #endif
 			blur_shadow(shadow);
+#ifdef MAIN_LIGHT_SHADOW_USED
+			if (i == 0) {
+				shadow *= half(clamp(main_light_shadow, 0.0, 1.0)); // Mariner E16.
+			}
+#endif
 
 			vec3 tint = vec3(1.0);
 #ifdef DEBUG_DRAW_PSSM_SPLITS

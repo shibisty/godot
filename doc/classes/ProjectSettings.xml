@@ -2906,6 +2906,9 @@
 		<member name="rendering/camera/depth_of_field/depth_of_field_use_jitter" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], jitters DOF samples to make effect slightly blurrier and hide lines created from low sample rates. This can result in a slightly grainy appearance when used with a low number of samples.
 		</member>
+		<member name="rendering/camera/motion_blur/samples" type="int" setter="" getter="" default="12">
+			Samples per pixel of the motion blur ([member CameraAttributes.motion_blur_enabled]). Fewer are faster and noisier (TAA / DLSS smooth the noise, the sample positions change every frame). Mariner engine patch E15a.
+		</member>
 		<member name="rendering/driver/depth_prepass/disable_for_vendors" type="String" setter="" getter="" default="&quot;PowerVR,Mali,Adreno,Apple&quot;">
 			Disables [member rendering/driver/depth_prepass/enable] conditionally for certain vendors. By default, disables the depth prepass for mobile devices as mobile devices do not benefit from the depth prepass due to their unique architecture.
 		</member>
@@ -3140,8 +3143,28 @@
 			The framerate-independent update speed when representing dynamic object lighting from [LightmapProbe]s. Higher values make dynamic object lighting update faster. Higher values can prevent fast-moving objects from having "outdated" indirect lighting displayed on them, at the cost of possible flickering when an object moves from a bright area to a shaded area.
 			[b]Note:[/b] This property is only read when the project starts. To adjust the BVH build quality at runtime, use [method RenderingServer.lightmap_set_probe_capture_update_speed].
 		</member>
+		<member name="rendering/lights_and_shadows/contact_shadows/max_distance" type="float" setter="" getter="" default="60.0">
+			Contact shadows fade out from 70% of this view distance to it (meters); farther the shadow map alone is used.
+		</member>
+		<member name="rendering/lights_and_shadows/contact_shadows/steps" type="int" setter="" getter="" default="16">
+			Number of steps of a contact shadow ray ([member DirectionalLight3D.contact_shadow_length]). More steps find thinner occluders and cost more (one depth read per step and pixel).
+			[b]Note:[/b] Mariner fork (patch E11).
+		</member>
+		<member name="rendering/lights_and_shadows/contact_shadows/thickness" type="float" setter="" getter="" default="0.02">
+			Assumed thickness of the surfaces seen in the depth buffer, as a fraction of their view distance (at least one ray step). Thicker finds more occluders but casts shadows behind silhouettes too.
+		</member>
 		<member name="rendering/lights_and_shadows/directional_shadow/16_bits" type="bool" setter="" getter="" default="true">
 			Use 16 bits for the directional shadow depth map. Enabling this results in shadows having less precision and may result in shadow acne, but can lead to performance improvements on some devices.
+		</member>
+		<member name="rendering/lights_and_shadows/directional_shadow/cache" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], directional shadows keep their static casters in a cache and redraw only the dynamic ones every frame (Forward+). Costs a second depth texture of [member rendering/lights_and_shadows/directional_shadow/size] (64 MiB at 4096 with 32-bit depth). Can be changed at run time with [method RenderingServer.directional_shadow_cache_set_enabled]. See also [member GeometryInstance3D.shadow_cache_mode].
+			[b]Note:[/b] Mariner fork (patch E10).
+		</member>
+		<member name="rendering/lights_and_shadows/directional_shadow/cache_light_angle_threshold" type="float" setter="" getter="" default="0.1">
+			With the directional shadow cache, the shadow follows the light direction only once it turned by more than this angle (degrees), so that a slowly moving sun does not redraw the cache every frame. The shadow direction lags the light by at most this angle.
+		</member>
+		<member name="rendering/lights_and_shadows/directional_shadow/cache_static_after_frames" type="int" setter="" getter="" default="30">
+			With the directional shadow cache, an instance in [constant GeometryInstance3D.SHADOW_CACHE_MODE_AUTO] is cached after its transform and base stayed unchanged for this many frames.
 		</member>
 		<member name="rendering/lights_and_shadows/directional_shadow/size" type="int" setter="" getter="" default="4096">
 			The directional shadow's size in pixels. Higher values will result in sharper shadows, at the cost of performance. The value is rounded up to the nearest power of 2.
@@ -3156,6 +3179,9 @@
 		</member>
 		<member name="rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile" type="int" setter="" getter="" default="0">
 			Lower-end override for [member rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality] on mobile devices, due to performance concerns or driver support.
+		</member>
+		<member name="rendering/lights_and_shadows/directional_shadow/translucent_shadow_size" type="int" setter="" getter="" default="1024">
+			Size (in pixels) of the map of translucent shadows (see [member GeometryInstance3D.shadow_translucent]). It is fitted to the bounds of the translucent casters in the shadowed range of the first directional light every frame, so its texels are spread over those casters only.
 		</member>
 		<member name="rendering/lights_and_shadows/positional_shadow/atlas_16_bits" type="bool" setter="" getter="" default="true">
 			Use 16 bits for the omni/spot shadow depth map. Enabling this results in shadows having less precision and may result in shadow acne, but can lead to performance improvements on some devices.
@@ -3233,12 +3259,19 @@
 			The [url=https://en.wikipedia.org/wiki/Bounding_volume_hierarchy]Bounding Volume Hierarchy[/url] quality to use when rendering the occlusion culling buffer. Higher values will result in more accurate occlusion culling, at the cost of higher CPU usage. See also [member rendering/occlusion_culling/occlusion_rays_per_thread].
 			[b]Note:[/b] This property is only read when the project starts. To adjust the BVH build quality at runtime, use [method RenderingServer.viewport_set_occlusion_culling_build_quality].
 		</member>
+		<member name="rendering/occlusion_culling/hiz_buffer_width" type="int" setter="" getter="" default="256">
+			Width of the grid of depth cells used by [member Viewport.use_hiz_occlusion_culling] (the height follows the aspect ratio of the viewport). Higher values cull smaller gaps more precisely, at a higher CPU cost of the reprojection (about [code]width * height[/code] cells per frame). Mariner engine patch E13.
+			[b]Note:[/b] This property is only read when the project starts.
+		</member>
 		<member name="rendering/occlusion_culling/jitter_projection" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], the projection used for rendering the occlusion buffer will be jittered. This can help prevent objects being incorrectly culled when visible through small gaps.
 		</member>
 		<member name="rendering/occlusion_culling/occlusion_rays_per_thread" type="int" setter="" getter="" default="512">
 			The number of occlusion rays traced per CPU thread. Higher values will result in more accurate occlusion culling, at the cost of higher CPU usage. The occlusion culling buffer's pixel count is roughly equal to [code]occlusion_rays_per_thread * number_of_logical_cpu_cores[/code], so it will depend on the system's CPU. Therefore, CPUs with fewer cores will use a lower resolution to attempt keeping performance costs even across devices. See also [member rendering/occlusion_culling/bvh_build_quality].
 			[b]Note:[/b] This property is only read when the project starts. To adjust the number of occlusion rays traced per thread at runtime, use [method RenderingServer.viewport_set_occlusion_rays_per_thread].
+		</member>
+		<member name="rendering/occlusion_culling/use_hiz_occlusion_culling" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], the root viewport culls objects hidden behind what it rendered in earlier frames, see [member Viewport.use_hiz_occlusion_culling]. Mariner engine patch E13.
 		</member>
 		<member name="rendering/occlusion_culling/use_occlusion_culling" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], [OccluderInstance3D] nodes will be usable for occlusion culling in 3D in the root viewport. In custom viewports, [member Viewport.use_occlusion_culling] must be set to [code]true[/code] instead.
@@ -3247,6 +3280,9 @@
 		</member>
 		<member name="rendering/raytracing/deformed_mesh_cache_ttl_frames" type="int" setter="" getter="" default="60">
 			Frames after which the raytracing data of a skinned / blend shape mesh that is no longer in any raytracing scene is freed.
+		</member>
+		<member name="rendering/raytracing/include_indirect_multimesh" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], [MultiMesh]es with indirect drawing are put in raytracing scenes like the others. Off by default: their instance buffers are usually written by compute shaders culling for one camera (frustum, Hi-Z), so they hold only what that view sees and their instance count is not known on the CPU; raytraced GI (DDGI) and reflections would change with the camera and see stale instances. Give such content a stable raytracing stand-in instead (simple meshes on a layer in [member Viewport.raytracing_scene_cull_mask] but not in the camera's cull mask). Mariner engine patch E12.
 		</member>
 		<member name="rendering/raytracing/multimesh_blas_cache_ttl_frames" type="int" setter="" getter="" default="3600">
 			Frames after which the merged raytracing BLAS of a [MultiMesh] that is no longer in any raytracing scene is freed.
@@ -3419,6 +3455,15 @@
 			A larger number is more efficient up to a limit, after that it will only waste RAM (maximum efficiency is achieved when there is no more than 1 pool per frame). A small number could end up with one pool per descriptor, which negatively impacts performance.
 			[b]Note:[/b] Changing this property requires a restart to take effect.
 		</member>
+		<member name="rendering/scaling_3d/dynamic_resolution/enabled" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], the root viewport of the game uses dynamic resolution: see [member Viewport.dynamic_resolution_enabled]. Not used in the editor.
+		</member>
+		<member name="rendering/scaling_3d/dynamic_resolution/min_scale" type="float" setter="" getter="" default="0.5">
+			The lowest 3D scale the root viewport goes down to with dynamic resolution. See [member Viewport.dynamic_resolution_min_scale].
+		</member>
+		<member name="rendering/scaling_3d/dynamic_resolution/target_ms" type="float" setter="" getter="" default="16.6667">
+			The GPU time per frame (in milliseconds) the root viewport keeps to with dynamic resolution. See [member Viewport.dynamic_resolution_target_ms].
+		</member>
 		<member name="rendering/scaling_3d/fsr_sharpness" type="float" setter="" getter="" default="0.2">
 			Determines how sharp the upscaled image will be when using the FSR upscaling mode. Sharpness halves with every whole number. Values go from 0.0 (sharpest) to 2.0. Values above 2.0 won't make a visible difference.
 		</member>
@@ -3426,6 +3471,7 @@
 			Sets the scaling 3D mode. Bilinear scaling renders at different resolution to either undersample or supersample the viewport. FidelityFX Super Resolution 1.0, abbreviated to FSR, is an upscaling technology that produces high quality images at fast framerates by using a spatially-aware upscaling algorithm. FSR is slightly more expensive than bilinear, but it produces significantly higher image quality. On particularly low-end GPUs, the added cost of FSR may not be worth it (compared to using bilinear scaling with a slightly higher resolution scale to match performance).
 			[b]Note:[/b] FSR is only effective when using the Forward+ rendering method, not Mobile or Compatibility. If using an incompatible rendering method, FSR will fall back to bilinear scaling.
 			[b]Note:[/b] NVIDIA DLSS ([constant Viewport.SCALING_3D_MODE_DLSS]) is only available on Windows with the Forward+ renderer, an NVIDIA RTX GPU and the Streamline runtime DLLs next to the executable; otherwise it falls back to bilinear scaling.
+			[b]Note:[/b] AMD FSR 3.1 ([constant Viewport.SCALING_3D_MODE_FSR3]) is a temporal upscaler like FSR 2.2, with less ghosting and shimmering; Forward+ only.
 		</member>
 		<member name="rendering/scaling_3d/mode.ios" type="int" setter="" getter="">
 			iOS override for [member rendering/scaling_3d/mode]. This allows selecting the MetalFX spatial and MetalFX temporal scaling modes, which are exclusive to platforms where the Metal rendering driver is used.
@@ -3456,6 +3502,15 @@
 		</member>
 		<member name="rendering/shading/overrides/force_vertex_shading" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], forces vertex shading for all rendering. This can increase performance a lot, but also reduces quality immensely. Can be used to optimize performance on low-end mobile devices.
+		</member>
+		<member name="rendering/shading/overrides/micro_shadowing" type="bool" setter="" getter="" default="true">
+			Mariner M2. If [code]true[/code], a material's ambient occlusion also shadows direct light at grazing angles (micro-shadowing, Chan 2018): a cavity with occlusion [code]AO[/code] is taken as a cone of [code]cos = sqrt(1 - AO)[/code] around the normal, and light from outside the cone falls off. Only the material's own occlusion is used (not SSAO/GTAO); [member BaseMaterial3D.ao_light_affect] still applies on top. Read at start-up.
+		</member>
+		<member name="rendering/shading/overrides/multi_bounce_ao" type="bool" setter="" getter="" default="true">
+			Mariner M3. If [code]true[/code], ambient occlusion (the material's, SSAO and GTAO) is brightened for light albedos, as light bounces inside the cavity (Jimenez et al. 2016): snow, sand and light paint do not turn grey in their creases. GTAO ([member Environment.ssao_gtao]) does this always. Read at start-up.
+		</member>
+		<member name="rendering/shading/overrides/multiscatter_diffuse" type="bool" setter="" getter="" default="true">
+			Mariner M1. If [code]true[/code], materials with the default Burley diffuse use the multiple-scattering diffuse BRDF of Chan 2018 ([i]Material Advances in Call of Duty: WWII[/i]) instead: rough surfaces get flatter lighting and a retroreflective brightening at grazing angles (concrete, soil, rock, bark), smooth ones a Burley-like darkening towards the silhouette. Direct light only. Ignored when [member rendering/shading/overrides/force_lambert_over_burley] is on. Read at start-up.
 		</member>
 		<member name="rendering/streamline/dlss_preset" type="String" setter="" getter="" default="&quot;?&quot;">
 			The default NVIDIA DLSS Super Resolution preset to use. [code]?[/code] lets the DLSS runtime choose (recommended); [code]K[/code] and [code]J[/code] are the transformer models, [code]F[/code] the convolutional model intended for Ultra Performance and DLAA.
@@ -3516,6 +3571,28 @@
 		</member>
 		<member name="rendering/textures/lossless_compression/force_png" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], the texture importer will import lossless textures using the PNG format. Otherwise, it will default to using WebP.
+		</member>
+		<member name="rendering/textures/streaming/budget_mb" type="int" setter="" getter="" default="1024">
+			Video memory (in MiB) that streamed textures may use together. When the mip levels the screen needs do not fit, all streamed textures are coarsened by the same number of levels until they do. The lowest levels (see [member rendering/textures/streaming/resident_size]) always stay, even over the budget. Read every frame.
+		</member>
+		<member name="rendering/textures/streaming/drop_delay" type="float" setter="" getter="" default="3.0">
+			Seconds a streamed texture keeps its detail after it leaves the view, and that a visible texture waits before it gives up detail it no longer needs (so a camera moving back and forth does not reload it). Over the budget, detail is given up at once. Read every frame.
+		</member>
+		<member name="rendering/textures/streaming/enabled" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], large mipmapped [CompressedTexture2D]s imported as VRAM textures (data format "image": VRAM Compressed or VRAM Uncompressed) load only their small mip levels; the finer levels are read from the file on worker threads when the scene needs them on screen, and released when it no longer does. The need is measured by the scene cull from the distance of each visible mesh and the UV density of its surfaces, for the textures of its materials. Not used in the editor. Lossless, lossy and Basis Universal textures always load whole.
+			[b]Note:[/b] Textures sampled with UVs not taken from the mesh (world-space or triplanar shaders) are estimated from the mesh UVs, which may be too coarse; raise [member rendering/textures/streaming/min_texture_size] or use another compression mode for them. Textures used only in 2D are not measured and stay at their lowest level.
+		</member>
+		<member name="rendering/textures/streaming/max_loads_in_flight" type="int" setter="" getter="" default="4">
+			Number of mip reads that may run on worker threads at the same time. Read every frame.
+		</member>
+		<member name="rendering/textures/streaming/min_texture_size" type="int" setter="" getter="" default="512">
+			Textures whose largest side is smaller than this size (in pixels) load whole and do not stream.
+		</member>
+		<member name="rendering/textures/streaming/mip_bias" type="float" setter="" getter="" default="0.0">
+			Added to the mip level each streamed texture needs. Positive values keep coarser levels (less memory, blurrier at close range); negative values keep finer ones. Read every frame.
+		</member>
+		<member name="rendering/textures/streaming/resident_size" type="int" setter="" getter="" default="64">
+			Largest side (in pixels) of the finest mip level that always stays loaded. A streamed texture starts at this level and returns to it out of view.
 		</member>
 		<member name="rendering/textures/vram_compression/cache_gpu_compressor" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], the GPU texture compressor will cache the local RenderingDevice and its resources (shaders and pipelines), making subsequent imports faster at the cost of increased memory usage.

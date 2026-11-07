@@ -116,6 +116,7 @@ struct Mesh {
 		Transform3D mesh_to_skeleton_xform;
 
 		Vector4 uv_scale;
+		float uv_density = 0.0f; // Mariner E17.
 
 		struct BlendShape {
 			GLuint vertex_buffer = 0;
@@ -319,6 +320,7 @@ public:
 
 	virtual void mesh_surface_set_material(RID p_mesh, int p_surface, RID p_material) override;
 	virtual RID mesh_surface_get_material(RID p_mesh, int p_surface) const override;
+	virtual float mesh_surface_get_uv_density(RID p_mesh, int p_surface) const override;
 
 	virtual RenderingServerTypes::SurfaceData mesh_get_surface(RID p_mesh, int p_surface) const override;
 	virtual int mesh_get_surface_count(RID p_mesh) const override;

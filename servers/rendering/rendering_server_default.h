@@ -36,6 +36,7 @@
 #include "core/templates/hash_map.h"
 #include "servers/rendering/renderer_canvas_cull.h"
 #include "servers/rendering/renderer_compositor.h"
+#include "servers/rendering/renderer_texture_streaming.h"
 #include "servers/rendering/renderer_viewport.h"
 #include "servers/rendering/rendering_method.h"
 #include "servers/rendering/rendering_server.h"
@@ -245,6 +246,21 @@ public:
 
 	FUNC2(texture_replace, RID, RID)
 
+	virtual void texture_streaming_track(RID p_texture, bool p_enable) override {
+		if (RendererTextureStreaming::get_singleton()) {
+			RendererTextureStreaming::get_singleton()->track(p_texture, p_enable);
+		}
+	}
+	virtual void texture_streaming_get_feedback(const RID *p_textures, uint32_t p_count, Vector2 *r_feedback) const override {
+		if (RendererTextureStreaming::get_singleton()) {
+			RendererTextureStreaming::get_singleton()->get_feedback(p_textures, p_count, r_feedback);
+		} else {
+			for (uint32_t i = 0; i < p_count; i++) {
+				r_feedback[i] = Vector2(0.0f, -1.0f);
+			}
+		}
+	}
+
 	FUNC3(texture_set_size_override, RID, int, int)
 // FIXME: Disabled during Vulkan refactoring, should be ported.
 #if 0
@@ -448,6 +464,10 @@ public:
 
 	FUNC2(multimesh_set_buffer, RID, const Vector<float> &)
 	FUNC1RC(RID, multimesh_get_command_buffer_rd_rid, RID)
+	FUNC2(multimesh_set_indirect_shadow_culling, RID, bool)
+	FUNC1RC(RID, multimesh_get_shadow_command_buffer_rd_rid, RID)
+	FUNC2(multimesh_set_indirect_view_culling, RID, bool)
+	FUNC1RC(RID, multimesh_get_view_command_buffer_rd_rid, RID)
 	FUNC1RC(RID, multimesh_get_buffer_rd_rid, RID)
 	FUNC1RC(Vector<float>, multimesh_get_buffer, RID)
 
@@ -492,6 +512,7 @@ public:
 	FUNC5(light_set_distance_fade, RID, bool, float, float, float)
 	FUNC2(light_set_reverse_cull_face_mode, RID, bool)
 	FUNC2(light_set_shadow_caster_mask, RID, uint32_t)
+	FUNC2(light_set_restir, RID, bool)
 	FUNC2(light_set_bake_mode, RID, RSE::LightBakeMode)
 	FUNC2(light_set_max_sdfgi_cascade, RID, uint32_t)
 
@@ -499,6 +520,9 @@ public:
 
 	FUNC2(light_directional_set_shadow_mode, RID, RSE::LightDirectionalShadowMode)
 	FUNC2(light_directional_set_blend_splits, RID, bool)
+	FUNC4(light_directional_set_object_shadow, RID, uint32_t, int, int)
+	FUNC2(light_directional_set_contact_shadow, RID, float)
+	FUNC2(light_directional_set_restir_shadow_mode, RID, int)
 	FUNC2(light_directional_set_sky_mode, RID, RSE::LightDirectionalSkyMode)
 
 	FUNC2(light_area_set_size, RID, const Vector2 &)
@@ -642,6 +666,7 @@ public:
 	FUNC6(particles_emit, RID, const Transform3D &, const Vector3 &, const Color &, const Color &, uint32_t)
 	FUNC2(particles_set_subemitter, RID, RID)
 	FUNC2(particles_set_collision_base_size, RID, float)
+	FUNC2(particles_set_screen_space_collision, RID, bool)
 
 	FUNC2(particles_set_transform_align, RID, RSE::ParticlesTransformAlign)
 	FUNC2(particles_set_transform_align_channel_filter, RID, RSE::ParticlesTransformAlignCustomSrc)
@@ -749,6 +774,8 @@ public:
 	FUNC2(viewport_set_scaling_3d_mode, RID, RSE::ViewportScaling3DMode)
 	FUNC2(viewport_set_frame_generation, RID, bool)
 	FUNC2(viewport_set_scaling_3d_scale, RID, float)
+	FUNC4(viewport_set_dynamic_resolution, RID, bool, float, float)
+	FUNC1RC(float, viewport_get_dynamic_resolution_scale, RID)
 	FUNC2(viewport_set_fsr_sharpness, RID, float)
 	FUNC2(viewport_set_texture_mipmap_bias, RID, float)
 	FUNC2(viewport_set_anisotropic_filtering_level, RID, RSE::ViewportAnisotropicFiltering)
@@ -793,6 +820,8 @@ public:
 	FUNC2(viewport_set_force_motion_vectors, RID, bool)
 	FUNC2(viewport_set_use_occlusion_culling, RID, bool)
 	FUNC4(viewport_set_raytracing_scene, RID, bool, uint32_t, float)
+	FUNC2(viewport_set_use_hiz_occlusion_culling, RID, bool)
+	FUNC3(viewport_set_hiz_occlusion_reference, RID, const Transform3D &, float)
 	FUNC1R(int, viewport_get_pathtracing_sample_count, RID)
 	FUNC1(viewport_reset_pathtracing, RID)
 	FUNC1(viewport_set_occlusion_rays_per_thread, int)
@@ -879,7 +908,16 @@ public:
 
 	FUNC6(environment_set_pathtracing, RID, bool, int, int, int, RSE::PathtracingDenoiser)
 	FUNC4(environment_set_pathtracing_accumulation, RID, bool, int, float)
+	FUNC9(environment_set_ddgi, RID, bool, const Vector3i &, float, int, float, float, float, float)
+	FUNC3(environment_set_ddgi_update, RID, int, bool)
+	FUNC3(environment_set_ddgi_channels, RID, float, float)
+	FUNC4(environment_set_ddgi_sea, RID, bool, float, const Color &)
+	FUNC4(environment_set_ssao_gtao, RID, bool, bool, float)
+	FUNC13(environment_set_color_grading, RID, bool, float, float, const Color &, const Color &, const Color &, const Vector4 &, const Vector3 &, const Vector3 &, const Vector3 &, float, bool)
+	FUNC6(environment_set_restir, RID, bool, int, int, bool, bool)
 	FUNC0RC(bool, pathtracing_is_supported)
+	FUNC1(directional_shadow_cache_set_enabled, bool)
+	FUNC0RC(Dictionary, directional_shadow_cache_get_stats)
 
 	FUNC11(environment_set_fog, RID, bool, const Color &, float, float, float, float, float, float, float, RSE::EnvironmentFogMode)
 
@@ -921,6 +959,10 @@ public:
 	FUNC1(camera_attributes_set_dof_blur_bokeh_shape, RSE::DOFBokehShape)
 
 	FUNC8(camera_attributes_set_dof_blur, RID, bool, float, float, bool, float, float, float)
+	FUNC5(camera_attributes_set_motion_blur, RID, bool, float, float, float)
+	FUNC10(camera_attributes_set_lens_flare, RID, bool, float, float, int, float, float, float, float, int)
+	FUNC3(camera_attributes_set_lens_dirt, RID, RID, float)
+	FUNC6(camera_attributes_set_image_effects, RID, float, float, float, float, float)
 	FUNC3(camera_attributes_set_exposure, RID, float, float)
 	FUNC6(camera_attributes_set_auto_exposure, RID, bool, float, float, float, float)
 
@@ -936,6 +978,7 @@ public:
 
 	FUNC2(scenario_set_environment, RID, RID)
 	FUNC2(scenario_set_camera_attributes, RID, RID)
+	FUNC7(scenario_set_ddgi_volume, RID, bool, const Transform3D &, const Vector3 &, float, int, int)
 	FUNC2(scenario_set_fallback_environment, RID, RID)
 	FUNC2(scenario_set_compositor, RID, RID)
 
@@ -970,6 +1013,12 @@ public:
 
 	FUNC3(instance_geometry_set_flag, RID, RSE::InstanceFlags, bool)
 	FUNC2(instance_geometry_set_cast_shadows_setting, RID, RSE::ShadowCastingSetting)
+	FUNC2(instance_geometry_set_shadow_cache_mode, RID, RSE::ShadowCacheMode)
+	FUNC3(instance_geometry_set_raytracing, RID, RSE::RaytracingMode, float)
+	FUNC2(instance_geometry_set_shadow_translucent, RID, bool)
+	FUNC2(instance_geometry_set_gpu_static, RID, bool)
+	FUNC1RC(bool, instance_geometry_is_gpu_static_active, RID)
+	FUNC1RC(Dictionary, scenario_get_gpu_static_info, RID)
 	FUNC2(instance_geometry_set_material_override, RID, RID)
 	FUNC2(instance_geometry_set_material_overlay, RID, RID)
 
@@ -1233,6 +1282,8 @@ public:
 	/* TESTING */
 
 	virtual double get_frame_setup_time_cpu() const override;
+	virtual uint64_t get_frame_generation_presented_count(DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) const override;
+	virtual RID get_frame_generation_output_texture(DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) const override;
 
 	virtual Color get_default_clear_color() override;
 	virtual void set_default_clear_color(const Color &p_color) override;

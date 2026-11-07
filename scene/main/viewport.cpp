@@ -3903,6 +3903,39 @@ bool Viewport::is_using_occlusion_culling() const {
 	return use_occlusion_culling;
 }
 
+void Viewport::set_use_hiz_occlusion_culling(bool p_enable) {
+	ERR_MAIN_THREAD_GUARD;
+	use_hiz_occlusion_culling = p_enable;
+	RS::get_singleton()->viewport_set_use_hiz_occlusion_culling(viewport, p_enable);
+}
+
+bool Viewport::is_using_hiz_occlusion_culling() const {
+	ERR_READ_THREAD_GUARD_V(false);
+	return use_hiz_occlusion_culling;
+}
+
+void Viewport::set_hiz_occlusion_reference(const Transform3D &p_reference) {
+	ERR_MAIN_THREAD_GUARD;
+	hiz_occlusion_reference = p_reference;
+	RS::get_singleton()->viewport_set_hiz_occlusion_reference(viewport, hiz_occlusion_reference, hiz_occlusion_reference_radius);
+}
+
+Transform3D Viewport::get_hiz_occlusion_reference() const {
+	ERR_READ_THREAD_GUARD_V(Transform3D());
+	return hiz_occlusion_reference;
+}
+
+void Viewport::set_hiz_occlusion_reference_radius(float p_radius) {
+	ERR_MAIN_THREAD_GUARD;
+	hiz_occlusion_reference_radius = MAX(p_radius, 0.0f);
+	RS::get_singleton()->viewport_set_hiz_occlusion_reference(viewport, hiz_occlusion_reference, hiz_occlusion_reference_radius);
+}
+
+float Viewport::get_hiz_occlusion_reference_radius() const {
+	ERR_READ_THREAD_GUARD_V(0.0);
+	return hiz_occlusion_reference_radius;
+}
+
 void Viewport::set_raytracing_scene(bool p_enable) {
 	ERR_MAIN_THREAD_GUARD;
 	raytracing_scene = p_enable;
@@ -5135,6 +5168,48 @@ float Viewport::get_scaling_3d_scale() const {
 	return scaling_3d_scale;
 }
 
+void Viewport::_update_dynamic_resolution() {
+	RS::get_singleton()->viewport_set_dynamic_resolution(viewport, dynamic_resolution_enabled, dynamic_resolution_target_ms, dynamic_resolution_min_scale);
+}
+
+void Viewport::set_dynamic_resolution_enabled(bool p_enabled) {
+	ERR_MAIN_THREAD_GUARD;
+	dynamic_resolution_enabled = p_enabled;
+	_update_dynamic_resolution();
+}
+
+bool Viewport::is_dynamic_resolution_enabled() const {
+	ERR_READ_THREAD_GUARD_V(false);
+	return dynamic_resolution_enabled;
+}
+
+void Viewport::set_dynamic_resolution_target_ms(float p_ms) {
+	ERR_MAIN_THREAD_GUARD;
+	dynamic_resolution_target_ms = MAX(p_ms, 0.1f);
+	_update_dynamic_resolution();
+}
+
+float Viewport::get_dynamic_resolution_target_ms() const {
+	ERR_READ_THREAD_GUARD_V(0);
+	return dynamic_resolution_target_ms;
+}
+
+void Viewport::set_dynamic_resolution_min_scale(float p_scale) {
+	ERR_MAIN_THREAD_GUARD;
+	dynamic_resolution_min_scale = CLAMP(p_scale, 0.1f, 1.0f);
+	_update_dynamic_resolution();
+}
+
+float Viewport::get_dynamic_resolution_min_scale() const {
+	ERR_READ_THREAD_GUARD_V(0);
+	return dynamic_resolution_min_scale;
+}
+
+float Viewport::get_dynamic_resolution_scale() const {
+	ERR_READ_THREAD_GUARD_V(1.0);
+	return RS::get_singleton()->viewport_get_dynamic_resolution_scale(viewport);
+}
+
 void Viewport::set_fsr_sharpness(float p_fsr_sharpness) {
 	ERR_MAIN_THREAD_GUARD;
 	if (fsr_sharpness == p_fsr_sharpness) {
@@ -5242,6 +5317,12 @@ void Viewport::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_use_occlusion_culling", "enable"), &Viewport::set_use_occlusion_culling);
 	ClassDB::bind_method(D_METHOD("is_using_occlusion_culling"), &Viewport::is_using_occlusion_culling);
+	ClassDB::bind_method(D_METHOD("set_use_hiz_occlusion_culling", "enable"), &Viewport::set_use_hiz_occlusion_culling);
+	ClassDB::bind_method(D_METHOD("is_using_hiz_occlusion_culling"), &Viewport::is_using_hiz_occlusion_culling);
+	ClassDB::bind_method(D_METHOD("set_hiz_occlusion_reference", "reference"), &Viewport::set_hiz_occlusion_reference);
+	ClassDB::bind_method(D_METHOD("get_hiz_occlusion_reference"), &Viewport::get_hiz_occlusion_reference);
+	ClassDB::bind_method(D_METHOD("set_hiz_occlusion_reference_radius", "radius"), &Viewport::set_hiz_occlusion_reference_radius);
+	ClassDB::bind_method(D_METHOD("get_hiz_occlusion_reference_radius"), &Viewport::get_hiz_occlusion_reference_radius);
 	ClassDB::bind_method(D_METHOD("set_raytracing_scene", "enable"), &Viewport::set_raytracing_scene);
 	ClassDB::bind_method(D_METHOD("is_raytracing_scene_enabled"), &Viewport::is_raytracing_scene_enabled);
 	ClassDB::bind_method(D_METHOD("set_raytracing_scene_cull_mask", "cull_mask"), &Viewport::set_raytracing_scene_cull_mask);
@@ -5394,6 +5475,13 @@ void Viewport::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_scaling_3d_scale", "scale"), &Viewport::set_scaling_3d_scale);
 	ClassDB::bind_method(D_METHOD("get_scaling_3d_scale"), &Viewport::get_scaling_3d_scale);
+	ClassDB::bind_method(D_METHOD("set_dynamic_resolution_enabled", "enabled"), &Viewport::set_dynamic_resolution_enabled);
+	ClassDB::bind_method(D_METHOD("is_dynamic_resolution_enabled"), &Viewport::is_dynamic_resolution_enabled);
+	ClassDB::bind_method(D_METHOD("set_dynamic_resolution_target_ms", "ms"), &Viewport::set_dynamic_resolution_target_ms);
+	ClassDB::bind_method(D_METHOD("get_dynamic_resolution_target_ms"), &Viewport::get_dynamic_resolution_target_ms);
+	ClassDB::bind_method(D_METHOD("set_dynamic_resolution_min_scale", "scale"), &Viewport::set_dynamic_resolution_min_scale);
+	ClassDB::bind_method(D_METHOD("get_dynamic_resolution_min_scale"), &Viewport::get_dynamic_resolution_min_scale);
+	ClassDB::bind_method(D_METHOD("get_dynamic_resolution_scale"), &Viewport::get_dynamic_resolution_scale);
 
 	ClassDB::bind_method(D_METHOD("set_fsr_sharpness", "fsr_sharpness"), &Viewport::set_fsr_sharpness);
 	ClassDB::bind_method(D_METHOD("get_fsr_sharpness"), &Viewport::get_fsr_sharpness);
@@ -5432,14 +5520,20 @@ void Viewport::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_taa"), "set_use_taa", "is_using_taa");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_debanding"), "set_use_debanding", "is_using_debanding");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_occlusion_culling"), "set_use_occlusion_culling", "is_using_occlusion_culling");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_hiz_occlusion_culling"), "set_use_hiz_occlusion_culling", "is_using_hiz_occlusion_culling");
+	ADD_PROPERTY(PropertyInfo(Variant::TRANSFORM3D, "hiz_occlusion_reference", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NONE), "set_hiz_occlusion_reference", "get_hiz_occlusion_reference");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hiz_occlusion_reference_radius", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:m"), "set_hiz_occlusion_reference_radius", "get_hiz_occlusion_reference_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mesh_lod_threshold", PROPERTY_HINT_RANGE, "0,1024,0.1"), "set_mesh_lod_threshold", "get_mesh_lod_threshold");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_draw", PROPERTY_HINT_ENUM, "Disabled,Unshaded,Lighting,Overdraw,Wireframe,Normal Buffer,VoxelGI Albedo,VoxelGI Lighting,VoxelGI Emission,Shadow Atlas,Directional Shadow Map,Scene Luminance,SSAO,SSIL,Directional Shadow Splits,Decal Atlas,SDFGI Cascades,SDFGI Probes,VoxelGI/SDFGI Buffer,Disable Mesh LOD,OmniLight3D Cluster,SpotLight3D Cluster,Decal Cluster,ReflectionProbe Cluster,Occlusion Culling Buffer,Motion Vectors,Internal Buffer,AreaLight3D Cluster,AreaLight3D Atlas"), "set_debug_draw", "get_debug_draw");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_hdr_2d"), "set_use_hdr_2d", "is_using_hdr_2d");
 
 #ifndef _3D_DISABLED
 	ADD_GROUP("Scaling 3D", "");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "scaling_3d_mode", PROPERTY_HINT_ENUM, "Nearest (Fastest):5,Bilinear (Fastest):0,FSR 1.0 (Fast):1,FSR 2.2 (Slow):2,MetalFX (Spatial - Fast):3,MetalFX (Temporal - Slow):4,NVIDIA DLSS (Temporal):6"), "set_scaling_3d_mode", "get_scaling_3d_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "scaling_3d_mode", PROPERTY_HINT_ENUM, "Nearest (Fastest):5,Bilinear (Fastest):0,FSR 1.0 (Fast):1,FSR 2.2 (Slow):2,MetalFX (Spatial - Fast):3,MetalFX (Temporal - Slow):4,NVIDIA DLSS (Temporal):6,FSR 3.1 (Slow):7"), "set_scaling_3d_mode", "get_scaling_3d_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scaling_3d_scale", PROPERTY_HINT_RANGE, "0.1,2.0,0.0001"), "set_scaling_3d_scale", "get_scaling_3d_scale");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "dynamic_resolution_enabled"), "set_dynamic_resolution_enabled", "is_dynamic_resolution_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "dynamic_resolution_target_ms", PROPERTY_HINT_RANGE, "1,100,0.01,suffix:ms"), "set_dynamic_resolution_target_ms", "get_dynamic_resolution_target_ms");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "dynamic_resolution_min_scale", PROPERTY_HINT_RANGE, "0.1,1.0,0.01"), "set_dynamic_resolution_min_scale", "get_dynamic_resolution_min_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "texture_mipmap_bias", PROPERTY_HINT_RANGE, "-2,2,0.001"), "set_texture_mipmap_bias", "get_texture_mipmap_bias");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "anisotropic_filtering_level", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2× (Faster),4× (Fast),8× (Average),16x (Slow)")), "set_anisotropic_filtering_level", "get_anisotropic_filtering_level");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fsr_sharpness", PROPERTY_HINT_RANGE, "0,2,0.01"), "set_fsr_sharpness", "get_fsr_sharpness");
@@ -5508,6 +5602,7 @@ void Viewport::_bind_methods() {
 	BIND_ENUM_CONSTANT(SCALING_3D_MODE_METALFX_TEMPORAL);
 	BIND_ENUM_CONSTANT(SCALING_3D_MODE_NEAREST);
 	BIND_ENUM_CONSTANT(SCALING_3D_MODE_DLSS);
+	BIND_ENUM_CONSTANT(SCALING_3D_MODE_FSR3);
 	BIND_ENUM_CONSTANT(SCALING_3D_MODE_MAX);
 
 	BIND_ENUM_CONSTANT(MSAA_DISABLED);

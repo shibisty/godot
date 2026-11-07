@@ -3426,6 +3426,10 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 		ERR_FAIL_COND_V_MSG(err != VK_SUCCESS, FAILED, vformat("Couldn't flush Vulkan memory allocations (VkResult error %d).", err));
 	}
 
+	thread_local LocalVector<VkSemaphore> extra_present_semaphores;
+	extra_present_semaphores.clear();
+	const bool executed_command_buffers = p_cmd_buffers.size() > 0;
+
 	if (p_cmd_buffers.size() > 0) {
 		thread_local LocalVector<VkCommandBuffer> command_buffers;
 		thread_local LocalVector<VkSemaphore> present_semaphores;
@@ -3448,6 +3452,17 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 			VkSemaphore semaphore = swap_chain->present_semaphores[swap_chain->image_index];
 			present_semaphores.push_back(semaphore);
 			signal_semaphores.push_back(semaphore);
+		}
+
+		// Mariner E24b: the extra (frame generation) images are drawn by these command buffers too.
+		extra_present_semaphores.clear();
+		for (uint32_t i = 0; i < p_swap_chains.size(); i++) {
+			const SwapChain *swap_chain = (const SwapChain *)(p_swap_chains[i].id);
+			if (swap_chain->extra_image_index < swap_chain->images.size()) {
+				VkSemaphore semaphore = swap_chain->present_semaphores[swap_chain->extra_image_index];
+				extra_present_semaphores.push_back(semaphore);
+				signal_semaphores.push_back(semaphore);
+			}
 		}
 
 		// Mariner E6: timeline semaphore waits/signals queued for this queue (async compute synchronization).
@@ -3521,6 +3536,50 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 		if (!present_semaphores.is_empty()) {
 			// If command buffers were executed, swap chains must wait on the present semaphore used by the command queue.
 			wait_semaphores = present_semaphores;
+		}
+	}
+
+	if (p_swap_chains.size() > 0 && executed_command_buffers && !extra_present_semaphores.is_empty()) {
+		// Mariner E24b: present the generated frames first (one present per swap chain, in acquisition-independent
+		// order: Vulkan lets images be presented in any order). Pacing is left to the present mode (FIFO: one image per
+		// vertical blank).
+		thread_local LocalVector<VkSwapchainKHR> extra_swapchains;
+		thread_local LocalVector<uint32_t> extra_indices;
+		thread_local LocalVector<VkResult> extra_results;
+		extra_swapchains.clear();
+		extra_indices.clear();
+		for (uint32_t i = 0; i < p_swap_chains.size(); i++) {
+			SwapChain *swap_chain = (SwapChain *)(p_swap_chains[i].id);
+			if (swap_chain->extra_image_index < swap_chain->images.size()) {
+				extra_swapchains.push_back(swap_chain->vk_swapchain);
+				extra_indices.push_back(swap_chain->extra_image_index);
+			}
+		}
+		extra_results.resize(extra_swapchains.size());
+
+		VkPresentInfoKHR extra_present_info = {};
+		extra_present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+		extra_present_info.waitSemaphoreCount = extra_present_semaphores.size();
+		extra_present_info.pWaitSemaphores = extra_present_semaphores.ptr();
+		extra_present_info.swapchainCount = extra_swapchains.size();
+		extra_present_info.pSwapchains = extra_swapchains.ptr();
+		extra_present_info.pImageIndices = extra_indices.ptr();
+		extra_present_info.pResults = extra_results.ptr();
+
+		device_queue.submit_mutex.lock();
+		VkResult extra_err = device_functions.QueuePresentKHR(device_queue.queue, &extra_present_info);
+		device_queue.submit_mutex.unlock();
+
+		uint32_t j = 0;
+		for (uint32_t i = 0; i < p_swap_chains.size(); i++) {
+			SwapChain *swap_chain = (SwapChain *)(p_swap_chains[i].id);
+			if (swap_chain->extra_image_index < swap_chain->images.size()) {
+				if (extra_results[j] == VK_ERROR_OUT_OF_DATE_KHR || extra_err == VK_ERROR_OUT_OF_DATE_KHR) {
+					context_driver->surface_set_needs_resize(swap_chain->surface, true);
+				}
+				swap_chain->extra_image_index = UINT32_MAX;
+				j++;
+			}
 		}
 	}
 
@@ -3931,6 +3990,7 @@ void RenderingDeviceDriverVulkan::_swap_chain_release(SwapChain *swap_chain) {
 	}
 
 	swap_chain->image_index = UINT_MAX;
+	swap_chain->extra_image_index = UINT32_MAX;
 	swap_chain->images.clear();
 	swap_chain->image_views.clear();
 	swap_chain->framebuffers.clear();
@@ -4309,41 +4369,72 @@ RDD::FramebufferID RenderingDeviceDriverVulkan::swap_chain_acquire_framebuffer(C
 		r_resize_required = true;
 		return FramebufferID();
 	}
+	return _swap_chain_acquire(command_queue, swap_chain, swap_chain->image_index, r_resize_required, UINT64_MAX);
+}
 
+RDD::FramebufferID RenderingDeviceDriverVulkan::swap_chain_acquire_extra_framebuffer(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain) {
+	DEV_ASSERT(p_cmd_queue);
+	DEV_ASSERT(p_swap_chain);
+
+	CommandQueue *command_queue = (CommandQueue *)(p_cmd_queue.id);
+	SwapChain *swap_chain = (SwapChain *)(p_swap_chain.id);
+	if (swap_chain->vk_swapchain == VK_NULL_HANDLE || swap_chain->image_index >= swap_chain->images.size() || swap_chain->extra_image_index != UINT32_MAX) {
+		return FramebufferID(); // Needs the frame's own image first, and only one extra image per frame.
+	}
+	bool resize_required = false;
+	// A finite timeout: holding two images needs one more than the presentation engine keeps (RenderingDevice asks for
+	// it); if none comes free in time, this frame is shown without a generated one.
+	FramebufferID framebuffer = _swap_chain_acquire(command_queue, swap_chain, swap_chain->extra_image_index, resize_required, 100000000ULL); // 100 ms
+	if (framebuffer.id == 0) {
+		swap_chain->extra_image_index = UINT32_MAX;
+		if (resize_required) {
+			context_driver->surface_set_needs_resize(swap_chain->surface, true);
+		}
+	}
+	return framebuffer;
+}
+
+RDD::FramebufferID RenderingDeviceDriverVulkan::_swap_chain_acquire(CommandQueue *p_command_queue, SwapChain *p_swap_chain, uint32_t &r_image_index, bool &r_resize_required, uint64_t p_timeout) {
 	VkResult err;
 	VkSemaphore semaphore = VK_NULL_HANDLE;
 	uint32_t semaphore_index = 0;
-	if (command_queue->free_image_semaphores.is_empty()) {
+	if (p_command_queue->free_image_semaphores.is_empty()) {
 		// Add a new semaphore if none are free.
 		VkSemaphoreCreateInfo create_info = {};
 		create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 		err = vkCreateSemaphore(vk_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SEMAPHORE), &semaphore);
 		ERR_FAIL_COND_V_MSG(err != VK_SUCCESS, FramebufferID(), vformat("Couldn't create Vulkan semaphore for acquiring swapchain image (VkResult error %d).", err));
 
-		semaphore_index = command_queue->image_semaphores.size();
-		command_queue->image_semaphores.push_back(semaphore);
-		command_queue->image_semaphores_swap_chains.push_back(swap_chain);
+		semaphore_index = p_command_queue->image_semaphores.size();
+		p_command_queue->image_semaphores.push_back(semaphore);
+		p_command_queue->image_semaphores_swap_chains.push_back(p_swap_chain);
 	} else {
 		// Pick a free semaphore.
-		uint32_t free_index = command_queue->free_image_semaphores.size() - 1;
-		semaphore_index = command_queue->free_image_semaphores[free_index];
-		command_queue->image_semaphores_swap_chains[semaphore_index] = swap_chain;
-		command_queue->free_image_semaphores.remove_at(free_index);
-		semaphore = command_queue->image_semaphores[semaphore_index];
+		uint32_t free_index = p_command_queue->free_image_semaphores.size() - 1;
+		semaphore_index = p_command_queue->free_image_semaphores[free_index];
+		p_command_queue->image_semaphores_swap_chains[semaphore_index] = p_swap_chain;
+		p_command_queue->free_image_semaphores.remove_at(free_index);
+		semaphore = p_command_queue->image_semaphores[semaphore_index];
 	}
 
 	// Store in the swap chain the acquired semaphore.
-	swap_chain->command_queues_acquired.push_back(command_queue);
-	swap_chain->command_queues_acquired_semaphores.push_back(semaphore_index);
+	p_swap_chain->command_queues_acquired.push_back(p_command_queue);
+	p_swap_chain->command_queues_acquired_semaphores.push_back(semaphore_index);
 
-	err = device_functions.AcquireNextImageKHR(vk_device, swap_chain->vk_swapchain, UINT64_MAX, semaphore, VK_NULL_HANDLE, &swap_chain->image_index);
+	err = device_functions.AcquireNextImageKHR(vk_device, p_swap_chain->vk_swapchain, p_timeout, semaphore, VK_NULL_HANDLE, &r_image_index);
 	if (err == VK_ERROR_OUT_OF_DATE_KHR) {
 		// Out of date leaves the semaphore in a signaled state that will never finish, so it's necessary to recreate it.
-		bool semaphore_recreated = _recreate_image_semaphore(command_queue, semaphore_index, true);
+		bool semaphore_recreated = _recreate_image_semaphore(p_command_queue, semaphore_index, true);
 		ERR_FAIL_COND_V_MSG(!semaphore_recreated, FramebufferID(), "Couldn't recreate Vulkan semaphore after swapchain becoming out of date.");
 
 		// Swap chain is out of date and must be recreated.
 		r_resize_required = true;
+		return FramebufferID();
+	} else if (err == VK_TIMEOUT || err == VK_NOT_READY) {
+		// Mariner E24b: only the extra (frame generation) image is acquired with a finite timeout. The semaphore was
+		// not signaled: give it back.
+		_release_image_semaphore(p_command_queue, semaphore_index, true);
+		p_command_queue->free_image_semaphores.push_back(semaphore_index);
 		return FramebufferID();
 	} else if (err != VK_SUCCESS && err != VK_SUBOPTIMAL_KHR) {
 		// Swap chain failed to present but the reason is unknown.
@@ -4353,11 +4444,11 @@ RDD::FramebufferID RenderingDeviceDriverVulkan::swap_chain_acquire_framebuffer(C
 
 	// Indicate the command queue should wait on these semaphores on the next submission and that it should
 	// indicate they're free again on the next fence.
-	command_queue->pending_semaphores_for_execute.push_back(semaphore_index);
-	command_queue->pending_semaphores_for_fence.push_back(semaphore_index);
+	p_command_queue->pending_semaphores_for_execute.push_back(semaphore_index);
+	p_command_queue->pending_semaphores_for_fence.push_back(semaphore_index);
 
 	// Return the corresponding framebuffer to the new current image.
-	FramebufferID framebuffer_id = swap_chain->framebuffers[swap_chain->image_index];
+	FramebufferID framebuffer_id = p_swap_chain->framebuffers[r_image_index];
 	Framebuffer *framebuffer = (Framebuffer *)(framebuffer_id.id);
 	framebuffer->swap_chain_acquired = true;
 	return framebuffer_id;

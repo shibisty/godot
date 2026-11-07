@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DDGIVolume3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		DDGI probe grid in the coordinates of a moving object (a ship).
+	</brief_description>
+	<description>
+		A grid of dynamic diffuse GI probes ([member Environment.ddgi_enabled]) in the frame of this node: the probes move and turn with it, so the indirect light in its rooms stays valid while it sails, rolls and pitches, instead of being recomputed by the world grid around the camera. Inside its box (with a fade over the outermost probe cell) it is sampled over the world grid. Make the box a probe spacing larger than the rooms on each side.
+		Needs the same as [member Environment.ddgi_enabled] (Forward+ on Vulkan with ray query, raytracing scene of the viewport). One per [World3D]; the probes are traced against the whole raytracing scene (the ship's own geometry, the sun, the sea and the world outside). Mariner engine patch E12.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="probe_count_for" qualifiers="static">
+			<return type="Vector3i" />
+			<param index="0" name="size" type="Vector3" />
+			<param index="1" name="spacing" type="float" />
+			<description>
+				Probes per axis for a box of [param size] with probes about [param spacing] apart, corners included, within the DDGI atlas limits.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="probe_spacing" type="float" setter="set_probe_spacing" getter="get_probe_spacing" default="1.0">
+			Distance between probes in meters (per axis it may grow to stay within 64 x 32 x 64 probes, at most 896 in [code]x * y[/code] and 16384 in total; the node warns then).
+		</member>
+		<member name="probes_per_frame" type="int" setter="set_probes_per_frame" getter="get_probes_per_frame" default="0">
+			Probes updated per frame (0: all), round robin; see [member Environment.ddgi_probes_per_frame].
+		</member>
+		<member name="rays_per_probe" type="int" setter="set_rays_per_probe" getter="get_rays_per_probe" default="128">
+			Rays traced per probe and frame (a multiple of 32, 32 to 256).
+		</member>
+		<member name="size" type="Vector3" setter="set_size" getter="get_size" default="Vector3(20, 8, 60)">
+			Size of the box in meters, centered on the node.
+		</member>
+	</members>
+</class>

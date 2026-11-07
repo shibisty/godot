@@ -63,6 +63,15 @@ public:
 		bool fsr_enabled = false;
 		bool dlss_enabled = false;
 		bool frame_generation = false; // Mariner E3: DLSS Frame Generation (needs the DLSS scaling mode).
+		// Mariner E19: dynamic resolution; the 3D scale follows the GPU time of the viewport, up to scaling_3d_scale.
+		bool dynamic_resolution = false;
+		float dynamic_resolution_target_ms = 16.6667f;
+		float dynamic_resolution_min_scale = 0.5f;
+		float dynamic_resolution_scale = 1.0f; // Applied, before the scaling_3d_scale cap.
+		float dynamic_resolution_gpu_ms = 0.0f; // Average GPU time since the last change.
+		uint32_t dynamic_resolution_samples = 0;
+		uint64_t dynamic_resolution_last_gpu_end = 0;
+		uint64_t dynamic_resolution_changed_usec = 0;
 		uint32_t jitter_phase_count = 0;
 		RSE::ViewportUpdateMode update_mode = RSE::VIEWPORT_UPDATE_WHEN_VISIBLE;
 		RID render_target;
@@ -80,6 +89,10 @@ public:
 		uint64_t prev_camera_data_frame = 0;
 
 		bool use_occlusion_culling = false;
+		// Mariner E13: occlusion culling by the depth of earlier frames.
+		bool use_hiz_occlusion_culling = false;
+		Transform3D hiz_occlusion_reference;
+		float hiz_occlusion_reference_radius = 0.0;
 
 		// Raytracing scene (TLAS built from the visible scene, for compositor effects).
 		bool raytracing_scene = false;
@@ -218,11 +231,13 @@ private:
 	static bool _is_frame_generation_available();
 	void _capture_frame_generation_hudless(Viewport *p_viewport);
 	void _configure_3d_render_buffers(Viewport *p_viewport);
+	void _dynamic_resolution_update(Viewport *p_viewport);
 	void _draw_3d(Viewport *p_viewport);
 	void _draw_viewport(Viewport *p_viewport);
 	DisplayServerEnums::WindowID _get_containing_window(Viewport *p_viewport);
 
 	int occlusion_rays_per_thread = 512;
+	int hiz_occlusion_buffer_width = 256; // Mariner E13.
 
 	void _resize_occlusion_culling_buffer(const Size2i &p_size);
 
@@ -246,6 +261,12 @@ public:
 	void viewport_set_frame_generation(RID p_viewport, bool p_frame_generation);
 	bool viewport_get_frame_generation(RID p_viewport) const;
 	void viewport_set_scaling_3d_scale(RID p_viewport, float p_scaling_3d_scale);
+	void viewport_set_dynamic_resolution(RID p_viewport, bool p_enable, float p_target_ms, float p_min_scale);
+	float viewport_get_dynamic_resolution_scale(RID p_viewport) const;
+
+	// Mariner E19: the next dynamic resolution scale for an averaged GPU time (pixels cost time in proportion; the scale
+	// moves in p_step levels from p_min to p_max, down when over the target, up only with headroom).
+	static float dynamic_resolution_next_scale(float p_scale, float p_gpu_ms, float p_target_ms, float p_min, float p_max, float p_step = 0.05f);
 	void viewport_set_fsr_sharpness(RID p_viewport, float p_sharpness);
 	void viewport_set_texture_mipmap_bias(RID p_viewport, float p_mipmap_bias);
 	void viewport_set_anisotropic_filtering_level(RID p_viewport, RSE::ViewportAnisotropicFiltering p_anisotropic_filtering_level);
@@ -297,6 +318,8 @@ public:
 	void viewport_set_force_motion_vectors(RID p_viewport, bool p_force_motion_vectors);
 	void viewport_set_use_occlusion_culling(RID p_viewport, bool p_use_occlusion_culling);
 	void viewport_set_raytracing_scene(RID p_viewport, bool p_enable, uint32_t p_cull_mask, float p_distance);
+	void viewport_set_use_hiz_occlusion_culling(RID p_viewport, bool p_enable);
+	void viewport_set_hiz_occlusion_reference(RID p_viewport, const Transform3D &p_reference, float p_radius);
 	int viewport_get_pathtracing_sample_count(RID p_viewport);
 	void viewport_reset_pathtracing(RID p_viewport);
 	void viewport_set_occlusion_rays_per_thread(int p_rays_per_thread);

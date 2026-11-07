@@ -34,6 +34,7 @@
 #include "core/io/resource_loader.h"
 #include "core/object/class_db.h"
 #include "scene/resources/bit_map.h"
+#include "scene/resources/texture_streamer.h"
 #include "servers/rendering/rendering_server.h"
 
 Error CompressedTexture2D::_load_data(const String &p_path, int &r_width, int &r_height, Ref<Image> &image, bool &r_request_3d, bool &r_request_normal, bool &r_request_roughness, int &mipmap_limit, int p_size_limit) {
@@ -139,9 +140,34 @@ Error CompressedTexture2D::load(const String &p_path) {
 	bool request_roughness;
 	int mipmap_limit;
 
-	Error err = _load_data(p_path, lw, lh, image, request_3d, request_normal, request_roughness, mipmap_limit);
-	if (err) {
-		return err;
+	if (streaming) {
+		TextureStreamer::unregister_texture(texture);
+		streaming = false;
+	}
+
+	// Mariner E17: a streamed texture starts with its small mips only; the streamer brings the rest in when the screen needs them.
+	TextureStreamer::Info stream_info;
+	bool stream = false;
+	if (TextureStreamer::is_enabled() && TextureStreamer::probe(p_path, stream_info) == OK) {
+		stream = TextureStreamer::should_stream(stream_info.width, stream_info.height, stream_info.mip_count, stream_info.lowest);
+	}
+
+	if (stream) {
+		alpha_cache.unref();
+		image = TextureStreamer::load_mips(p_path, stream_info.lowest);
+		if (image.is_null() || image->is_empty()) {
+			return ERR_CANT_OPEN;
+		}
+		lw = stream_info.size_width;
+		lh = stream_info.size_height;
+		request_3d = false;
+		request_normal = false;
+		request_roughness = false;
+	} else {
+		Error err = _load_data(p_path, lw, lh, image, request_3d, request_normal, request_roughness, mipmap_limit);
+		if (err) {
+			return err;
+		}
 	}
 
 	if (texture.is_valid()) {
@@ -158,6 +184,19 @@ Error CompressedTexture2D::load(const String &p_path) {
 	h = lh;
 	path_to_file = p_path;
 	format = image->get_format();
+
+	if (stream) {
+		if (!lw && !lh) {
+			// The texture holds a low mip; it still reports the size of the base level.
+			w = stream_info.width;
+			h = stream_info.height;
+			RS::get_singleton()->texture_set_size_override(texture, w, h);
+		}
+		stream_info.size_width = w;
+		stream_info.size_height = h;
+		TextureStreamer::register_texture(texture, stream_info, stream_info.lowest);
+		streaming = true;
+	}
 
 	if (get_path().is_empty()) {
 		//temporarily set path if no path set for resource, helps find errors
@@ -240,7 +279,15 @@ bool CompressedTexture2D::has_alpha() const {
 	return false;
 }
 
+int CompressedTexture2D::get_streaming_mip() const {
+	return streaming ? TextureStreamer::get_resident_mip(texture) : -1;
+}
+
 Ref<Image> CompressedTexture2D::get_image() const {
+	if (streaming) {
+		// Mariner E17: the GPU may hold only some of the mips; the file has all of them.
+		return TextureStreamer::load_mips(path_to_file, 0);
+	}
 	if (texture.is_valid()) {
 		return RS::get_singleton()->texture_2d_get(texture);
 	} else {
@@ -455,11 +502,15 @@ Ref<Image> CompressedTexture2D::load_image_from_file(Ref<FileAccess> f, int p_si
 void CompressedTexture2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load", "path"), &CompressedTexture2D::load);
 	ClassDB::bind_method(D_METHOD("get_load_path"), &CompressedTexture2D::get_load_path);
+	ClassDB::bind_method(D_METHOD("get_streaming_mip"), &CompressedTexture2D::get_streaming_mip);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "load_path", PROPERTY_HINT_FILE, "*.ctex"), "load", "get_load_path");
 }
 
 CompressedTexture2D::~CompressedTexture2D() {
+	if (streaming) {
+		TextureStreamer::unregister_texture(texture);
+	}
 	if (texture.is_valid()) {
 		ERR_FAIL_NULL(RenderingServer::get_singleton());
 		RS::get_singleton()->free_rid(texture);

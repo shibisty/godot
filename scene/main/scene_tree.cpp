@@ -2108,6 +2108,13 @@ SceneTree::SceneTree() {
 	const int msaa_mode_3d = GLOBAL_GET("rendering/anti_aliasing/quality/msaa_3d");
 	root->set_msaa_3d(Viewport::MSAA(msaa_mode_3d));
 
+#ifndef _3D_DISABLED
+	// Mariner E19: dynamic resolution of the game window.
+	root->set_dynamic_resolution_target_ms(GLOBAL_GET("rendering/scaling_3d/dynamic_resolution/target_ms"));
+	root->set_dynamic_resolution_min_scale(GLOBAL_GET("rendering/scaling_3d/dynamic_resolution/min_scale"));
+	root->set_dynamic_resolution_enabled(!Engine::get_singleton()->is_editor_hint() && bool(GLOBAL_GET("rendering/scaling_3d/dynamic_resolution/enabled")));
+#endif // _3D_DISABLED
+
 	const bool transparent_background = GLOBAL_DEF("rendering/viewport/transparent_background", false);
 	root->set_transparent_background(transparent_background);
 
@@ -2133,6 +2140,7 @@ SceneTree::SceneTree() {
 
 	const bool use_occlusion_culling = GLOBAL_DEF("rendering/occlusion_culling/use_occlusion_culling", false);
 	root->set_use_occlusion_culling(use_occlusion_culling);
+	root->set_use_hiz_occlusion_culling(GLOBAL_DEF("rendering/occlusion_culling/use_hiz_occlusion_culling", false)); // Mariner E13.
 
 	float mesh_lod_threshold = GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/mesh_lod/lod_change/threshold_pixels", PROPERTY_HINT_RANGE, "0,1024,0.1"), 1.0);
 	root->set_mesh_lod_threshold(mesh_lod_threshold);

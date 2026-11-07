@@ -80,6 +80,7 @@ private:
 	bool interpolate = true;
 	NodePath sub_emitter;
 	real_t collision_base_size = 0.01;
+	bool screen_space_collision = false; // Mariner E22.
 	uint32_t seed = 0;
 	bool use_fixed_seed = false;
 
@@ -135,6 +136,8 @@ public:
 	void set_process_material(const Ref<Material> &p_material);
 	void set_speed_scale(double p_scale);
 	void set_collision_base_size(real_t p_ratio);
+	void set_screen_space_collision(bool p_enable);
+	bool is_screen_space_collision() const;
 	void set_trail_enabled(bool p_enabled);
 	void set_trail_lifetime(double p_seconds);
 	void set_interp_to_end(float p_interp);

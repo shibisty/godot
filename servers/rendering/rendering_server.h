@@ -133,6 +133,11 @@ public:
 	virtual Vector<Ref<Image>> texture_3d_get(RID p_texture) const = 0;
 
 	virtual void texture_replace(RID p_texture, RID p_by_texture) = 0;
+
+	// Mariner E17: screen demand of streamed textures. Both calls are thread-safe and do not wait for the render thread.
+	virtual void texture_streaming_track(RID p_texture, bool p_enable) = 0;
+	// x = screen pixels per UV unit, y = rendered frames since the texture was last visible (-1 if never).
+	virtual void texture_streaming_get_feedback(const RID *p_textures, uint32_t p_count, Vector2 *r_feedback) const = 0;
 	virtual void texture_set_size_override(RID p_texture, int p_width, int p_height) = 0;
 
 	virtual void texture_set_path(RID p_texture, const String &p_path) = 0;
@@ -206,6 +211,9 @@ public:
 	virtual void mesh_surface_make_offsets_from_format(uint64_t p_format, int p_vertex_len, int p_index_len, uint32_t *r_offsets, uint32_t &r_vertex_element_size, uint32_t &r_normal_element_size, uint32_t &r_attrib_element_size, uint32_t &r_skin_element_size) const;
 	virtual Error mesh_create_surface_data_from_arrays(RenderingServerTypes::SurfaceData *r_surface_data, RSE::PrimitiveType p_primitive, const Array &p_arrays, const Array &p_blend_shapes = Array(), const Dictionary &p_lods = Dictionary(), uint64_t p_compress_format = 0);
 	Array mesh_create_arrays_from_surface_data(const RenderingServerTypes::SurfaceData &p_data) const;
+	// Mariner E17: world units per unit of the first UV channel, from the triangle areas (0 when there are no usable triangles or UVs).
+	static float mesh_compute_uv_density(const Vector<Vector3> &p_vertices, const Vector<Vector2> &p_uvs, const Vector<int> &p_indices, RSE::PrimitiveType p_primitive = RSE::PRIMITIVE_TRIANGLES);
+	float mesh_surface_data_compute_uv_density(const RenderingServerTypes::SurfaceData &p_data) const;
 	Array mesh_surface_get_arrays(RID p_mesh, int p_surface) const;
 	TypedArray<Array> mesh_surface_get_blend_shape_arrays(RID p_mesh, int p_surface) const;
 	Dictionary mesh_surface_get_lods(RID p_mesh, int p_surface) const;
@@ -274,6 +282,10 @@ public:
 
 	virtual void multimesh_set_buffer(RID p_multimesh, const Vector<float> &p_buffer) = 0;
 	virtual RID multimesh_get_command_buffer_rd_rid(RID p_multimesh) const = 0;
+	virtual void multimesh_set_indirect_shadow_culling(RID p_multimesh, bool p_enable) = 0;
+	virtual RID multimesh_get_shadow_command_buffer_rd_rid(RID p_multimesh) const = 0;
+	virtual void multimesh_set_indirect_view_culling(RID p_multimesh, bool p_enable) = 0; // Mariner E25a.
+	virtual RID multimesh_get_view_command_buffer_rd_rid(RID p_multimesh) const = 0;
 	virtual RID multimesh_get_buffer_rd_rid(RID p_multimesh) const = 0;
 	virtual Vector<float> multimesh_get_buffer(RID p_multimesh) const = 0;
 
@@ -314,6 +326,7 @@ public:
 	virtual void light_set_distance_fade(RID p_light, bool p_enabled, float p_begin, float p_shadow, float p_length) = 0;
 	virtual void light_set_reverse_cull_face_mode(RID p_light, bool p_enabled) = 0;
 	virtual void light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_mask) = 0;
+	virtual void light_set_restir(RID p_light, bool p_enable) = 0; // Mariner E20.
 
 	virtual void light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) = 0;
 	virtual void light_set_max_sdfgi_cascade(RID p_light, uint32_t p_cascade) = 0;
@@ -326,6 +339,9 @@ public:
 
 	virtual void light_directional_set_shadow_mode(RID p_light, RSE::LightDirectionalShadowMode p_mode) = 0;
 	virtual void light_directional_set_blend_splits(RID p_light, bool p_enable) = 0;
+	virtual void light_directional_set_object_shadow(RID p_light, uint32_t p_layers, int p_size, int p_from_cascade) = 0; // Mariner E10b.
+	virtual void light_directional_set_contact_shadow(RID p_light, float p_length) = 0; // Mariner E11.
+	virtual void light_directional_set_restir_shadow_mode(RID p_light, int p_mode) = 0; // Mariner E20d.
 	virtual void light_directional_set_sky_mode(RID p_light, RSE::LightDirectionalSkyMode p_mode) = 0;
 
 	virtual void light_area_set_size(RID p_light, const Vector2 &p_size) = 0;
@@ -453,6 +469,7 @@ public:
 	virtual void particles_set_interpolate(RID p_particles, bool p_enable) = 0;
 	virtual void particles_set_fractional_delta(RID p_particles, bool p_enable) = 0;
 	virtual void particles_set_collision_base_size(RID p_particles, float p_size) = 0;
+	virtual void particles_set_screen_space_collision(RID p_particles, bool p_enable) = 0; // Mariner E22.
 	virtual void particles_set_seed(RID p_particles, uint32_t p_seed) = 0;
 
 	virtual void particles_set_transform_align(RID p_particles, RSE::ParticlesTransformAlign p_transform_align) = 0;
@@ -550,6 +567,9 @@ public:
 	virtual void viewport_set_scaling_3d_mode(RID p_viewport, RSE::ViewportScaling3DMode p_scaling_3d_mode) = 0;
 	virtual void viewport_set_frame_generation(RID p_viewport, bool p_frame_generation) = 0;
 	virtual void viewport_set_scaling_3d_scale(RID p_viewport, float p_scaling_3d_scale) = 0;
+	// Mariner E19: dynamic resolution (the 3D scale follows the GPU time, up to the scaling 3D scale).
+	virtual void viewport_set_dynamic_resolution(RID p_viewport, bool p_enable, float p_target_ms, float p_min_scale) = 0;
+	virtual float viewport_get_dynamic_resolution_scale(RID p_viewport) const = 0;
 	virtual void viewport_set_fsr_sharpness(RID p_viewport, float p_fsr_sharpness) = 0;
 	virtual void viewport_set_texture_mipmap_bias(RID p_viewport, float p_texture_mipmap_bias) = 0;
 	virtual void viewport_set_anisotropic_filtering_level(RID p_viewport, RSE::ViewportAnisotropicFiltering p_anisotropic_filtering_level) = 0;
@@ -603,10 +623,16 @@ public:
 
 	virtual void viewport_set_use_occlusion_culling(RID p_viewport, bool p_use_occlusion_culling) = 0;
 	virtual void viewport_set_raytracing_scene(RID p_viewport, bool p_enable, uint32_t p_cull_mask = 0xFFFFF, float p_distance = 0.0) = 0;
+	virtual void viewport_set_use_hiz_occlusion_culling(RID p_viewport, bool p_enable) = 0;
+	virtual void viewport_set_hiz_occlusion_reference(RID p_viewport, const Transform3D &p_reference, float p_radius) = 0;
 	// Mariner E5c: path tracer accumulation of the viewport (Environment.pathtracing_enabled).
 	virtual int viewport_get_pathtracing_sample_count(RID p_viewport) = 0;
 	virtual void viewport_reset_pathtracing(RID p_viewport) = 0;
 	virtual bool pathtracing_is_supported() const = 0;
+
+	// Mariner E10: directional shadow cache (Forward+).
+	virtual void directional_shadow_cache_set_enabled(bool p_enabled) = 0;
+	virtual Dictionary directional_shadow_cache_get_stats() const = 0;
 	virtual void viewport_set_occlusion_rays_per_thread(int p_rays_per_thread) = 0;
 
 	virtual void viewport_set_occlusion_culling_build_quality(RSE::ViewportOcclusionCullingBuildQuality p_quality) = 0;
@@ -671,6 +697,14 @@ public:
 	// Path tracing (Mariner E5c).
 	virtual void environment_set_pathtracing(RID p_env, bool p_enable, int p_debug_mode, int p_samples_per_pixel, int p_max_bounces, RSE::PathtracingDenoiser p_denoiser) = 0;
 	virtual void environment_set_pathtracing_accumulation(RID p_env, bool p_accumulate, int p_max_samples, float p_firefly_clamp) = 0;
+	virtual void environment_set_ddgi(RID p_env, bool p_enable, const Vector3i &p_probe_count, float p_probe_spacing, int p_rays_per_probe, float p_hysteresis, float p_energy, float p_bias, float p_specular_occlusion) = 0;
+	virtual void environment_set_ddgi_update(RID p_env, int p_probes_per_frame, bool p_relocation) = 0;
+	virtual void environment_set_ddgi_channels(RID p_env, float p_sky_energy, float p_lights_energy) = 0;
+	virtual void environment_set_ddgi_sea(RID p_env, bool p_enable, float p_level, const Color &p_color) = 0;
+	// Mariner E18: ground truth ambient occlusion with bent normals in place of the stock SSAO.
+	virtual void environment_set_ssao_gtao(RID p_env, bool p_enable, bool p_bent_normals, float p_thickness = 0.5) = 0;
+	virtual void environment_set_color_grading(RID p_env, bool p_enable, float p_temperature, float p_tint, const Color &p_shadows, const Color &p_midtones, const Color &p_highlights, const Vector4 &p_tonal_ranges, const Vector3 &p_slope, const Vector3 &p_offset, const Vector3 &p_power, float p_saturation, bool p_gamut_mapping) = 0; // Mariner F3.
+	virtual void environment_set_restir(RID p_env, bool p_enable, int p_candidates, int p_spatial_samples, bool p_temporal, bool p_denoise) = 0; // Mariner E20.
 
 	virtual void environment_set_ssr(RID p_env, bool p_enable, int p_max_steps, float p_fade_in, float p_fade_out, float p_depth_tolerance) = 0;
 
@@ -717,6 +751,10 @@ public:
 	virtual void camera_attributes_set_dof_blur_bokeh_shape(RSE::DOFBokehShape p_shape) = 0;
 
 	virtual void camera_attributes_set_dof_blur(RID p_camera_attributes, bool p_far_enable, float p_far_distance, float p_far_transition, bool p_near_enable, float p_near_distance, float p_near_transition, float p_amount) = 0;
+	virtual void camera_attributes_set_lens_flare(RID p_camera_attributes, bool p_enable, float p_intensity, float p_threshold, int p_ghosts, float p_ghost_spacing, float p_halo_width, float p_chromatic, float p_sun_streaks, int p_streak_count) = 0; // Mariner E15b.
+	virtual void camera_attributes_set_lens_dirt(RID p_camera_attributes, RID p_texture, float p_intensity) = 0;
+	virtual void camera_attributes_set_motion_blur(RID p_camera_attributes, bool p_enable, float p_intensity, float p_camera_motion, float p_max_length) = 0; // Mariner E15a.
+	virtual void camera_attributes_set_image_effects(RID p_camera_attributes, float p_chromatic_aberration, float p_lens_distortion, float p_film_grain, float p_film_grain_size, float p_sharpening) = 0; // Mariner E23.
 	virtual void camera_attributes_set_exposure(RID p_camera_attributes, float p_multiplier, float p_exposure_normalization) = 0;
 	virtual void camera_attributes_set_auto_exposure(RID p_camera_attributes, bool p_enable, float p_min_sensitivity, float p_max_sensitivity, float p_speed, float p_scale) = 0;
 
@@ -727,6 +765,7 @@ public:
 	virtual void scenario_set_environment(RID p_scenario, RID p_environment) = 0;
 	virtual void scenario_set_fallback_environment(RID p_scenario, RID p_environment) = 0;
 	virtual void scenario_set_camera_attributes(RID p_scenario, RID p_camera_attributes) = 0;
+	virtual void scenario_set_ddgi_volume(RID p_scenario, bool p_enable, const Transform3D &p_transform, const Vector3 &p_size, float p_probe_spacing, int p_rays_per_probe, int p_probes_per_frame) = 0;
 	virtual void scenario_set_compositor(RID p_scenario, RID p_compositor) = 0;
 
 	/* INSTANCING API */
@@ -767,6 +806,14 @@ public:
 
 	virtual void instance_geometry_set_flag(RID p_instance, RSE::InstanceFlags p_flags, bool p_enabled) = 0;
 	virtual void instance_geometry_set_cast_shadows_setting(RID p_instance, RSE::ShadowCastingSetting p_shadow_casting_setting) = 0;
+	virtual void instance_geometry_set_shadow_cache_mode(RID p_instance, RSE::ShadowCacheMode p_mode) = 0; // Mariner E10.
+	virtual void instance_geometry_set_raytracing(RID p_instance, RSE::RaytracingMode p_mode, float p_opacity) = 0; // Mariner E12 DG-F.
+	// Mariner E21: the instance lets the directional light through, tinted (translucent shadow) instead of casting an opaque shadow.
+	virtual void instance_geometry_set_shadow_translucent(RID p_instance, bool p_enabled) = 0;
+	// Mariner E25a: GPU static batches.
+	virtual void instance_geometry_set_gpu_static(RID p_instance, bool p_enabled) = 0;
+	virtual bool instance_geometry_is_gpu_static_active(RID p_instance) const = 0;
+	virtual Dictionary scenario_get_gpu_static_info(RID p_scenario) const = 0;
 	virtual void instance_geometry_set_material_override(RID p_instance, RID p_material) = 0;
 	virtual void instance_geometry_set_material_overlay(RID p_instance, RID p_material) = 0;
 	virtual void instance_geometry_set_visibility_range(RID p_instance, float p_min, float p_max, float p_min_margin, float p_max_margin, RSE::VisibilityRangeFadeMode p_fade_mode) = 0;
@@ -994,6 +1041,10 @@ public:
 	virtual uint64_t get_frame_profile_frame() = 0;
 
 	virtual double get_frame_setup_time_cpu() const = 0;
+	// Mariner E24b: frames generated by FSR 3 frame generation and presented on the window so far.
+	virtual uint64_t get_frame_generation_presented_count(DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) const = 0;
+	// Mariner E24b: the last generated frame (RenderingDevice texture, RGBA16F, window size), for diagnostics.
+	virtual RID get_frame_generation_output_texture(DisplayServerEnums::WindowID p_window = DisplayServerEnums::MAIN_WINDOW_ID) const = 0;
 
 	virtual void gi_set_use_half_resolution(bool p_enable) = 0;
 
@@ -1166,6 +1217,8 @@ VARIANT_ENUM_CAST_EXT(RSE::ShadowQuality, RenderingServer::ShadowQuality);
 VARIANT_ENUM_CAST_EXT(RSE::InstanceType, RenderingServer::InstanceType);
 VARIANT_ENUM_CAST_EXT(RSE::InstanceFlags, RenderingServer::InstanceFlags);
 VARIANT_ENUM_CAST_EXT(RSE::ShadowCastingSetting, RenderingServer::ShadowCastingSetting);
+VARIANT_ENUM_CAST_EXT(RSE::ShadowCacheMode, RenderingServer::ShadowCacheMode);
+VARIANT_ENUM_CAST_EXT(RSE::RaytracingMode, RenderingServer::RaytracingMode);
 VARIANT_ENUM_CAST_EXT(RSE::VisibilityRangeFadeMode, RenderingServer::VisibilityRangeFadeMode);
 VARIANT_ENUM_CAST_EXT(RSE::NinePatchAxisMode, RenderingServer::NinePatchAxisMode);
 VARIANT_ENUM_CAST_EXT(RSE::CanvasItemTextureFilter, RenderingServer::CanvasItemTextureFilter);

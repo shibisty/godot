@@ -101,6 +101,7 @@ private:
 			COLLISION_TYPE_SDF,
 			COLLISION_TYPE_HEIGHT_FIELD,
 			COLLISION_TYPE_2D_SDF,
+			COLLISION_TYPE_SCREEN_DEPTH, // Mariner E22.
 
 		};
 
@@ -176,6 +177,7 @@ private:
 		AABB custom_aabb = AABB(Vector3(-4, -4, -4), Vector3(8, 8, 8));
 		bool use_local_coords = false;
 		bool has_collision_cache = false;
+		bool screen_space_collision = false; // Mariner E22.
 
 		bool has_sdf_collision = false;
 		Transform2D sdf_collision_transform;
@@ -211,6 +213,7 @@ private:
 		RID collision_3d_textures[ParticlesFrameParams::MAX_3D_TEXTURES];
 		uint32_t collision_3d_textures_used = 0;
 		RID collision_heightmap_texture;
+		RID collision_screen_texture; // Mariner E22.
 
 		RID particles_sort_buffer;
 		RID particles_sort_uniform_set;
@@ -469,7 +472,30 @@ public:
 	virtual void particles_set_interpolate(RID p_particles, bool p_enable) override;
 	virtual void particles_set_fractional_delta(RID p_particles, bool p_enable) override;
 	virtual void particles_set_collision_base_size(RID p_particles, real_t p_size) override;
+	virtual void particles_set_screen_space_collision(RID p_particles, bool p_enable) override;
 
+	// Mariner E22: the depth and normal of the largest perspective camera view drawn in a frame, read by the
+	// particles of the next frame. The renderer asks whether a view should write it and gives what it wrote with.
+	struct ScreenCollision {
+		RID texture; // RGBA32F, half the view size: xyz world normal, w view distance (0: sky / nothing).
+		Size2i size;
+		Projection view_projection; // World -> clip of the view, as rasterized.
+		Vector3 camera_position;
+		uint64_t frame = 0;
+		uint64_t area = 0;
+		bool valid = false;
+	};
+	bool screen_collision_wanted() const { return screen_collision_users > 0; }
+	// Returns the texture to write (allocated at p_size) if a view of p_area pixels should provide this frame's data.
+	RID screen_collision_begin(uint64_t p_frame, uint64_t p_area, const Size2i &p_size);
+	void screen_collision_end(const Projection &p_view_projection, const Vector3 &p_camera_position);
+	const ScreenCollision &screen_collision_get() const { return screen_collision; }
+
+private:
+	ScreenCollision screen_collision; // Mariner E22.
+	uint32_t screen_collision_users = 0;
+
+public:
 	virtual void particles_set_transform_align(RID p_particles, RSE::ParticlesTransformAlign p_transform_align) override;
 	virtual void particles_set_transform_align_channel_filter(RID p_particles, RSE::ParticlesTransformAlignCustomSrc p_transform_align_channel_filter) override;
 	virtual void particles_set_transform_align_axis(RID p_particles, RSE::ParticlesTransformAlignAxis p_rotation_axis) override;

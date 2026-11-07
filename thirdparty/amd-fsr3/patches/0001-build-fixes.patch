@@ -1,0 +1,1270 @@
+--- a/thirdparty/amd-fsr3/ffx_assert.cpp
++++ b/thirdparty/amd-fsr3/ffx_assert.cpp
+@@ -20,10 +20,10 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#include <FidelityFX/host/ffx_assert.h>
++#include "ffx_assert.h"
+ #include <stdlib.h>  // for malloc()
+ 
+-#ifdef _WIN32
++#if 0 // Godot: no <windows.h> inside the FFX3 namespace (was: #ifdef _WIN32)
+ #ifndef WIN32_LEAN_AND_MEAN
+ #define WIN32_LEAN_AND_MEAN
+ #endif
+@@ -48,7 +48,7 @@
+         return true;
+     }
+ 
+-#ifdef _WIN32
++#if 0 // Godot: no <windows.h> inside the FFX3 namespace (was: #ifdef _WIN32)
+     // form the final assertion string and output to the TTY.
+     const size_t bufferSize = snprintf(NULL, 0, "%s(%d): ASSERTION FAILED. %s\n", file, line, message ? message : condition) + 1;
+     char*        tempBuf    = (char*)malloc(bufferSize);
+--- a/thirdparty/amd-fsr3/ffx_assert.h
++++ b/thirdparty/amd-fsr3/ffx_assert.h
+@@ -22,10 +22,14 @@
+ 
+ #pragma once
+ 
+-#include <FidelityFX/host/ffx_types.h>
+-#include <FidelityFX/host/ffx_util.h>
++#include "ffx_types.h"
++#include "ffx_util.h"
+ 
+-#ifdef __cplusplus
++// Godot: FSR 2.2 (thirdparty/amd-fsr2) defines the same C functions.
++#define ffxAssertReport ffx3AssertReport
++#define ffxAssertSetPrintingCallback ffx3AssertSetPrintingCallback
++
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #ifdef __cplusplus)
+ extern "C" {
+ #endif  // #ifdef __cplusplus
+ 
+@@ -146,6 +150,6 @@
+ /// @ingroup Asserts
+ #define FFX_STATIC_ASSERT(condition) static_assert(condition, #condition)
+ 
+-#ifdef __cplusplus
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #ifdef __cplusplus)
+ }
+ #endif  // #ifdef __cplusplus
+--- a/thirdparty/amd-fsr3/ffx_error.h
++++ b/thirdparty/amd-fsr3/ffx_error.h
+@@ -22,7 +22,7 @@
+ 
+ #pragma once
+ 
+-#include <FidelityFX/host/ffx_types.h>
++#include "ffx_types.h"
+ 
+ /// @defgroup Errors Error Codes
+ /// Error codes returned from FidelityFX SDK functions
+--- a/thirdparty/amd-fsr3/ffx_frameinterpolation.cpp
++++ b/thirdparty/amd-fsr3/ffx_frameinterpolation.cpp
+@@ -24,7 +24,7 @@
+ #include <cmath>        // for fabs, abs, sinf, sqrt, etc.
+ #include <string>       // for memset
+ #include <cfloat>       // for FLT_EPSILON
+-#include <FidelityFX/host/ffx_frameinterpolation.h>
++#include "ffx_frameinterpolation.h"
+ 
+ #define FFX_CPU
+ 
+@@ -33,12 +33,21 @@
+ #pragma clang diagnostic ignored "-Wsign-compare"
+ #endif
+ 
+-#include <FidelityFX/gpu/ffx_core.h>
+-#include <FidelityFX/gpu/spd/ffx_spd.h>
+-#include <ffx_object_management.h>
++#include "shaders/ffx_core.h"
++#include "shaders/ffx_spd.h"
++#include "ffx_object_management.h"
+ 
+ #include "ffx_frameinterpolation_private.h"
+ 
++// Godot: MSVC extensions.
++#ifndef _countof
++#define _countof(array) (sizeof(array) / sizeof(array[0]))
++#endif
++#ifndef _MSC_VER
++#include <wchar.h>
++#define wcscpy_s wcscpy
++#endif
++
+ // lists to map shader resource bindpoint name to resource identifier
+ typedef struct ResourceBinding
+ {
+--- a/thirdparty/amd-fsr3/ffx_frameinterpolation.h
++++ b/thirdparty/amd-fsr3/ffx_frameinterpolation.h
+@@ -25,7 +25,7 @@
+ #pragma once
+ 
+ // Include the interface for the backend of the Frameinterpolation API.
+-#include <FidelityFX/host/ffx_interface.h>
++#include "ffx_interface.h"
+ 
+ /// FidelityFX Frameinterpolation major version.
+ ///
+@@ -52,9 +52,9 @@
+ /// The size of the context specified in 32bit values.
+ ///
+ /// @ingroup FRAMEINTERPOLATIONFRAMEINTERPOLATION
+-#define FFX_FRAMEINTERPOLATION_CONTEXT_SIZE (FFX_SDK_DEFAULT_CONTEXT_SIZE)
++#define FFX_FRAMEINTERPOLATION_CONTEXT_SIZE (FFX_SDK_DEFAULT_CONTEXT_SIZE * 2) // Godot: 4-byte wchar_t (was: FFX_SDK_DEFAULT_CONTEXT_SIZE)
+ 
+-#if defined(__cplusplus)
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #if defined(__cplusplus))
+ extern "C" {
+ #endif // #if defined(__cplusplus)
+ 
+@@ -311,6 +311,6 @@
+ /// @ingroup FRAMEINTERPOLATION
+ FFX_API FfxErrorCode ffxFrameInterpolationSetGlobalDebugMessage(ffxMessageCallback fpMessage, uint32_t debugLevel);
+ 
+-#if defined(__cplusplus)
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #if defined(__cplusplus))
+ }
+ #endif // #if defined(__cplusplus)
+--- a/thirdparty/amd-fsr3/ffx_frameinterpolation_private.h
++++ b/thirdparty/amd-fsr3/ffx_frameinterpolation_private.h
+@@ -22,7 +22,7 @@
+ 
+ #pragma once
+ 
+-#include <FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_resources.h>
++#include "shaders/ffx_frameinterpolation_resources.h"
+ 
+ /// An enumeration of all the permutations that can be passed to the FSR3 algorithm.
+ ///
+--- a/thirdparty/amd-fsr3/ffx_fsr3upscaler.cpp
++++ b/thirdparty/amd-fsr3/ffx_fsr3upscaler.cpp
+@@ -24,7 +24,7 @@
+ #include <cmath>        // for fabs, abs, sinf, sqrt, etc.
+ #include <string.h>     // for memset
+ #include <cfloat>       // for FLT_EPSILON
+-#include <FidelityFX/host/ffx_fsr3upscaler.h>
++#include "ffx_fsr3upscaler.h"
+ 
+ #define FFX_CPU
+ 
+@@ -33,19 +33,28 @@
+ #pragma clang diagnostic ignored "-Wsign-compare"
+ #endif
+ 
+-#include <FidelityFX/gpu/ffx_core.h>
+-#include <FidelityFX/gpu/fsr1/ffx_fsr1.h>
+-#include <FidelityFX/gpu/spd/ffx_spd.h>
+-#include <FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_callbacks_hlsl.h>
+-#include <FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_resources.h>
+-#include <FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_common.h>
+-#include <ffx_object_management.h>
++#include "shaders/ffx_core.h"
++#include "shaders/ffx_fsr1.h"
++#include "shaders/ffx_spd.h"
++#include "shaders/ffx_fsr3upscaler_callbacks_hlsl.h"
++#include "shaders/ffx_fsr3upscaler_resources.h"
++#include "shaders/ffx_fsr3upscaler_common.h"
++#include "ffx_object_management.h"
+ 
+ // max queued frames for descriptor management
+ static const uint32_t FSR3UPSCALER_MAX_QUEUED_FRAMES = 16;
+ 
+ #include "ffx_fsr3upscaler_private.h"
+ 
++// Godot: MSVC extensions.
++#ifndef _countof
++#define _countof(array) (sizeof(array) / sizeof(array[0]))
++#endif
++#ifndef _MSC_VER
++#include <wchar.h>
++#define wcscpy_s wcscpy
++#endif
++
+ // lists to map shader resource bindpoint name to resource identifier
+ typedef struct ResourceBinding
+ {
+--- a/thirdparty/amd-fsr3/ffx_fsr3upscaler.h
++++ b/thirdparty/amd-fsr3/ffx_fsr3upscaler.h
+@@ -23,7 +23,7 @@
+ #pragma once
+ 
+ // Include the interface for the backend of the FSR3 API.
+-#include <FidelityFX/host/ffx_interface.h>
++#include "ffx_interface.h"
+ 
+ /// @defgroup ffxFsr3Upscaler FidelityFX FSR3
+ /// FidelityFX Super Resolution 3 runtime library
+@@ -55,9 +55,9 @@
+ /// The size of the context specified in 32bit values.
+ ///
+ /// @ingroup ffxFsr3Upscaler
+-#define FFX_FSR3UPSCALER_CONTEXT_SIZE (FFX_SDK_DEFAULT_CONTEXT_SIZE)
++#define FFX_FSR3UPSCALER_CONTEXT_SIZE (FFX_SDK_DEFAULT_CONTEXT_SIZE * 2) // Godot: 4-byte wchar_t (was: FFX_SDK_DEFAULT_CONTEXT_SIZE)
+ 
+-#if defined(__cplusplus)
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #if defined(__cplusplus))
+ extern "C" {
+ #endif // #if defined(__cplusplus)
+ 
+@@ -587,6 +587,6 @@
+ /// @ingroup FRAMEINTERPOLATION
+ FFX_API FfxErrorCode ffxFsr3UpscalerSetGlobalDebugMessage(ffxMessageCallback fpMessage, uint32_t debugLevel);
+ 
+-#if defined(__cplusplus)
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #if defined(__cplusplus))
+ }
+ #endif // #if defined(__cplusplus)
+--- a/thirdparty/amd-fsr3/ffx_fsr3upscaler_private.h
++++ b/thirdparty/amd-fsr3/ffx_fsr3upscaler_private.h
+@@ -21,7 +21,7 @@
+ // THE SOFTWARE.
+ 
+ #pragma once
+-#include <FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_resources.h>
++#include "shaders/ffx_fsr3upscaler_resources.h"
+ 
+ /// An enumeration of all the permutations that can be passed to the FSR3 Upscaler algorithm.
+ ///
+--- a/thirdparty/amd-fsr3/ffx_interface.h
++++ b/thirdparty/amd-fsr3/ffx_interface.h
+@@ -22,13 +22,13 @@
+ 
+ #pragma once
+ 
+-#include <FidelityFX/host/ffx_assert.h>
+-#include <FidelityFX/host/ffx_types.h>
+-#include <FidelityFX/host/ffx_error.h>
+-#include <FidelityFX/host/ffx_message.h>
++#include "ffx_assert.h"
++#include "ffx_types.h"
++#include "ffx_error.h"
++#include "ffx_message.h"
+ 
+-#if defined(__cplusplus)
+-#define FFX_CPU
++#define FFX_CPU // Godot: hoisted out of the (disabled) extern "C" block.
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #if defined(__cplusplus))
+ extern "C" {
+ #endif // #if defined(__cplusplus)
+ 
+@@ -659,6 +659,6 @@
+ 
+ } FfxInterface;
+ 
+-#if defined(__cplusplus)
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #if defined(__cplusplus))
+ }
+ #endif // #if defined(__cplusplus)
+--- a/thirdparty/amd-fsr3/ffx_message.cpp
++++ b/thirdparty/amd-fsr3/ffx_message.cpp
+@@ -20,14 +20,14 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#include <FidelityFX/host/ffx_message.h>
++#include "ffx_message.h"
+ 
+-#ifdef _WIN32
++#if 0 // Godot: no <windows.h> inside the FFX3 namespace (was: #ifdef _WIN32)
+ #ifndef WIN32_LEAN_AND_MEAN
+ #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>  // required for OutputDebugString()
+-#endif                // #ifdef _WIN32
++#endif                // #if 0 // Godot: no <windows.h> inside the FFX3 namespace (was: #ifdef _WIN32)
+ 
+ static ffxMessageCallback s_messageCallback;
+ static uint32_t s_debugLevel;
+@@ -42,7 +42,7 @@
+ 
+ void ffxPrintMessage(uint32_t type, const wchar_t* message)
+ {
+-#ifdef _WIN32
++#if 0 // Godot: no <windows.h> inside the FFX3 namespace (was: #ifdef _WIN32)
+     if (!s_messageCallback) {
+         // Format the message string
+         wchar_t buffer[512];
+--- a/thirdparty/amd-fsr3/ffx_message.h
++++ b/thirdparty/amd-fsr3/ffx_message.h
+@@ -22,9 +22,9 @@
+ 
+ #pragma once
+ 
+-#include <FidelityFX/host/ffx_types.h>
++#include "ffx_types.h"
+ 
+-#ifdef __cplusplus
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #ifdef __cplusplus)
+ extern "C" {
+ #endif  // #ifdef __cplusplus
+ 
+@@ -58,6 +58,6 @@
+     {                                 \
+         ffxPrintMessage( type, msg);  \
+     } while (0)
+-#ifdef __cplusplus
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #ifdef __cplusplus)
+ }
+ #endif  // #ifdef __cplusplus
+\ No newline at end of file
+--- a/thirdparty/amd-fsr3/ffx_object_management.cpp
++++ b/thirdparty/amd-fsr3/ffx_object_management.cpp
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#include <FidelityFX/host/ffx_interface.h>
++#include "ffx_interface.h"
+ #include "ffx_object_management.h"
+ 
+ void ffxSafeReleasePipeline(FfxInterface* backendInterface, FfxPipelineState* pipeline, FfxUInt32 effectContextId)
+--- a/thirdparty/amd-fsr3/ffx_object_management.h
++++ b/thirdparty/amd-fsr3/ffx_object_management.h
+@@ -22,10 +22,10 @@
+ 
+ #pragma once
+ 
+-#include <FidelityFX/host/ffx_types.h>
+-#include <FidelityFX/host/ffx_interface.h>
++#include "ffx_types.h"
++#include "ffx_interface.h"
+ 
+-#if defined(__cplusplus)
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #if defined(__cplusplus))
+ extern "C" {
+ #endif  // #if defined(__cplusplus)
+ 
+@@ -33,6 +33,6 @@
+ FFX_API void ffxSafeReleaseCopyResource(FfxInterface* backendInterface, FfxResourceInternal resource, FfxUInt32 effectContextId);
+ FFX_API void ffxSafeReleaseResource(FfxInterface* backendInterface, FfxResourceInternal resource, FfxUInt32 effectContextId);
+ 
+-#if defined(__cplusplus)
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #if defined(__cplusplus))
+ }
+ #endif  // #if defined(__cplusplus)
+--- a/thirdparty/amd-fsr3/ffx_opticalflow.cpp
++++ b/thirdparty/amd-fsr3/ffx_opticalflow.cpp
+@@ -24,7 +24,7 @@
+ #include <cmath>        // for fabs, abs, sinf, sqrt, etc.
+ #include <string>       // for memset
+ #include <cfloat>       // for FLT_EPSILON
+-#include "FidelityFX/host/ffx_opticalflow.h"
++#include "ffx_opticalflow.h"
+ 
+ #ifdef __clang__
+ #pragma clang diagnostic ignored "-Wunused-function"
+@@ -32,15 +32,24 @@
+ #endif
+ 
+ #define FFX_CPU
+-#include <FidelityFX/gpu/ffx_core.h>
+-#include <FidelityFX/gpu/spd/ffx_spd.h>
+-#include <FidelityFX/gpu/opticalflow/ffx_opticalflow_callbacks_hlsl.h>
+-#include <ffx_object_management.h>
++#include "shaders/ffx_core.h"
++#include "shaders/ffx_spd.h"
++#include "shaders/ffx_opticalflow_callbacks_hlsl.h"
++#include "ffx_object_management.h"
+ 
+ #define FFX_OPTICALFLOW_MAX_QUEUED_FRAMES 16
+ 
+ #include "ffx_opticalflow_private.h"
+ 
++// Godot: MSVC extensions.
++#ifndef _countof
++#define _countof(array) (sizeof(array) / sizeof(array[0]))
++#endif
++#ifndef _MSC_VER
++#include <wchar.h>
++#define wcscpy_s wcscpy
++#endif
++
+ typedef struct Binding
+ {
+     uint32_t    index;
+--- a/thirdparty/amd-fsr3/ffx_opticalflow.h
++++ b/thirdparty/amd-fsr3/ffx_opticalflow.h
+@@ -25,7 +25,7 @@
+ #pragma once
+ 
+ // Include the interface for the backend of the OpticalFlow API.
+-#include <FidelityFX/host/ffx_interface.h>
++#include "ffx_interface.h"
+ 
+ /// FidelityFX OpticalFlow major version.
+ ///
+@@ -52,9 +52,9 @@
+ /// The size of the context specified in 32bit size units.
+ ///
+ /// @ingroup ffxOpticalflow
+-#define FFX_OPTICALFLOW_CONTEXT_SIZE (FFX_SDK_DEFAULT_CONTEXT_SIZE)
++#define FFX_OPTICALFLOW_CONTEXT_SIZE (FFX_SDK_DEFAULT_CONTEXT_SIZE * 2) // Godot: 4-byte wchar_t (was: FFX_SDK_DEFAULT_CONTEXT_SIZE)
+ 
+-#if defined(__cplusplus)
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #if defined(__cplusplus))
+ extern "C" {
+ #endif // #if defined(__cplusplus)
+ 
+@@ -207,6 +207,6 @@
+ /// @ingroup ffxOpticalflow
+ FFX_API FfxVersionNumber ffxOpticalflowGetEffectVersion();
+ 
+-#if defined(__cplusplus)
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #if defined(__cplusplus))
+ }
+ #endif // #if defined(__cplusplus)
+--- a/thirdparty/amd-fsr3/ffx_opticalflow_private.h
++++ b/thirdparty/amd-fsr3/ffx_opticalflow_private.h
+@@ -23,7 +23,7 @@
+ #pragma once
+ 
+ #define FFX_CPU
+-#include <FidelityFX/gpu/opticalflow/ffx_opticalflow_resources.h>
++#include "shaders/ffx_opticalflow_resources.h"
+ 
+ typedef enum OpticalFlowBindingIdentifiers
+ {
+--- a/thirdparty/amd-fsr3/ffx_types.h
++++ b/thirdparty/amd-fsr3/ffx_types.h
+@@ -152,7 +152,7 @@
+ // Off by default warnings
+ #pragma warning(disable : 4365 4710 4820 5039)
+ 
+-#ifdef __cplusplus
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #ifdef __cplusplus)
+ extern "C" {
+ #endif  // #ifdef __cplusplus
+ 
+@@ -1298,6 +1298,6 @@
+     bool     allowWaitForSingleObjectOnFence; //Allows to call WaitForSingleObject() instead of spinning for fence value.
+ } FfxSwapchainFramePacingTuning;
+ 
+-#ifdef __cplusplus
++#if 0 // Godot: C++ linkage inside the FFX3 namespace (was: #ifdef __cplusplus)
+ }
+ #endif  // #ifdef __cplusplus
+--- a/thirdparty/amd-fsr3/ffx_util.h
++++ b/thirdparty/amd-fsr3/ffx_util.h
+@@ -22,7 +22,7 @@
+ 
+ #pragma once
+ 
+-#include <FidelityFX/host/ffx_types.h>
++#include "ffx_types.h"
+ 
+ /// @defgroup Utils Utilities
+ /// Utility Macros used by the FidelityFX SDK
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_compute_game_vector_field_inpainting_pyramid.h
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_compute_game_vector_field_inpainting_pyramid.h
+@@ -105,7 +105,7 @@
+     return vec;
+ }
+ 
+-#include "spd/ffx_spd.h"
++#include "ffx_spd.h"
+ 
+ void computeFrameinterpolationGameVectorFieldInpaintingPyramid(FfxInt32x3 iGroupId, FfxInt32 iLocalIndex)
+ {
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_compute_game_vector_field_inpainting_pyramid_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_compute_game_vector_field_inpainting_pyramid_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -51,9 +51,9 @@
+     #define FFX_HALF 0
+ #endif
+ 
+-#include "frameinterpolation/ffx_frameinterpolation_callbacks_glsl.h"
+-#include "frameinterpolation/ffx_frameinterpolation_common.h"
+-#include "frameinterpolation/ffx_frameinterpolation_compute_game_vector_field_inpainting_pyramid.h"
++#include "ffx_frameinterpolation_callbacks_glsl.h"
++#include "ffx_frameinterpolation_common.h"
++#include "ffx_frameinterpolation_compute_game_vector_field_inpainting_pyramid.h"
+ 
+ #ifndef FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH
+ #define FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH 256
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_compute_inpainting_pyramid.h
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_compute_inpainting_pyramid.h
+@@ -104,7 +104,7 @@
+     return (v0 * w[0] + v1 * w[1] + v2 * w[2] + v3 * w[3]) / sum;
+ }
+ 
+-#include "spd/ffx_spd.h"
++#include "ffx_spd.h"
+ 
+ void computeFrameinterpolationInpaintingPyramid(FfxInt32x3 iGroupId, FfxInt32 iLocalIndex)
+ {
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_compute_inpainting_pyramid_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_compute_inpainting_pyramid_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -50,9 +50,9 @@
+     #define FFX_HALF 0
+ #endif
+ 
+-#include "frameinterpolation/ffx_frameinterpolation_callbacks_glsl.h"
+-#include "frameinterpolation/ffx_frameinterpolation_common.h"
+-#include "frameinterpolation/ffx_frameinterpolation_compute_inpainting_pyramid.h"
++#include "ffx_frameinterpolation_callbacks_glsl.h"
++#include "ffx_frameinterpolation_common.h"
++#include "ffx_frameinterpolation_compute_inpainting_pyramid.h"
+ 
+ #ifndef FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH
+ #define FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH 256
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_debug_view_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_debug_view_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -41,9 +41,9 @@
+ 
+ #define FFX_FRAMEINTERPOLATION_BIND_CB_FRAMEINTERPOLATION                       10
+ 
+-#include "frameinterpolation/ffx_frameinterpolation_callbacks_glsl.h"
+-#include "frameinterpolation/ffx_frameinterpolation_common.h"
+-#include "frameinterpolation/ffx_frameinterpolation_debug_view.h"
++#include "ffx_frameinterpolation_callbacks_glsl.h"
++#include "ffx_frameinterpolation_common.h"
++#include "ffx_frameinterpolation_debug_view.h"
+ 
+ #ifndef FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH
+ #define FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_disocclusion_mask_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_disocclusion_mask_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -37,9 +37,9 @@
+ 
+ #define FFX_FRAMEINTERPOLATION_BIND_CB_FRAMEINTERPOLATION                       8
+ 
+-#include "frameinterpolation/ffx_frameinterpolation_callbacks_glsl.h"
+-#include "frameinterpolation/ffx_frameinterpolation_common.h"
+-#include "frameinterpolation/ffx_frameinterpolation_disocclusion_mask.h"
++#include "ffx_frameinterpolation_callbacks_glsl.h"
++#include "ffx_frameinterpolation_common.h"
++#include "ffx_frameinterpolation_disocclusion_mask.h"
+ 
+ #ifndef FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH
+ #define FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_game_motion_vector_field_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_game_motion_vector_field_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -36,9 +36,9 @@
+ 
+ #define FFX_FRAMEINTERPOLATION_BIND_CB_FRAMEINTERPOLATION                       7
+ 
+-#include "frameinterpolation/ffx_frameinterpolation_callbacks_glsl.h"
+-#include "frameinterpolation/ffx_frameinterpolation_common.h"
+-#include "frameinterpolation/ffx_frameinterpolation_game_motion_vector_field.h"
++#include "ffx_frameinterpolation_callbacks_glsl.h"
++#include "ffx_frameinterpolation_common.h"
++#include "ffx_frameinterpolation_game_motion_vector_field.h"
+ 
+ #ifndef FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH
+ #define FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_inpainting_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_inpainting_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -36,9 +36,9 @@
+ 
+ #define FFX_FRAMEINTERPOLATION_BIND_CB_FRAMEINTERPOLATION                       8
+ 
+-#include "frameinterpolation/ffx_frameinterpolation_callbacks_glsl.h"
+-#include "frameinterpolation/ffx_frameinterpolation_common.h"
+-#include "frameinterpolation/ffx_frameinterpolation_inpainting.h"
++#include "ffx_frameinterpolation_callbacks_glsl.h"
++#include "ffx_frameinterpolation_common.h"
++#include "ffx_frameinterpolation_inpainting.h"
+ 
+ #ifndef FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH
+ #define FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_optical_flow_vector_field_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_optical_flow_vector_field_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -36,9 +36,9 @@
+ 
+ #define FFX_FRAMEINTERPOLATION_BIND_CB_FRAMEINTERPOLATION                       8
+ 
+-#include "frameinterpolation/ffx_frameinterpolation_callbacks_glsl.h"
+-#include "frameinterpolation/ffx_frameinterpolation_common.h"
+-#include "frameinterpolation/ffx_frameinterpolation_optical_flow_vector_field.h"
++#include "ffx_frameinterpolation_callbacks_glsl.h"
++#include "ffx_frameinterpolation_common.h"
++#include "ffx_frameinterpolation_optical_flow_vector_field.h"
+ 
+ #ifndef FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH
+ #define FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -41,9 +41,9 @@
+ 
+ #define FFX_FRAMEINTERPOLATION_BIND_CB_FRAMEINTERPOLATION                       10
+ 
+-#include "frameinterpolation/ffx_frameinterpolation_callbacks_glsl.h"
+-#include "frameinterpolation/ffx_frameinterpolation_common.h"
+-#include "frameinterpolation/ffx_frameinterpolation.h"
++#include "ffx_frameinterpolation_callbacks_glsl.h"
++#include "ffx_frameinterpolation_common.h"
++#include "ffx_frameinterpolation.h"
+ 
+ #ifndef FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH
+ #define FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_reconstruct_and_dilate_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_reconstruct_and_dilate_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -34,9 +34,9 @@
+ 
+ #define FFX_FRAMEINTERPOLATION_BIND_CB_FRAMEINTERPOLATION                   5
+ 
+-#include "frameinterpolation/ffx_frameinterpolation_callbacks_glsl.h"
+-#include "frameinterpolation/ffx_frameinterpolation_common.h"
+-#include "frameinterpolation/ffx_frameinterpolation_reconstruct_dilated_velocity_and_previous_depth.h"
++#include "ffx_frameinterpolation_callbacks_glsl.h"
++#include "ffx_frameinterpolation_common.h"
++#include "ffx_frameinterpolation_reconstruct_dilated_velocity_and_previous_depth.h"
+ 
+ #ifndef FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH
+ #define FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_reconstruct_previous_depth_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_reconstruct_previous_depth_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -34,9 +34,9 @@
+ 
+ #define FFX_FRAMEINTERPOLATION_BIND_CB_FRAMEINTERPOLATION                       5
+ 
+-#include "frameinterpolation/ffx_frameinterpolation_callbacks_glsl.h"
+-#include "frameinterpolation/ffx_frameinterpolation_common.h"
+-#include "frameinterpolation/ffx_frameinterpolation_reconstruct_previous_depth.h"
++#include "ffx_frameinterpolation_callbacks_glsl.h"
++#include "ffx_frameinterpolation_common.h"
++#include "ffx_frameinterpolation_reconstruct_previous_depth.h"
+ 
+ #ifndef FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH
+ #define FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_setup_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_setup_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -36,9 +36,9 @@
+ 
+ #define FFX_FRAMEINTERPOLATION_BIND_CB_FRAMEINTERPOLATION                       7
+ 
+-#include "frameinterpolation/ffx_frameinterpolation_callbacks_glsl.h"
+-#include "frameinterpolation/ffx_frameinterpolation_common.h"
+-#include "frameinterpolation/ffx_frameinterpolation_setup.h"
++#include "ffx_frameinterpolation_callbacks_glsl.h"
++#include "ffx_frameinterpolation_common.h"
++#include "ffx_frameinterpolation_setup.h"
+ 
+ #ifndef FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH
+ #define FFX_FRAMEINTERPOLATION_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_accumulate_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_accumulate_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -48,12 +48,12 @@
+ 
+ #define FSR3UPSCALER_BIND_CB_FSR3UPSCALER                           12
+ 
+-#include "fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_common.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_sample.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_upsample.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_reproject.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_accumulate.h"
++#include "ffx_fsr3upscaler_callbacks_glsl.h"
++#include "ffx_fsr3upscaler_common.h"
++#include "ffx_fsr3upscaler_sample.h"
++#include "ffx_fsr3upscaler_upsample.h"
++#include "ffx_fsr3upscaler_reproject.h"
++#include "ffx_fsr3upscaler_accumulate.h"
+ 
+ #ifndef FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH
+ #define FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_autogen_reactive_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_autogen_reactive_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -34,8 +34,8 @@
+ #define FSR3UPSCALER_BIND_CB_FSR3UPSCALER                           4
+ #define FSR3UPSCALER_BIND_CB_REACTIVE                               5
+ 
+-#include "fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_common.h"
++#include "ffx_fsr3upscaler_callbacks_glsl.h"
++#include "ffx_fsr3upscaler_common.h"
+ 
+ #ifndef FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH
+ #define FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_debug_view_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_debug_view_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -35,9 +35,9 @@
+ 
+ #define FSR3UPSCALER_BIND_CB_FSR3UPSCALER                           6
+ 
+-#include "fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_common.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_debug_view.h"
++#include "ffx_fsr3upscaler_callbacks_glsl.h"
++#include "ffx_fsr3upscaler_common.h"
++#include "ffx_fsr3upscaler_debug_view.h"
+ 
+ #ifndef FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH
+ #define FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_luma_instability_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_luma_instability_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -38,9 +38,9 @@
+ 
+ #define FSR3UPSCALER_BIND_CB_FSR3UPSCALER                           9
+ 
+-#include "fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_common.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_luma_instability.h"
++#include "ffx_fsr3upscaler_callbacks_glsl.h"
++#include "ffx_fsr3upscaler_common.h"
++#include "ffx_fsr3upscaler_luma_instability.h"
+ 
+ #ifndef FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH
+ #define FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_luma_pyramid.h
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_luma_pyramid.h
+@@ -168,7 +168,7 @@
+ }
+ #endif
+ 
+-#include "spd/ffx_spd.h"
++#include "ffx_spd.h"
+ 
+ void ComputeAutoExposure(FfxUInt32x3 WorkGroupId, FfxUInt32 LocalThreadIndex)
+ {
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_luma_pyramid_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_luma_pyramid_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -41,9 +41,9 @@
+ #define FSR3UPSCALER_BIND_CB_FSR3UPSCALER                     11
+ #define FSR3UPSCALER_BIND_CB_SPD                              12
+ 
+-#include "fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_common.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_luma_pyramid.h"
++#include "ffx_fsr3upscaler_callbacks_glsl.h"
++#include "ffx_fsr3upscaler_common.h"
++#include "ffx_fsr3upscaler_luma_pyramid.h"
+ 
+ #ifndef FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH
+ #define FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH 256
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_prepare_inputs_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_prepare_inputs_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -37,9 +37,9 @@
+ 
+ #define FSR3UPSCALER_BIND_CB_FSR3UPSCALER                               8
+ 
+-#include "fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_common.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_prepare_inputs.h"
++#include "ffx_fsr3upscaler_callbacks_glsl.h"
++#include "ffx_fsr3upscaler_common.h"
++#include "ffx_fsr3upscaler_prepare_inputs.h"
+ 
+ #ifndef FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH
+ #define FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_prepare_reactivity_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_prepare_reactivity_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -41,9 +41,9 @@
+ 
+ #define FSR3UPSCALER_BIND_CB_FSR3UPSCALER                                   12
+ 
+-#include "fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_common.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_prepare_reactivity.h"
++#include "ffx_fsr3upscaler_callbacks_glsl.h"
++#include "ffx_fsr3upscaler_common.h"
++#include "ffx_fsr3upscaler_prepare_reactivity.h"
+ 
+ #ifndef FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH
+ #define FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_rcas.h
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_rcas.h
+@@ -50,7 +50,8 @@
+         b = FfxFloat16x2(b * e);
+     }
+ 
+-	#include "fsr1/ffx_fsr1.h"
++	// Godot: "ffx_fsr1.h" is included once, in the #else branch (Godot's shader builder inlines a file only at its
++	// first #include, and this branch is compiled out).
+ 	
+ 	void CurrFilterPaired(FFX_MIN16_U2 pos)
+     {
+@@ -78,7 +79,7 @@
+     }
+     void FsrRcasInputF(inout FfxFloat32 r, inout FfxFloat32 g, inout FfxFloat32 b) {}
+ 
+-    #include "fsr1/ffx_fsr1.h"
++    #include "ffx_fsr1.h"
+ 
+     void CurrFilter(FFX_MIN16_U2 pos)
+     {
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_rcas_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_rcas_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -35,9 +35,9 @@
+ #define FSR3UPSCALER_BIND_CB_FSR3UPSCALER           3
+ #define FSR3UPSCALER_BIND_CB_RCAS                   4
+ 
+-#include "fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_common.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_rcas.h"
++#include "ffx_fsr3upscaler_callbacks_glsl.h"
++#include "ffx_fsr3upscaler_common.h"
++#include "ffx_fsr3upscaler_rcas.h"
+ 
+ #ifndef FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH
+ #define FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH 64
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_shading_change_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_shading_change_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -31,9 +31,9 @@
+ 
+ #define FSR3UPSCALER_BIND_CB_FSR3UPSCALER                           2
+ 
+-#include "fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_common.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_shading_change.h"
++#include "ffx_fsr3upscaler_callbacks_glsl.h"
++#include "ffx_fsr3upscaler_common.h"
++#include "ffx_fsr3upscaler_shading_change.h"
+ 
+ #ifndef FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH
+ #define FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH 8
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_shading_change_pyramid.h
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_shading_change_pyramid.h
+@@ -273,7 +273,7 @@
+ }
+ #endif
+ 
+-#include "spd/ffx_spd.h"
++#include "ffx_spd.h"
+ 
+ void ComputeShadingChangePyramid(FfxUInt32x3 WorkGroupId, FfxUInt32 LocalThreadIndex)
+ {
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_shading_change_pyramid_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_shading_change_pyramid_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -43,9 +43,9 @@
+ #define FSR3UPSCALER_BIND_CB_FSR3UPSCALER                           11
+ #define FSR3UPSCALER_BIND_CB_SPD                                    12
+ 
+-#include "fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_common.h"
+-#include "fsr3upscaler/ffx_fsr3upscaler_shading_change_pyramid.h"
++#include "ffx_fsr3upscaler_callbacks_glsl.h"
++#include "ffx_fsr3upscaler_common.h"
++#include "ffx_fsr3upscaler_shading_change_pyramid.h"
+ 
+ #ifndef FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH
+ #define FFX_FSR3UPSCALER_THREAD_GROUP_WIDTH 256
+--- a/thirdparty/amd-fsr3/shaders/ffx_opticalflow_callbacks_glsl.h
++++ b/thirdparty/amd-fsr3/shaders/ffx_opticalflow_callbacks_glsl.h
+@@ -23,7 +23,7 @@
+ #ifndef FFX_OPTICALFLOW_CALLBACKS_HLSL_H
+ #define FFX_OPTICALFLOW_CALLBACKS_HLSL_H
+ 
+-#include "opticalflow/ffx_opticalflow_resources.h"
++#include "ffx_opticalflow_resources.h"
+ 
+ // no msad4 in glsl
+ #define FFX_OPTICALFLOW_USE_MSAD4_INSTRUCTION 0
+@@ -47,7 +47,7 @@
+ #endif // #if defined(FFX_GPU)
+ 
+ 
+-#include "opticalflow/ffx_opticalflow_common.h"
++#include "ffx_opticalflow_common.h"
+ 
+ 
+ #if defined(FFX_OPTICALFLOW_BIND_CB_COMMON)
+--- a/thirdparty/amd-fsr3/shaders/ffx_opticalflow_callbacks_hlsl.h
++++ b/thirdparty/amd-fsr3/shaders/ffx_opticalflow_callbacks_hlsl.h
+@@ -44,7 +44,7 @@
+ #undef FFX_OPTICALFLOW_USE_MSAD4_INSTRUCTION
+ #endif
+ 
+-#include "opticalflow/ffx_opticalflow_common.h"
++#include "ffx_opticalflow_common.h"
+ 
+ #ifndef FFX_PREFER_WAVE64
+ #define FFX_PREFER_WAVE64
+--- a/thirdparty/amd-fsr3/shaders/ffx_opticalflow_compute_luminance_pyramid.h
++++ b/thirdparty/amd-fsr3/shaders/ffx_opticalflow_compute_luminance_pyramid.h
+@@ -91,7 +91,7 @@
+ #endif
+ 
+ // https://github.com/GPUOpen-Effects/FidelityFX-SPD/blob/master/docs/FidelityFX_SPD.pdf
+-#include "spd/ffx_spd.h"
++#include "ffx_spd.h"
+ 
+ void ComputeOpticalFlowInputPyramid(FfxInt32x2 iGroupId, FfxInt32 iLocalIndex)
+ {
+--- a/thirdparty/amd-fsr3/shaders/ffx_opticalflow_compute_luminance_pyramid_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_opticalflow_compute_luminance_pyramid_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -36,9 +36,9 @@
+ #define FFX_OPTICALFLOW_BIND_CB_COMMON                             7
+ #define FFX_OPTICALFLOW_BIND_CB_SPD                                8
+ 
+-#include "opticalflow/ffx_opticalflow_callbacks_glsl.h"
+-#include "opticalflow/ffx_opticalflow_common.h"
+-#include "opticalflow/ffx_opticalflow_compute_luminance_pyramid.h"
++#include "ffx_opticalflow_callbacks_glsl.h"
++#include "ffx_opticalflow_common.h"
++#include "ffx_opticalflow_compute_luminance_pyramid.h"
+ 
+ #ifndef FFX_OPTICALFLOW_THREAD_GROUP_WIDTH
+ #define FFX_OPTICALFLOW_THREAD_GROUP_WIDTH 256
+--- a/thirdparty/amd-fsr3/shaders/ffx_opticalflow_compute_optical_flow_advanced_pass_v5.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_opticalflow_compute_optical_flow_advanced_pass_v5.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -37,8 +37,8 @@
+ #define FFX_OPTICALFLOW_BIND_CB_COMMON                             4
+ 
+ 
+-#include "opticalflow/ffx_opticalflow_callbacks_glsl.h"
+-#include "opticalflow/ffx_opticalflow_common.h"
++#include "ffx_opticalflow_callbacks_glsl.h"
++#include "ffx_opticalflow_common.h"
+ 
+ #ifndef FFX_OPTICALFLOW_BLOCK_SIZE
+ #define FFX_OPTICALFLOW_BLOCK_SIZE 8
+@@ -53,7 +53,7 @@
+ #define FFX_OPTICALFLOW_THREAD_GROUP_DEPTH 1
+ #endif // #ifndef FFX_OPTICALFLOW_THREAD_GROUP_DEPTH
+ 
+-#include "opticalflow/ffx_opticalflow_compute_optical_flow_v5.h"
++#include "ffx_opticalflow_compute_optical_flow_v5.h"
+ 
+ #ifndef FFX_OPTICALFLOW_NUM_THREADS
+ #define FFX_OPTICALFLOW_NUM_THREADS layout (local_size_x = FFX_OPTICALFLOW_THREAD_GROUP_WIDTH, local_size_y = FFX_OPTICALFLOW_THREAD_GROUP_HEIGHT, local_size_z = FFX_OPTICALFLOW_THREAD_GROUP_DEPTH) in;
+--- a/thirdparty/amd-fsr3/shaders/ffx_opticalflow_compute_scd_divergence_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_opticalflow_compute_scd_divergence_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -32,9 +32,9 @@
+ 
+ #define FFX_OPTICALFLOW_BIND_CB_COMMON                                 4
+ 
+-#include "opticalflow/ffx_opticalflow_callbacks_glsl.h"
+-#include "opticalflow/ffx_opticalflow_common.h"
+-#include "opticalflow/ffx_opticalflow_compute_scd_divergence.h"
++#include "ffx_opticalflow_callbacks_glsl.h"
++#include "ffx_opticalflow_common.h"
++#include "ffx_opticalflow_compute_scd_divergence.h"
+ 
+ #ifndef FFX_OPTICALFLOW_THREAD_GROUP_WIDTH
+ #define FFX_OPTICALFLOW_THREAD_GROUP_WIDTH 256
+--- a/thirdparty/amd-fsr3/shaders/ffx_opticalflow_filter_optical_flow_pass_v5.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_opticalflow_filter_optical_flow_pass_v5.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -31,8 +31,8 @@
+ 
+ #define FFX_OPTICALFLOW_BIND_CB_COMMON                                 2
+ 
+-#include "opticalflow/ffx_opticalflow_callbacks_glsl.h"
+-#include "opticalflow/ffx_opticalflow_common.h"
++#include "ffx_opticalflow_callbacks_glsl.h"
++#include "ffx_opticalflow_common.h"
+ 
+ #ifndef FFX_OPTICALFLOW_THREAD_GROUP_WIDTH
+ #define FFX_OPTICALFLOW_THREAD_GROUP_WIDTH 16
+@@ -44,7 +44,7 @@
+ #define FFX_OPTICALFLOW_THREAD_GROUP_DEPTH 1
+ #endif // #ifndef FFX_OPTICALFLOW_THREAD_GROUP_DEPTH
+ 
+-#include "opticalflow/ffx_opticalflow_filter_optical_flow_v5.h"
++#include "ffx_opticalflow_filter_optical_flow_v5.h"
+ 
+ #ifndef FFX_OPTICALFLOW_NUM_THREADS
+ #define FFX_OPTICALFLOW_NUM_THREADS layout (local_size_x = FFX_OPTICALFLOW_THREAD_GROUP_WIDTH, local_size_y = FFX_OPTICALFLOW_THREAD_GROUP_HEIGHT, local_size_z = FFX_OPTICALFLOW_THREAD_GROUP_DEPTH) in;
+--- a/thirdparty/amd-fsr3/shaders/ffx_opticalflow_generate_scd_histogram_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_opticalflow_generate_scd_histogram_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -30,9 +30,9 @@
+ 
+ #define FFX_OPTICALFLOW_BIND_CB_COMMON                         2
+ 
+-#include "opticalflow/ffx_opticalflow_callbacks_glsl.h"
+-#include "opticalflow/ffx_opticalflow_common.h"
+-#include "opticalflow/ffx_opticalflow_generate_scd_histogram.h"
++#include "ffx_opticalflow_callbacks_glsl.h"
++#include "ffx_opticalflow_common.h"
++#include "ffx_opticalflow_generate_scd_histogram.h"
+ 
+ #ifndef FFX_OPTICALFLOW_THREAD_GROUP_WIDTH
+ #define FFX_OPTICALFLOW_THREAD_GROUP_WIDTH 32
+--- a/thirdparty/amd-fsr3/shaders/ffx_opticalflow_prepare_luma_pass.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_opticalflow_prepare_luma_pass.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -30,8 +30,8 @@
+ 
+ #define FFX_OPTICALFLOW_BIND_CB_COMMON                       2
+ 
+-#include "opticalflow/ffx_opticalflow_callbacks_glsl.h"
+-#include "opticalflow/ffx_opticalflow_common.h"
++#include "ffx_opticalflow_callbacks_glsl.h"
++#include "ffx_opticalflow_common.h"
+ 
+ #ifndef FFX_OPTICALFLOW_THREAD_GROUP_WIDTH
+ #define FFX_OPTICALFLOW_THREAD_GROUP_WIDTH 16
+@@ -46,7 +46,7 @@
+ #define FFX_OPTICALFLOW_NUM_THREADS layout (local_size_x = FFX_OPTICALFLOW_THREAD_GROUP_WIDTH, local_size_y = FFX_OPTICALFLOW_THREAD_GROUP_HEIGHT, local_size_z = FFX_OPTICALFLOW_THREAD_GROUP_DEPTH) in;
+ #endif // #ifndef FFX_OPTICALFLOW_NUM_THREADS
+ 
+-#include "opticalflow/ffx_opticalflow_prepare_luma.h"
++#include "ffx_opticalflow_prepare_luma.h"
+ 
+ FFX_OPTICALFLOW_NUM_THREADS
+ void main()
+--- a/thirdparty/amd-fsr3/shaders/ffx_opticalflow_scale_optical_flow_advanced_pass_v5.glsl
++++ b/thirdparty/amd-fsr3/shaders/ffx_opticalflow_scale_optical_flow_advanced_pass_v5.glsl
+@@ -20,7 +20,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ // THE SOFTWARE.
+ 
+-#version 450
++//#version 450
+ 
+ #extension GL_GOOGLE_include_directive : require
+ #extension GL_EXT_samplerless_texture_functions : require
+@@ -34,8 +34,8 @@
+ 
+ #define FFX_OPTICALFLOW_BIND_CB_COMMON                         5
+ 
+-#include "opticalflow/ffx_opticalflow_callbacks_glsl.h"
+-#include "opticalflow/ffx_opticalflow_common.h"
++#include "ffx_opticalflow_callbacks_glsl.h"
++#include "ffx_opticalflow_common.h"
+ 
+ #ifndef FFX_OPTICALFLOW_BLOCK_SIZE
+ #define FFX_OPTICALFLOW_BLOCK_SIZE 8
+@@ -53,7 +53,7 @@
+ #define FFX_OPTICALFLOW_THREAD_GROUP_DEPTH 4
+ #endif // #ifndef FFX_OPTICALFLOW_THREAD_GROUP_DEPTH
+ 
+-#include "opticalflow/ffx_opticalflow_scale_optical_flow_advanced_v5.h"
++#include "ffx_opticalflow_scale_optical_flow_advanced_v5.h"
+ 
+ #ifndef FFX_OPTICALFLOW_NUM_THREADS
+ #define FFX_OPTICALFLOW_NUM_THREADS layout (local_size_x = FFX_OPTICALFLOW_THREAD_GROUP_WIDTH, local_size_y = FFX_OPTICALFLOW_THREAD_GROUP_HEIGHT, local_size_z = FFX_OPTICALFLOW_THREAD_GROUP_DEPTH) in;

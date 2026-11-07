@@ -386,6 +386,8 @@ private:
 		uint64_t grow : 1;
 		uint64_t proximity_fade : 1;
 		uint64_t orm : 1;
+		uint64_t heightmap_self_shadow : 1; // Mariner E16.
+		uint64_t heightmap_depth_offset : 1;
 
 		// flag bitfield
 		uint32_t feature_mask;
@@ -440,6 +442,8 @@ private:
 		mk.emission_op = emission_op;
 		mk.alpha_antialiasing_mode = alpha_antialiasing_mode;
 		mk.orm = orm;
+		mk.heightmap_self_shadow = heightmap_self_shadow;
+		mk.heightmap_depth_offset = heightmap_depth_offset;
 
 		mk.stencil_mode = stencil_mode;
 		mk.stencil_flags = stencil_flags;
@@ -492,6 +496,7 @@ private:
 		StringName heightmap_min_layers;
 		StringName heightmap_max_layers;
 		StringName heightmap_flip;
+		StringName heightmap_self_shadow_strength; // Mariner E16.
 		StringName uv1_blend_sharpness;
 		StringName uv2_blend_sharpness;
 		StringName grow;
@@ -586,6 +591,10 @@ private:
 	int deep_parallax_max_layers = 0;
 	bool heightmap_parallax_flip_tangent = false;
 	bool heightmap_parallax_flip_binormal = false;
+	// Mariner E16: self-shadowing towards the main light and depth of the relief point.
+	bool heightmap_self_shadow = false;
+	float heightmap_self_shadow_strength = 1.0;
+	bool heightmap_depth_offset = false;
 
 	bool proximity_fade_enabled = false;
 	float proximity_fade_distance = 0.0f;
@@ -701,6 +710,13 @@ public:
 
 	void set_heightmap_deep_parallax_flip_binormal(bool p_flip);
 	bool get_heightmap_deep_parallax_flip_binormal() const;
+
+	void set_heightmap_self_shadow(bool p_enable);
+	bool is_heightmap_self_shadow_enabled() const;
+	void set_heightmap_self_shadow_strength(float p_strength);
+	float get_heightmap_self_shadow_strength() const;
+	void set_heightmap_depth_offset(bool p_enable);
+	bool is_heightmap_depth_offset_enabled() const;
 
 	void set_subsurface_scattering_strength(float p_subsurface_scattering_strength);
 	float get_subsurface_scattering_strength() const;

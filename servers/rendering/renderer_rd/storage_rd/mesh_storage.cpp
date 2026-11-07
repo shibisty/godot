@@ -478,6 +478,7 @@ void MeshStorage::mesh_add_surface(RID p_mesh, const RenderingServerTypes::Surfa
 	s->mesh_to_skeleton_xform = p_surface.mesh_to_skeleton_xform;
 
 	s->uv_scale = new_surface.uv_scale;
+	s->uv_density = new_surface.uv_density;
 
 	if (mesh->blend_shape_count > 0) {
 		s->blend_shape_buffer = RD::get_singleton()->storage_buffer_create(new_surface.blend_shape_data.size(), new_surface.blend_shape_data);
@@ -678,6 +679,14 @@ RID MeshStorage::mesh_surface_get_material(RID p_mesh, int p_surface) const {
 	return mesh->surfaces[p_surface]->material;
 }
 
+float MeshStorage::mesh_surface_get_uv_density(RID p_mesh, int p_surface) const {
+	Mesh *mesh = mesh_owner.get_or_null(p_mesh);
+	ERR_FAIL_NULL_V(mesh, 0.0f);
+	ERR_FAIL_UNSIGNED_INDEX_V((uint32_t)p_surface, mesh->surface_count, 0.0f);
+
+	return mesh->surfaces[p_surface]->uv_density;
+}
+
 RenderingServerTypes::SurfaceData MeshStorage::mesh_get_surface(RID p_mesh, int p_surface) const {
 	Mesh *mesh = mesh_owner.get_or_null(p_mesh);
 	ERR_FAIL_NULL_V(mesh, RenderingServerTypes::SurfaceData());
@@ -709,6 +718,7 @@ RenderingServerTypes::SurfaceData MeshStorage::mesh_get_surface(RID p_mesh, int 
 	}
 	sd.aabb = s.aabb;
 	sd.uv_scale = s.uv_scale;
+	sd.uv_density = s.uv_density;
 	for (uint32_t i = 0; i < s.lod_count; i++) {
 		RenderingServerTypes::SurfaceData::LOD lod;
 		lod.edge_length = s.lods[i].edge_length;
@@ -1582,15 +1592,187 @@ void MeshStorage::_multimesh_free(RID p_rid) {
 	_update_dirty_multimeshes();
 	multimesh_allocate_data(p_rid, 0, RSE::MULTIMESH_TRANSFORM_2D);
 	MultiMesh *multimesh = multimesh_owner.get_or_null(p_rid);
+	// Mariner fix: the indirect command buffer is owned by the multimesh (allocate_data() above may return early).
+	_multimesh_free_command_buffer(multimesh);
+	_multimesh_free_shadow_cull(multimesh); // Mariner E14b.
+	_multimesh_free_view_cull(multimesh); // Mariner E25a.
 	multimesh->dependency.deleted_notify(p_rid);
 	multimesh_owner.free(p_rid);
+}
+
+void MeshStorage::multimesh_set_indirect_shadow_culling(RID p_multimesh, bool p_enable) {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL(multimesh);
+	multimesh->indirect_shadow_culling = p_enable;
+	if (!p_enable) {
+		_multimesh_free_shadow_cull(multimesh);
+	}
+}
+
+bool MeshStorage::multimesh_get_indirect_shadow_culling(RID p_multimesh) const {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL_V(multimesh, false);
+	return multimesh->indirect_shadow_culling && multimesh->indirect;
+}
+
+RID MeshStorage::multimesh_get_shadow_command_buffer_rd_rid(RID p_multimesh) const {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL_V(multimesh, RID());
+	return multimesh->shadow_command_buffer;
+}
+
+void MeshStorage::_multimesh_free_shadow_cull(MultiMesh *multimesh) {
+	RD *rd = RD::get_singleton();
+	for (RID *rid : { &multimesh->shadow_data_buffer, &multimesh->shadow_command_buffer, &multimesh->shadow_counter_buffer, &multimesh->cull_state_buffer }) {
+		if (rid->is_valid()) {
+			rd->free_rid(*rid);
+			*rid = RID();
+		}
+	}
+	multimesh->shadow_uniform_set = RID(); // Freed with its buffer.
+	multimesh->shadow_sections = 0;
+}
+
+bool MeshStorage::multimesh_shadow_cull_prepare(RID p_multimesh, uint32_t p_sections, RID p_shader, uint32_t p_set, MultiMeshShadowCull &r_cull) {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL_V(multimesh, false);
+	// A directional light's cascades at least.
+	return _multimesh_cull_prepare(multimesh, p_sections, 4, multimesh->shadow_sections, multimesh->shadow_data_buffer, multimesh->shadow_command_buffer, multimesh->shadow_counter_buffer, multimesh->shadow_uniform_set, p_shader, p_set, r_cull);
+}
+
+void MeshStorage::multimesh_set_indirect_view_culling(RID p_multimesh, bool p_enable) {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL(multimesh);
+	multimesh->indirect_view_culling = p_enable;
+	if (!p_enable) {
+		_multimesh_free_view_cull(multimesh);
+	}
+}
+
+bool MeshStorage::multimesh_get_indirect_view_culling(RID p_multimesh) const {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL_V(multimesh, false);
+	return multimesh->indirect_view_culling && multimesh->indirect;
+}
+
+RID MeshStorage::multimesh_get_view_command_buffer_rd_rid(RID p_multimesh) const {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL_V(multimesh, RID());
+	return multimesh->view_command_buffer;
+}
+
+void MeshStorage::_multimesh_free_view_cull(MultiMesh *multimesh) {
+	RD *rd = RD::get_singleton();
+	for (RID *rid : { &multimesh->view_data_buffer, &multimesh->view_command_buffer, &multimesh->view_counter_buffer, &multimesh->cull_state_buffer }) {
+		if (rid->is_valid()) {
+			rd->free_rid(*rid);
+			*rid = RID();
+		}
+	}
+	multimesh->view_uniform_set = RID(); // Freed with its buffer.
+	multimesh->view_sections = 0;
+}
+
+bool MeshStorage::multimesh_view_cull_prepare(RID p_multimesh, uint32_t p_sections, RID p_shader, uint32_t p_set, MultiMeshShadowCull &r_cull) {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL_V(multimesh, false);
+	if (!_multimesh_cull_prepare(multimesh, p_sections, 1, multimesh->view_sections, multimesh->view_data_buffer, multimesh->view_command_buffer, multimesh->view_counter_buffer, multimesh->view_uniform_set, p_shader, p_set, r_cull)) {
+		return false;
+	}
+	return true;
+}
+
+bool MeshStorage::_multimesh_cull_prepare(MultiMesh *multimesh, uint32_t p_sections, uint32_t p_min_sections, uint32_t &r_sections, RID &r_data, RID &r_commands, RID &r_counters, RID &r_uniform_set, RID p_shader, uint32_t p_set, MultiMeshShadowCull &r_cull) {
+	if (!multimesh->indirect || multimesh->instances == 0 || multimesh->buffer.is_null() || multimesh->command_buffer.is_null() || multimesh->xform_format != RSE::MULTIMESH_TRANSFORM_3D) {
+		return false;
+	}
+	Mesh *mesh = mesh_owner.get_or_null(multimesh->mesh);
+	if (mesh == nullptr || mesh->surface_count == 0) {
+		return false;
+	}
+	RD *rd = RD::get_singleton();
+	if (r_sections < p_sections || r_data.is_null()) {
+		for (RID *rid : { &r_data, &r_commands, &r_counters }) {
+			if (rid->is_valid()) {
+				rd->free_rid(*rid);
+				*rid = RID();
+			}
+		}
+		r_uniform_set = RID(); // Freed with its buffer.
+		const uint32_t sections = MAX(p_sections, p_min_sections);
+		r_sections = sections;
+		r_data = rd->storage_buffer_create(sizeof(float) * multimesh->stride_cache * multimesh->instances * sections);
+		r_commands = rd->storage_buffer_create(sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE * mesh->surface_count * sections, {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+		r_counters = rd->storage_buffer_create(sizeof(uint32_t) * sections);
+	}
+	if (r_uniform_set.is_null() || !rd->uniform_set_is_valid(r_uniform_set)) {
+		RD::Uniform u(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, r_data);
+		r_uniform_set = rd->uniform_set_create(VectorView<RD::Uniform>(&u, 1), p_shader, p_set);
+	}
+	r_cull.source_buffer = multimesh->buffer;
+	r_cull.source_command_buffer = multimesh->command_buffer;
+	r_cull.data_buffer = r_data;
+	r_cull.command_buffer = r_commands;
+	r_cull.counter_buffer = r_counters;
+	r_cull.uniform_set = r_uniform_set;
+	r_cull.capacity = multimesh->instances;
+	r_cull.stride = multimesh->stride_cache;
+	r_cull.source_offset = multimesh->motion_vectors_current_offset;
+	r_cull.surface_count = mesh->surface_count;
+	r_cull.mesh_aabb = mesh->custom_aabb != AABB() ? mesh->custom_aabb : mesh->aabb; // Custom: room for wind sway etc.
+	if (multimesh->cull_state_buffer.is_null()) {
+		// Mariner E25b / E25c, shared by camera and shadow culling. Zeroed: no occlusion timer runs (instances found
+		// occluded are culled at once, as on the CPU), outside the visibility range (the CPU's state of a new instance).
+		const uint32_t size = sizeof(uint32_t) * 2 * multimesh->instances;
+		multimesh->cull_state_buffer = rd->storage_buffer_create(size);
+		rd->buffer_clear(multimesh->cull_state_buffer, 0, size);
+	}
+	r_cull.state_buffer = multimesh->cull_state_buffer;
+	r_cull.buckets = 1;
+	return true;
+}
+
+void MeshStorage::_multimesh_free_command_buffer(MultiMesh *multimesh) {
+	if (multimesh->command_buffer.is_valid()) {
+		// Scripts written for stock Godot free the buffer themselves (from multimesh_get_command_buffer_rd_rid()) to work
+		// around the leak; don't report that as an error.
+		if (RD::get_singleton()->buffer_is_valid(multimesh->command_buffer)) {
+			RD::get_singleton()->free_rid(multimesh->command_buffer);
+		}
+		multimesh->command_buffer = RID();
+	}
+}
+
+void MeshStorage::_multimesh_update_command_buffer(MultiMesh *multimesh) {
+	_multimesh_free_command_buffer(multimesh);
+	if (!multimesh->indirect) {
+		return;
+	}
+	Mesh *mesh = mesh_owner.get_or_null(multimesh->mesh);
+	if (mesh == nullptr || mesh->surface_count == 0) {
+		return;
+	}
+
+	// One command per surface: {vertex or index count, instance count, 0, 0, 0}. The instance count is the visible
+	// instance count if it was set, otherwise 0 - the user writes it (usually from a compute shader).
+	const uint32_t stride = sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE;
+	const uint32_t instance_count = multimesh->visible_instances >= 0 ? uint32_t(multimesh->visible_instances) : 0u;
+	Vector<uint8_t> commands;
+	commands.resize_initialized(stride * mesh->surface_count);
+	uint8_t *w = commands.ptrw();
+	for (uint32_t i = 0; i < mesh->surface_count; i++) {
+		const uint32_t count = mesh_surface_get_vertices_drawn_count(mesh->surfaces[i]);
+		memcpy(w + i * stride, &count, sizeof(uint32_t));
+		memcpy(w + i * stride + sizeof(uint32_t), &instance_count, sizeof(uint32_t));
+	}
+	multimesh->command_buffer = RD::get_singleton()->storage_buffer_create(commands.size(), commands, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
 }
 
 void MeshStorage::_multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors, bool p_use_custom_data, bool p_use_indirect) {
 	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
 	ERR_FAIL_NULL(multimesh);
 
-	if (multimesh->instances == p_instances && multimesh->xform_format == p_transform_format && multimesh->uses_colors == p_use_colors && multimesh->uses_custom_data == p_use_custom_data) {
+	if (multimesh->instances == p_instances && multimesh->xform_format == p_transform_format && multimesh->uses_colors == p_use_colors && multimesh->uses_custom_data == p_use_custom_data && multimesh->indirect == p_use_indirect) {
 		return;
 	}
 
@@ -1613,6 +1795,9 @@ void MeshStorage::_multimesh_allocate_data(RID p_multimesh, int p_instances, RSE
 		multimesh->previous_data_cache_dirty_region_count = 0;
 	}
 
+	_multimesh_free_shadow_cull(multimesh); // Mariner E14b: sized for the old instances / stride.
+	_multimesh_free_view_cull(multimesh); // Mariner E25a: the same.
+
 	multimesh->instances = p_instances;
 	multimesh->xform_format = p_transform_format;
 	multimesh->uses_colors = p_use_colors;
@@ -1623,13 +1808,15 @@ void MeshStorage::_multimesh_allocate_data(RID p_multimesh, int p_instances, RSE
 	multimesh->buffer_set = false;
 
 	multimesh->indirect = p_use_indirect;
-	multimesh->command_buffer = RID();
 
 	//print_line("allocate, elements: " + itos(p_instances) + " 2D: " + itos(p_transform_format == RSE::MULTIMESH_TRANSFORM_2D) + " colors " + itos(multimesh->uses_colors) + " data " + itos(multimesh->uses_custom_data) + " stride " + itos(multimesh->stride_cache) + " total size " + itos(multimesh->stride_cache * multimesh->instances));
 	multimesh->data_cache = Vector<float>();
 	multimesh->aabb = AABB();
 	multimesh->aabb_dirty = false;
 	multimesh->visible_instances = MIN(multimesh->visible_instances, multimesh->instances);
+	// Mariner fix: the old command buffer was dropped here without being freed (leaked on every reallocation and on
+	// free), and an indirect multimesh lost its command buffer until the mesh was set again.
+	_multimesh_update_command_buffer(multimesh);
 	multimesh->motion_vectors_current_offset = 0;
 	multimesh->motion_vectors_previous_offset = 0;
 	multimesh->motion_vectors_last_change = -1;
@@ -1715,29 +1902,12 @@ void MeshStorage::_multimesh_set_mesh(RID p_multimesh, RID p_mesh) {
 		return;
 	}
 	multimesh->mesh = p_mesh;
+	// Mariner E25a: the culled sections hold commands per surface of the old mesh.
+	_multimesh_free_shadow_cull(multimesh);
+	_multimesh_free_view_cull(multimesh);
 
 	if (multimesh->indirect) {
-		Mesh *mesh = mesh_owner.get_or_null(p_mesh);
-		ERR_FAIL_NULL(mesh);
-		if (mesh->surface_count > 0) {
-			if (multimesh->command_buffer.is_valid()) {
-				RD::get_singleton()->free_rid(multimesh->command_buffer);
-			}
-
-			Vector<uint8_t> newVector;
-			newVector.resize_initialized(sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE * mesh->surface_count);
-
-			for (uint32_t i = 0; i < mesh->surface_count; i++) {
-				uint32_t count = mesh_surface_get_vertices_drawn_count(mesh->surfaces[i]);
-				newVector.set(i * sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE, static_cast<uint8_t>(count));
-				newVector.set(i * sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE + 1, static_cast<uint8_t>(count >> 8));
-				newVector.set(i * sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE + 2, static_cast<uint8_t>(count >> 16));
-				newVector.set(i * sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE + 3, static_cast<uint8_t>(count >> 24));
-			}
-
-			RID newBuffer = RD::get_singleton()->storage_buffer_create(sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE * mesh->surface_count, newVector, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
-			multimesh->command_buffer = newBuffer;
-		}
+		_multimesh_update_command_buffer(multimesh);
 	}
 
 	if (multimesh->instances == 0) {

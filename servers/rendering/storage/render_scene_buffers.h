@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/object/ref_counted.h"
+#include "servers/rendering/renderer_scene_hiz_occlusion.h"
 #include "servers/rendering/rendering_server_enums.h"
 
 class RenderSceneBuffersConfiguration : public RefCounted {
@@ -123,4 +124,8 @@ public:
 	// viewport was not path traced) and its reset. Both may be called from any thread.
 	virtual uint32_t get_pathtracing_sample_count() const { return 0; }
 	virtual void reset_pathtracing() {}
+
+	// Mariner E13: occlusion culling by the depth of earlier frames (set by the viewport, read back by the renderer,
+	// reprojected by RendererSceneCull). Render thread only.
+	RendererSceneHiZOcclusion::State hiz_occlusion;
 };

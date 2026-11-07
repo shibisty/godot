@@ -63,6 +63,9 @@ public:
 	virtual void light_set_reverse_cull_face_mode(RID p_light, bool p_enabled) = 0;
 	virtual void light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_mask) = 0;
 	virtual uint32_t light_get_shadow_caster_mask(RID p_light) const = 0;
+	// Mariner E20: direct light of the light from ReSTIR DI with ray traced shadows (Forward+ with raytracing).
+	virtual void light_set_restir(RID p_light, bool p_enable) {}
+	virtual bool light_is_restir(RID p_light) const { return false; }
 	virtual void light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) = 0;
 	virtual void light_set_max_sdfgi_cascade(RID p_light, uint32_t p_cascade) = 0;
 
@@ -71,6 +74,23 @@ public:
 	virtual void light_directional_set_shadow_mode(RID p_light, RSE::LightDirectionalShadowMode p_mode) = 0;
 	virtual void light_directional_set_blend_splits(RID p_light, bool p_enable) = 0;
 	virtual bool light_directional_get_blend_splits(RID p_light) const = 0;
+
+	// Mariner E10b: object shadow - instances on `p_layers` cast their directional shadow into a separate map fitted to
+	// them (`p_size` texels square) instead of the cascades from `p_from_cascade` on. Renderers without it ignore it.
+	virtual void light_directional_set_object_shadow(RID p_light, uint32_t p_layers, int p_size, int p_from_cascade) {}
+	virtual uint32_t light_directional_get_object_shadow_layers(RID p_light) const { return 0; }
+	virtual int light_directional_get_object_shadow_size(RID p_light) const { return 0; }
+	virtual int light_directional_get_object_shadow_from_cascade(RID p_light) const { return 0; }
+	// Per frame from the scene cull: the object shadow of this light instance is drawn (pass 4, transform in slot 4).
+	virtual void light_instance_set_directional_object_shadow(RID p_light_instance, bool p_enabled) {}
+	// Mariner E21: shadow_transform[5] holds the translucent shadow map of the light this frame.
+	virtual void light_instance_set_directional_translucent_shadow(RID p_light_instance, bool p_enabled) {}
+
+	// Mariner E11: screen space contact shadows of a directional light, ray length in meters (0: off).
+	virtual void light_directional_set_contact_shadow(RID p_light, float p_length) {}
+	virtual float light_directional_get_contact_shadow(RID p_light) const { return 0.0; }
+	virtual void light_directional_set_restir_shadow_mode(RID p_light, int p_mode) {} // Mariner E20d.
+	virtual int light_directional_get_restir_shadow_mode(RID p_light) const { return 0; }
 	virtual void light_directional_set_sky_mode(RID p_light, RSE::LightDirectionalSkyMode p_mode) = 0;
 	virtual RSE::LightDirectionalSkyMode light_directional_get_sky_mode(RID p_light) const = 0;
 

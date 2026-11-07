@@ -233,7 +233,8 @@ float RendererEnvironmentStorage::environment_get_white(RID p_env, bool p_limit_
 
 	// Glow with screen blend mode does not work when white < 1.0, so make sure
 	// it is at least 1.0 for all tonemappers:
-	if (env->tone_mapper == RSE::ENV_TONE_MAPPER_LINEAR) {
+	if (env->tone_mapper == RSE::ENV_TONE_MAPPER_LINEAR || env->tone_mapper == RSE::ENV_TONE_MAPPER_GT7) {
+		// GT7 maps to the display peak by itself; white is not a parameter of it.
 		return p_output_max_value;
 	} else if (env->tone_mapper == RSE::ENV_TONE_MAPPER_FILMIC || env->tone_mapper == RSE::ENV_TONE_MAPPER_ACES) {
 		// Filmic and ACES only support SDR; their white is stable regardless
@@ -338,9 +339,27 @@ RendererEnvironmentStorage::TonemapParameters RendererEnvironmentStorage::enviro
 		tonemap_parameters.awp_toe_a = awp_toe_a;
 		tonemap_parameters.awp_slope = awp_slope;
 		tonemap_parameters.awp_w = awp_w;
+	} else if (env->tone_mapper == RSE::ENV_TONE_MAPPER_GT7) {
+		gt7_tonemap_parameters(p_output_max_value, tonemap_parameters.gt7_peak, tonemap_parameters.gt7_peak_intensity);
 	}
 
 	return tonemap_parameters;
+}
+
+void RendererEnvironmentStorage::gt7_tonemap_parameters(float p_output_max_value, float &r_peak, float &r_peak_intensity) {
+	// GT7 places SDR paper white at 250 cd/m^2 (2.5 frame buffer units); the curve tunings assume a peak of at least
+	// that (Polyphony Digital reference), the PQ range ends at 10000 cd/m^2. Must match tonemap_gt7_inc.glsl.
+	const float paper_white = 2.5f;
+	r_peak = CLAMP(paper_white * MAX(p_output_max_value, 1.0f), paper_white, 100.0f);
+
+	// ICtCp intensity of grey at the peak: the PQ inverse EOTF of the peak (L = M = S for grey).
+	const double m1 = 0.1593017578125;
+	const double m2 = 78.84375;
+	const double c1 = 0.8359375;
+	const double c2 = 18.8515625;
+	const double c3 = 18.6875;
+	double ym = Math::pow(double(r_peak) * 100.0 / 10000.0, m1);
+	r_peak_intensity = float(Math::pow((c1 + c2 * ym) / (1.0 + c3 * ym), m2));
 }
 
 // Fog
@@ -1012,4 +1031,242 @@ float RendererEnvironmentStorage::environment_get_pathtracing_firefly_clamp(RID 
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, 0.0);
 	return env->pathtracing_firefly_clamp;
+}
+
+// Dynamic diffuse GI probes (Mariner E12)
+
+Vector3i RendererEnvironmentStorage::ddgi_clamp_probe_count(const Vector3i &p_count) {
+	// Atlas limits: probes of one Z row side by side (x * y tiles of 18 texels, at most 16384), at most 16384 probes.
+	Vector3i c(CLAMP(p_count.x, 2, 64), CLAMP(p_count.y, 2, 32), CLAMP(p_count.z, 2, 64));
+	while (c.x * c.y > 896 && c.y > 2) {
+		c.y--;
+	}
+	while (c.x * c.y * c.z > 16384 && c.z > 2) {
+		c.z--;
+	}
+	return c;
+}
+
+Vector3i RendererEnvironmentStorage::ddgi_volume_probe_count(const Vector3 &p_size, float p_spacing) {
+	const float spacing = MAX(p_spacing, 0.01f);
+	const Vector3 s = p_size.maxf(0.0);
+	return ddgi_clamp_probe_count(Vector3i(int(Math::round(s.x / spacing)) + 1, int(Math::round(s.y / spacing)) + 1, int(Math::round(s.z / spacing)) + 1));
+}
+
+void RendererEnvironmentStorage::environment_set_ddgi(RID p_env, bool p_enable, const Vector3i &p_probe_count, float p_probe_spacing, int p_rays_per_probe, float p_hysteresis, float p_energy, float p_bias, float p_specular_occlusion) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ddgi_enabled = p_enable;
+	env->ddgi_probe_count = ddgi_clamp_probe_count(p_probe_count);
+	env->ddgi_probe_spacing = CLAMP(p_probe_spacing, 0.1f, 64.0f);
+	env->ddgi_rays_per_probe = CLAMP((p_rays_per_probe + 31) / 32 * 32, 32, 256);
+	env->ddgi_hysteresis = CLAMP(p_hysteresis, 0.0f, 0.995f);
+	env->ddgi_energy = MAX(p_energy, 0.0f);
+	env->ddgi_bias = MAX(p_bias, 0.0f);
+	env->ddgi_specular_occlusion = CLAMP(p_specular_occlusion, 0.0f, 1.0f);
+}
+
+bool RendererEnvironmentStorage::environment_get_ddgi_enabled(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, false);
+	return env->ddgi_enabled;
+}
+
+Vector3i RendererEnvironmentStorage::environment_get_ddgi_probe_count(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, Vector3i(24, 8, 24));
+	return env->ddgi_probe_count;
+}
+
+float RendererEnvironmentStorage::environment_get_ddgi_probe_spacing(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 2.0);
+	return env->ddgi_probe_spacing;
+}
+
+int RendererEnvironmentStorage::environment_get_ddgi_rays_per_probe(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 128);
+	return env->ddgi_rays_per_probe;
+}
+
+float RendererEnvironmentStorage::environment_get_ddgi_hysteresis(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0.97);
+	return env->ddgi_hysteresis;
+}
+
+float RendererEnvironmentStorage::environment_get_ddgi_energy(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 1.0);
+	return env->ddgi_energy;
+}
+
+float RendererEnvironmentStorage::environment_get_ddgi_bias(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0.3);
+	return env->ddgi_bias;
+}
+
+float RendererEnvironmentStorage::environment_get_ddgi_specular_occlusion(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 1.0);
+	return env->ddgi_specular_occlusion;
+}
+
+void RendererEnvironmentStorage::environment_set_ddgi_update(RID p_env, int p_probes_per_frame, bool p_relocation) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ddgi_probes_per_frame = MAX(p_probes_per_frame, 0);
+	env->ddgi_relocation = p_relocation;
+}
+
+int RendererEnvironmentStorage::environment_get_ddgi_probes_per_frame(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0);
+	return env->ddgi_probes_per_frame;
+}
+
+bool RendererEnvironmentStorage::environment_get_ddgi_relocation(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, true);
+	return env->ddgi_relocation;
+}
+
+void RendererEnvironmentStorage::environment_set_ddgi_channels(RID p_env, float p_sky_energy, float p_lights_energy) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ddgi_sky_energy = MAX(p_sky_energy, 0.0f);
+	env->ddgi_lights_energy = MAX(p_lights_energy, 0.0f);
+}
+
+float RendererEnvironmentStorage::environment_get_ddgi_sky_energy(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 1.0);
+	return env->ddgi_sky_energy;
+}
+
+float RendererEnvironmentStorage::environment_get_ddgi_lights_energy(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 1.0);
+	return env->ddgi_lights_energy;
+}
+
+void RendererEnvironmentStorage::environment_set_ddgi_sea(RID p_env, bool p_enable, float p_level, const Color &p_color) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ddgi_sea = p_enable;
+	env->ddgi_sea_level = p_level;
+	env->ddgi_sea_color = p_color;
+}
+
+bool RendererEnvironmentStorage::environment_get_ddgi_sea(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, false);
+	return env->ddgi_sea;
+}
+
+float RendererEnvironmentStorage::environment_get_ddgi_sea_level(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0.0);
+	return env->ddgi_sea_level;
+}
+
+Color RendererEnvironmentStorage::environment_get_ddgi_sea_color(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, Color());
+	return env->ddgi_sea_color;
+}
+
+// Mariner E18.
+void RendererEnvironmentStorage::environment_set_ssao_gtao(RID p_env, bool p_enable, bool p_bent_normals, float p_thickness) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ssao_gtao = p_enable;
+	env->ssao_bent_normals = p_bent_normals;
+	env->ssao_gtao_thickness = MAX(p_thickness, 0.0f);
+}
+
+void RendererEnvironmentStorage::environment_set_restir(RID p_env, bool p_enable, int p_candidates, int p_spatial_samples, bool p_temporal, bool p_denoise) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->restir_enabled = p_enable;
+	env->restir_candidates = CLAMP(p_candidates, 1, 32);
+	env->restir_spatial_samples = CLAMP(p_spatial_samples, 0, 8);
+	env->restir_temporal = p_temporal;
+	env->restir_denoise = p_denoise;
+}
+
+bool RendererEnvironmentStorage::environment_get_restir_enabled(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, false);
+	return env->restir_enabled;
+}
+
+int RendererEnvironmentStorage::environment_get_restir_candidates(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 8);
+	return env->restir_candidates;
+}
+
+int RendererEnvironmentStorage::environment_get_restir_spatial_samples(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 3);
+	return env->restir_spatial_samples;
+}
+
+bool RendererEnvironmentStorage::environment_get_restir_temporal(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, true);
+	return env->restir_temporal;
+}
+
+bool RendererEnvironmentStorage::environment_get_restir_denoise(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, true);
+	return env->restir_denoise;
+}
+
+bool RendererEnvironmentStorage::environment_get_ssao_gtao(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, false);
+	return env->ssao_gtao;
+}
+
+bool RendererEnvironmentStorage::environment_get_ssao_bent_normals(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, true);
+	return env->ssao_bent_normals;
+}
+
+// Mariner F3.
+void RendererEnvironmentStorage::environment_set_color_grading(RID p_env, bool p_enable, float p_temperature, float p_tint, const Color &p_shadows, const Color &p_midtones, const Color &p_highlights, const Vector4 &p_tonal_ranges, const Vector3 &p_slope, const Vector3 &p_offset, const Vector3 &p_power, float p_saturation, bool p_gamut_mapping) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	ColorGrading &cg = env->color_grading;
+	cg.enabled = p_enable;
+	cg.temperature = CLAMP(p_temperature, 1667.0f, 25000.0f);
+	cg.tint = CLAMP(p_tint, -1.0f, 1.0f);
+	cg.shadows = p_shadows;
+	cg.midtones = p_midtones;
+	cg.highlights = p_highlights;
+	cg.tonal_ranges = p_tonal_ranges;
+	cg.slope = p_slope.maxf(0.0);
+	cg.offset = p_offset;
+	cg.power = p_power.maxf(0.01);
+	cg.saturation = MAX(p_saturation, 0.0f);
+	cg.gamut_mapping = p_gamut_mapping;
+}
+
+RendererEnvironmentStorage::ColorGrading RendererEnvironmentStorage::environment_get_color_grading(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, ColorGrading());
+	return env->color_grading;
+}
+
+// Mariner F1.
+float RendererEnvironmentStorage::environment_get_ssao_gtao_thickness(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0.5);
+	return env->ssao_gtao_thickness;
 }

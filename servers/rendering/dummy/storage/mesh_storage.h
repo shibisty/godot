@@ -95,6 +95,7 @@ public:
 		s->mesh_to_skeleton_xform = p_surface.mesh_to_skeleton_xform;
 		s->blend_shape_data = p_surface.blend_shape_data;
 		s->uv_scale = p_surface.uv_scale;
+		s->uv_density = p_surface.uv_density;
 		s->material = p_surface.material;
 		m->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_MESH);
 	}
@@ -136,6 +137,12 @@ public:
 		ERR_FAIL_NULL_V(m, RID());
 		ERR_FAIL_UNSIGNED_INDEX_V((uint32_t)p_surface, m->surfaces.size(), RID());
 		return m->surfaces[p_surface].material;
+	}
+	virtual float mesh_surface_get_uv_density(RID p_mesh, int p_surface) const override {
+		DummyMesh *m = mesh_owner.get_or_null(p_mesh);
+		ERR_FAIL_NULL_V(m, 0.0f);
+		ERR_FAIL_UNSIGNED_INDEX_V((uint32_t)p_surface, m->surfaces.size(), 0.0f);
+		return m->surfaces[p_surface].uv_density;
 	}
 
 	virtual RenderingServerTypes::SurfaceData mesh_get_surface(RID p_mesh, int p_surface) const override {

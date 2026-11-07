@@ -32,10 +32,14 @@
 
 #include "servers/rendering/renderer_compositor.h"
 #include "servers/rendering/renderer_rd/effects/bokeh_dof.h"
+#include "servers/rendering/renderer_rd/effects/cas.h"
 #include "servers/rendering/renderer_rd/effects/copy_effects.h"
 #include "servers/rendering/renderer_rd/effects/debug_effects.h"
 #include "servers/rendering/renderer_rd/effects/fsr.h"
+#include "servers/rendering/renderer_rd/effects/fsr3_upscaler.h"
+#include "servers/rendering/renderer_rd/effects/lens_flare.h"
 #include "servers/rendering/renderer_rd/effects/luminance.h"
+#include "servers/rendering/renderer_rd/effects/motion_blur.h"
 #include "servers/rendering/renderer_rd/effects/resolve.h"
 #include "servers/rendering/renderer_rd/effects/smaa.h"
 #include "servers/rendering/renderer_rd/effects/tone_mapper.h"
@@ -61,6 +65,9 @@ class RendererSceneRenderRD : public RendererSceneRender, public RenderingShader
 protected:
 	RendererRD::ForwardIDStorage *forward_id_storage = nullptr;
 	RendererRD::BokehDOF *bokeh_dof = nullptr;
+	RendererRD::MotionBlur *motion_blur = nullptr; // Mariner E15a.
+	RendererRD::LensFlare *lens_flare = nullptr; // Mariner E15b.
+	RendererRD::CAS *cas = nullptr; // Mariner E23.
 	RendererRD::CopyEffects *copy_effects = nullptr;
 	RendererRD::DebugEffects *debug_effects = nullptr;
 	RendererRD::Luminance *luminance = nullptr;
@@ -339,6 +346,9 @@ public:
 	virtual PackedByteArray bake_render_area_light_atlas(const TypedArray<RID> &p_area_light_textures, const TypedArray<Rect2> &p_area_light_atlas_texture_rects, const Size2i &p_size, int p_mipmaps) override;
 
 	virtual bool free(RID p_rid) override;
+
+	// Mariner E24b: the FSR 3.1 upscaler's surfaces of these render buffers (frame generation), or null.
+	virtual const RendererRD::FSR3UpscalerEffect::SharedSurfaces *get_fsr3_shared_surfaces(const Ref<RenderSceneBuffersRD> &p_render_buffers) const { return nullptr; }
 
 	virtual void update() override;
 

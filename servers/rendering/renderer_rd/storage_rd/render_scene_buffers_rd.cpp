@@ -31,6 +31,7 @@
 #include "render_scene_buffers_rd.h"
 #include "render_scene_buffers_rd.compat.inc"
 
+#include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "servers/rendering/renderer_compositor.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
@@ -156,6 +157,111 @@ void RenderSceneBuffersRD::free_pathtracing() {
 	}
 	pt = Pathtracing();
 	pathtracing_published_samples.set(0);
+}
+
+void RenderSceneBuffersRD::free_ddgi_volume(uint32_t p_volume) {
+	ERR_FAIL_UNSIGNED_INDEX(p_volume, uint32_t(DDGI_VOLUME_MAX));
+	DDGIVolume &v = ddgi.volumes[p_volume];
+	RD *rd = RD::get_singleton();
+	RID *rids[] = { &v.irradiance, &v.irradiance_lights, &v.distance, &v.rays, &v.probe_state, &v.probe_data, &v.slot_list };
+	for (RID *r : rids) {
+		if (r->is_valid()) {
+			rd->free_rid(*r);
+		}
+	}
+	v = DDGIVolume();
+}
+
+int RenderSceneBuffersRD::hiz_readback_acquire(const Size2i &p_size) {
+	for (uint32_t i = 0; i < HIZ_READBACK_SLOTS; i++) {
+		HiZReadback &slot = hiz_readback[i];
+		if (slot.pending) {
+			continue;
+		}
+		if (slot.buffer.is_valid() && slot.size != p_size) {
+			RD::get_singleton()->free_rid(slot.buffer);
+			slot.buffer = RID();
+		}
+		if (slot.buffer.is_null()) {
+			slot.buffer = RD::get_singleton()->storage_buffer_create(sizeof(float) * p_size.x * p_size.y);
+			slot.size = p_size;
+		}
+		return int(i);
+	}
+	return -1;
+}
+
+void RenderSceneBuffersRD::hiz_readback_request(int p_slot, const Transform3D &p_cam_transform, const Projection &p_projection, uint64_t p_frame) {
+	ERR_FAIL_INDEX(p_slot, int(HIZ_READBACK_SLOTS));
+	HiZReadback &slot = hiz_readback[p_slot];
+	slot.cam_transform = p_cam_transform;
+	slot.projection = p_projection;
+	slot.reference = hiz_occlusion.reference;
+	slot.reference_radius = hiz_occlusion.reference_radius;
+	slot.frame = p_frame;
+	if (RD::get_singleton()->buffer_get_data_async(slot.buffer, callable_mp(this, &RenderSceneBuffersRD::_hiz_readback_done).bind(p_slot)) == OK) {
+		slot.pending = true;
+	}
+}
+
+void RenderSceneBuffersRD::_hiz_readback_done(const PackedByteArray &p_data, int p_slot) {
+	ERR_FAIL_INDEX(p_slot, int(HIZ_READBACK_SLOTS));
+	HiZReadback &slot = hiz_readback[p_slot];
+	if (!slot.pending) {
+		return; // Freed meanwhile.
+	}
+	slot.pending = false;
+	RendererSceneHiZOcclusion::Snapshot &snapshot = hiz_occlusion.snapshot;
+	const int count = slot.size.x * slot.size.y;
+	if (p_data.size() != int64_t(sizeof(float)) * count || (snapshot.valid && snapshot.frame >= slot.frame)) {
+		return; // Not newer than the one we have (they may arrive out of order).
+	}
+	snapshot.distances.resize(count);
+	memcpy(snapshot.distances.ptr(), p_data.ptr(), sizeof(float) * count);
+	snapshot.size = slot.size;
+	snapshot.cam_transform = slot.cam_transform;
+	snapshot.projection = slot.projection;
+	snapshot.reference = slot.reference;
+	snapshot.reference_radius = slot.reference_radius;
+	snapshot.frame = slot.frame;
+	snapshot.valid = true;
+}
+
+void RenderSceneBuffersRD::free_hiz_readback() {
+	for (HiZReadback &slot : hiz_readback) {
+		if (slot.buffer.is_valid()) {
+			RD::get_singleton()->free_rid(slot.buffer);
+		}
+		slot = HiZReadback();
+	}
+}
+
+void RenderSceneBuffersRD::free_ddgi() {
+	for (uint32_t i = 0; i < DDGI_VOLUME_MAX; i++) {
+		free_ddgi_volume(i);
+	}
+	RD *rd = RD::get_singleton();
+	if (ddgi.params_buffer.is_valid()) {
+		rd->free_rid(ddgi.params_buffer);
+	}
+	if (ddgi.light_buffer.is_valid()) {
+		rd->free_rid(ddgi.light_buffer);
+	}
+	ddgi = DDGI();
+}
+
+void RenderSceneBuffersRD::free_restir() {
+	RD *rd = RD::get_singleton();
+	RID *buffers[] = { &restir.light_buffer, &restir.cell_buffer, &restir.index_buffer, &restir.remap_buffer, &restir.params_buffer, &restir.shadow_params_buffer, &restir.late_shadow_params_buffer };
+	for (RID *b : buffers) {
+		if (b->is_valid()) {
+			rd->free_rid(*b);
+		}
+	}
+	if (has_texture(SNAME("mariner_restir"), SNAME("surface0"))) {
+		clear_context(SNAME("mariner_restir"));
+	}
+	restir = Restir();
 }
 
 bool RenderSceneBuffersRD::has_raytracing_scene() const {
@@ -290,6 +396,9 @@ void RenderSceneBuffersRD::cleanup() {
 
 	free_raytracing_scene();
 	free_pathtracing();
+	free_ddgi();
+	free_restir(); // Mariner E20.
+	free_hiz_readback();
 
 	// Clear weight_buffer / blur textures.
 	for (WeightBuffers &weight_buffer : weight_buffers) {

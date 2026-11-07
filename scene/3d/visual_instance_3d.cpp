@@ -380,6 +380,55 @@ GeometryInstance3D::ShadowCastingSetting GeometryInstance3D::get_cast_shadows_se
 	return shadow_casting_setting;
 }
 
+void GeometryInstance3D::set_shadow_cache_mode(ShadowCacheMode p_mode) {
+	shadow_cache_mode = p_mode;
+	RS::get_singleton()->instance_geometry_set_shadow_cache_mode(get_instance(), (RSE::ShadowCacheMode)p_mode);
+}
+
+GeometryInstance3D::ShadowCacheMode GeometryInstance3D::get_shadow_cache_mode() const {
+	return shadow_cache_mode;
+}
+
+void GeometryInstance3D::set_raytracing_mode(RaytracingMode p_mode) {
+	raytracing_mode = p_mode;
+	RS::get_singleton()->instance_geometry_set_raytracing(get_instance(), (RSE::RaytracingMode)p_mode, raytracing_opacity);
+}
+
+GeometryInstance3D::RaytracingMode GeometryInstance3D::get_raytracing_mode() const {
+	return raytracing_mode;
+}
+
+void GeometryInstance3D::set_raytracing_opacity(float p_opacity) {
+	raytracing_opacity = CLAMP(p_opacity, 0.0f, 1.0f);
+	RS::get_singleton()->instance_geometry_set_raytracing(get_instance(), (RSE::RaytracingMode)raytracing_mode, raytracing_opacity);
+}
+
+float GeometryInstance3D::get_raytracing_opacity() const {
+	return raytracing_opacity;
+}
+
+void GeometryInstance3D::set_shadow_translucent(bool p_enabled) {
+	shadow_translucent = p_enabled;
+	RS::get_singleton()->instance_geometry_set_shadow_translucent(get_instance(), p_enabled);
+}
+
+bool GeometryInstance3D::is_shadow_translucent() const {
+	return shadow_translucent;
+}
+
+void GeometryInstance3D::set_gpu_static(bool p_enabled) {
+	gpu_static = p_enabled;
+	RS::get_singleton()->instance_geometry_set_gpu_static(get_instance(), p_enabled);
+}
+
+bool GeometryInstance3D::is_gpu_static() const {
+	return gpu_static;
+}
+
+bool GeometryInstance3D::is_gpu_static_active() const {
+	return RS::get_singleton()->instance_geometry_is_gpu_static_active(get_instance());
+}
+
 void GeometryInstance3D::set_extra_cull_margin(float p_margin) {
 	ERR_FAIL_COND(p_margin < 0);
 	extra_cull_margin = p_margin;
@@ -555,6 +604,18 @@ void GeometryInstance3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_cast_shadows_setting", "shadow_casting_setting"), &GeometryInstance3D::set_cast_shadows_setting);
 	ClassDB::bind_method(D_METHOD("get_cast_shadows_setting"), &GeometryInstance3D::get_cast_shadows_setting);
 
+	ClassDB::bind_method(D_METHOD("set_shadow_cache_mode", "mode"), &GeometryInstance3D::set_shadow_cache_mode);
+	ClassDB::bind_method(D_METHOD("get_shadow_cache_mode"), &GeometryInstance3D::get_shadow_cache_mode);
+	ClassDB::bind_method(D_METHOD("set_raytracing_mode", "mode"), &GeometryInstance3D::set_raytracing_mode);
+	ClassDB::bind_method(D_METHOD("get_raytracing_mode"), &GeometryInstance3D::get_raytracing_mode);
+	ClassDB::bind_method(D_METHOD("set_raytracing_opacity", "opacity"), &GeometryInstance3D::set_raytracing_opacity);
+	ClassDB::bind_method(D_METHOD("get_raytracing_opacity"), &GeometryInstance3D::get_raytracing_opacity);
+	ClassDB::bind_method(D_METHOD("set_shadow_translucent", "enabled"), &GeometryInstance3D::set_shadow_translucent);
+	ClassDB::bind_method(D_METHOD("is_shadow_translucent"), &GeometryInstance3D::is_shadow_translucent);
+	ClassDB::bind_method(D_METHOD("set_gpu_static", "enabled"), &GeometryInstance3D::set_gpu_static);
+	ClassDB::bind_method(D_METHOD("is_gpu_static"), &GeometryInstance3D::is_gpu_static);
+	ClassDB::bind_method(D_METHOD("is_gpu_static_active"), &GeometryInstance3D::is_gpu_static_active);
+
 	ClassDB::bind_method(D_METHOD("set_lod_bias", "bias"), &GeometryInstance3D::set_lod_bias);
 	ClassDB::bind_method(D_METHOD("get_lod_bias"), &GeometryInstance3D::get_lod_bias);
 
@@ -606,6 +667,11 @@ void GeometryInstance3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material_overlay", PROPERTY_HINT_RESOURCE_TYPE, "BaseMaterial3D,ShaderMaterial", PROPERTY_USAGE_DEFAULT), "set_material_overlay", "get_material_overlay");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "transparency", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_transparency", "get_transparency");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cast_shadow", PROPERTY_HINT_ENUM, "Off,On,Double-Sided,Shadows Only"), "set_cast_shadows_setting", "get_cast_shadows_setting");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "shadow_cache_mode", PROPERTY_HINT_ENUM, "Auto,Static,Dynamic"), "set_shadow_cache_mode", "get_shadow_cache_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "shadow_translucent"), "set_shadow_translucent", "is_shadow_translucent");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "gpu_static"), "set_gpu_static", "is_gpu_static");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "raytracing_mode", PROPERTY_HINT_ENUM, "Default,Raytracing Only,Disabled"), "set_raytracing_mode", "get_raytracing_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "raytracing_opacity", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_raytracing_opacity", "get_raytracing_opacity");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "extra_cull_margin", PROPERTY_HINT_RANGE, "0,16384,0.01,suffix:m"), "set_extra_cull_margin", "get_extra_cull_margin");
 	ADD_PROPERTY(PropertyInfo(Variant::AABB, "custom_aabb", PROPERTY_HINT_NONE, "suffix:m"), "set_custom_aabb", "get_custom_aabb");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_bias", PROPERTY_HINT_RANGE, "0.001,128,0.001"), "set_lod_bias", "get_lod_bias");
@@ -629,6 +695,14 @@ void GeometryInstance3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(SHADOW_CASTING_SETTING_ON);
 	BIND_ENUM_CONSTANT(SHADOW_CASTING_SETTING_DOUBLE_SIDED);
 	BIND_ENUM_CONSTANT(SHADOW_CASTING_SETTING_SHADOWS_ONLY);
+
+	BIND_ENUM_CONSTANT(SHADOW_CACHE_MODE_AUTO);
+	BIND_ENUM_CONSTANT(SHADOW_CACHE_MODE_STATIC);
+	BIND_ENUM_CONSTANT(SHADOW_CACHE_MODE_DYNAMIC);
+
+	BIND_ENUM_CONSTANT(RAYTRACING_MODE_DEFAULT);
+	BIND_ENUM_CONSTANT(RAYTRACING_MODE_ONLY);
+	BIND_ENUM_CONSTANT(RAYTRACING_MODE_DISABLED);
 
 	BIND_ENUM_CONSTANT(GI_MODE_DISABLED);
 	BIND_ENUM_CONSTANT(GI_MODE_STATIC);

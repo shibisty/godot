@@ -229,6 +229,15 @@ void RenderingServerDefault::_run_post_draw_steps() {
 	emit_signal(SNAME("frame_post_draw"));
 }
 
+uint64_t RenderingServerDefault::get_frame_generation_presented_count(DisplayServerEnums::WindowID p_window) const {
+	// A counter written on the render thread; reading it from another thread may lag a frame behind.
+	return RSG::rasterizer ? RSG::rasterizer->fsr3_frame_generation_get_presented_count(p_window) : 0;
+}
+
+RID RenderingServerDefault::get_frame_generation_output_texture(DisplayServerEnums::WindowID p_window) const {
+	return RSG::rasterizer ? RSG::rasterizer->fsr3_frame_generation_get_output_texture(p_window) : RID();
+}
+
 double RenderingServerDefault::get_frame_setup_time_cpu() const {
 	return frame_setup_time;
 }

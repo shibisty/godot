@@ -590,6 +590,7 @@ void BaseMaterial3D::init_shaders() {
 	shader_names->heightmap_min_layers = "heightmap_min_layers";
 	shader_names->heightmap_max_layers = "heightmap_max_layers";
 	shader_names->heightmap_flip = "heightmap_flip";
+	shader_names->heightmap_self_shadow_strength = "heightmap_self_shadow_strength";
 
 	shader_names->grow = "grow";
 
@@ -1147,6 +1148,9 @@ uniform int heightmap_max_layers : hint_range(1, 64);
 uniform vec2 heightmap_flip;
 )",
 				texfilter_height_str);
+		if (heightmap_self_shadow) {
+			code += "uniform float heightmap_self_shadow_strength : hint_range(0.0, 1.0, 0.01);\n";
+		}
 	}
 	if (flags[FLAG_UV1_USE_TRIPLANAR]) {
 		code += "varying vec3 uv1_triplanar_pos;\n";
@@ -1515,6 +1519,7 @@ void fragment() {)";
 	{
 		// Height: Enabled
 		vec3 view_dir = normalize(normalize(-VERTEX + EYE_OFFSET) * mat3(TANGENT * heightmap_flip.x, -BINORMAL * heightmap_flip.y, NORMAL));
+		vec2 height_base_uv = base_uv; // Mariner E16: before the parallax offset.
 )";
 
 		if (deep_parallax) {
@@ -1558,6 +1563,7 @@ void fragment() {)";
 			code += R"(
 		float weight = after_depth / (after_depth - before_depth);
 		ofs = mix(ofs, prev_ofs, weight);
+		float hit_depth = mix(current_depth, current_depth - layer_depth, weight); // Mariner E16.
 )";
 
 		} else {
@@ -1570,6 +1576,51 @@ void fragment() {)";
 			// This reduces the impression of depth, but avoids visible warping in the distance.
 			// Multiply the heightmap scale by 0.01 to improve heightmap scale usability.
 			code += "		vec2 ofs = base_uv - view_dir.xy * depth * heightmap_scale * 0.01;\n";
+			code += "		float hit_depth = depth; // Mariner E16.\n";
+		}
+
+		// Mariner E16: depth (0 at the top of the relief, 1 at its bottom) of the heightmap at a UV.
+		const String depth_at = flags[FLAG_INVERT_HEIGHTMAP] ? "texture(texture_heightmap, %s).r" : "(1.0 - texture(texture_heightmap, %s).r)";
+		if (heightmap_self_shadow) {
+			// Self-shadowing (after the idea of "steep parallax occlusion mapping" with soft shadows): from the point seen,
+			// along the main light up to the top of the relief; relief above the ray blocks the light, nearer more.
+			code += R"(
+		// Height Self Shadow: Enabled
+		{
+			vec3 light_t = normalize(MAIN_LIGHT_DIRECTION * mat3(TANGENT * heightmap_flip.x, -BINORMAL * heightmap_flip.y, NORMAL));
+			if (light_t.z > 0.0) {
+				const int shadow_steps = 12;
+				float d_step = hit_depth / float(shadow_steps);
+				vec2 uv_step = light_t.xy / max(light_t.z, 0.1) * heightmap_scale * 0.01 * d_step;
+				vec2 shadow_uv = ofs;
+				float ray_depth = hit_depth;
+				float occlusion = 0.0;
+				for (int i = 1; i <= shadow_steps; i++) {
+					shadow_uv += uv_step;
+					ray_depth -= d_step;
+)";
+			code += "					float surface_depth = " + vformat(depth_at, "shadow_uv") + ";\n";
+			code += R"(
+					occlusion = max(occlusion, (ray_depth - surface_depth) * (1.0 - float(i) / float(shadow_steps + 1)));
+				}
+				MAIN_LIGHT_SHADOW = 1.0 - clamp(occlusion * 20.0, 0.0, 1.0) * heightmap_self_shadow_strength;
+			}
+		}
+)";
+		}
+		if (heightmap_depth_offset) {
+			// The seen point of the relief, below the mesh surface, as far along the view ray as the parallax shifted it:
+			// its depth (intersections, contact shadows, SSAO) and the position its light is computed at (shadow maps).
+			code += R"(
+		// Height Depth Offset: Enabled
+		{
+			float world_per_uv = sqrt(length(dFdx(VERTEX)) * length(dFdy(VERTEX)) / max(length(dFdx(height_base_uv)) * length(dFdy(height_base_uv)), 1e-12));
+			vec3 relief_vertex = VERTEX - normalize(-VERTEX + EYE_OFFSET) * (hit_depth * abs(heightmap_scale) * 0.01 * world_per_uv);
+			LIGHT_VERTEX = relief_vertex;
+			vec4 relief_clip = PROJECTION_MATRIX * vec4(relief_vertex, 1.0);
+			DEPTH = relief_clip.z / relief_clip.w;
+		}
+)";
 		}
 
 		code += "		base_uv = ofs;\n";
@@ -2631,6 +2682,10 @@ void BaseMaterial3D::_validate_property(PropertyInfo &p_property) const {
 		p_property.usage = PROPERTY_USAGE_NONE;
 	}
 
+	if (p_property.name == "heightmap_self_shadow_strength" && !heightmap_self_shadow) {
+		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
+	}
+
 	if (Engine::get_singleton()->is_editor_hint()) {
 		if (p_property.name == "depth_test" && flags[FLAG_DISABLE_DEPTH_TEST]) {
 			p_property.usage = PROPERTY_USAGE_NO_EDITOR;
@@ -2825,6 +2880,34 @@ void BaseMaterial3D::set_particles_anim_loop(bool p_loop) {
 
 bool BaseMaterial3D::get_particles_anim_loop() const {
 	return particles_anim_loop;
+}
+
+void BaseMaterial3D::set_heightmap_self_shadow(bool p_enable) {
+	heightmap_self_shadow = p_enable;
+	_queue_shader_change();
+	notify_property_list_changed();
+}
+
+bool BaseMaterial3D::is_heightmap_self_shadow_enabled() const {
+	return heightmap_self_shadow;
+}
+
+void BaseMaterial3D::set_heightmap_self_shadow_strength(float p_strength) {
+	heightmap_self_shadow_strength = CLAMP(p_strength, 0.0f, 1.0f);
+	_material_set_param(shader_names->heightmap_self_shadow_strength, heightmap_self_shadow_strength);
+}
+
+float BaseMaterial3D::get_heightmap_self_shadow_strength() const {
+	return heightmap_self_shadow_strength;
+}
+
+void BaseMaterial3D::set_heightmap_depth_offset(bool p_enable) {
+	heightmap_depth_offset = p_enable;
+	_queue_shader_change();
+}
+
+bool BaseMaterial3D::is_heightmap_depth_offset_enabled() const {
+	return heightmap_depth_offset;
 }
 
 void BaseMaterial3D::set_heightmap_deep_parallax(bool p_enable) {
@@ -3465,6 +3548,12 @@ void BaseMaterial3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_particles_anim_loop", "loop"), &BaseMaterial3D::set_particles_anim_loop);
 	ClassDB::bind_method(D_METHOD("get_particles_anim_loop"), &BaseMaterial3D::get_particles_anim_loop);
 
+	ClassDB::bind_method(D_METHOD("set_heightmap_self_shadow", "enable"), &BaseMaterial3D::set_heightmap_self_shadow);
+	ClassDB::bind_method(D_METHOD("is_heightmap_self_shadow_enabled"), &BaseMaterial3D::is_heightmap_self_shadow_enabled);
+	ClassDB::bind_method(D_METHOD("set_heightmap_self_shadow_strength", "strength"), &BaseMaterial3D::set_heightmap_self_shadow_strength);
+	ClassDB::bind_method(D_METHOD("get_heightmap_self_shadow_strength"), &BaseMaterial3D::get_heightmap_self_shadow_strength);
+	ClassDB::bind_method(D_METHOD("set_heightmap_depth_offset", "enable"), &BaseMaterial3D::set_heightmap_depth_offset);
+	ClassDB::bind_method(D_METHOD("is_heightmap_depth_offset_enabled"), &BaseMaterial3D::is_heightmap_depth_offset_enabled);
 	ClassDB::bind_method(D_METHOD("set_heightmap_deep_parallax", "enable"), &BaseMaterial3D::set_heightmap_deep_parallax);
 	ClassDB::bind_method(D_METHOD("is_heightmap_deep_parallax_enabled"), &BaseMaterial3D::is_heightmap_deep_parallax_enabled);
 
@@ -3650,6 +3739,9 @@ void BaseMaterial3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "heightmap_max_layers", PROPERTY_HINT_RANGE, "1,64,1"), "set_heightmap_deep_parallax_max_layers", "get_heightmap_deep_parallax_max_layers");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "heightmap_flip_tangent"), "set_heightmap_deep_parallax_flip_tangent", "get_heightmap_deep_parallax_flip_tangent");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "heightmap_flip_binormal"), "set_heightmap_deep_parallax_flip_binormal", "get_heightmap_deep_parallax_flip_binormal");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "heightmap_self_shadow"), "set_heightmap_self_shadow", "is_heightmap_self_shadow_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "heightmap_self_shadow_strength", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_heightmap_self_shadow_strength", "get_heightmap_self_shadow_strength");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "heightmap_depth_offset"), "set_heightmap_depth_offset", "is_heightmap_depth_offset_enabled");
 	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "heightmap_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_HEIGHTMAP);
 	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "heightmap_flip_texture"), "set_flag", "get_flag", FLAG_INVERT_HEIGHTMAP);
 
@@ -3966,6 +4058,7 @@ BaseMaterial3D::BaseMaterial3D(bool p_orm) :
 
 	set_heightmap_deep_parallax_min_layers(8);
 	set_heightmap_deep_parallax_max_layers(32);
+	set_heightmap_self_shadow_strength(1.0); // Mariner E16.
 	set_heightmap_deep_parallax_flip_tangent(false); //also sets binormal
 
 	set_z_clip_scale(1.0);

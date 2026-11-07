@@ -69,6 +69,7 @@ public:
 		TONE_MAPPER_FILMIC,
 		TONE_MAPPER_ACES,
 		TONE_MAPPER_AGX,
+		TONE_MAPPER_GT7, // Mariner E23.
 	};
 
 	enum SDFGIYScale {
@@ -167,6 +168,17 @@ private:
 	float ssao_sharpness = 0.98;
 	float ssao_direct_light_affect = 0.0;
 	float ssao_ao_channel_affect = 0.0;
+	bool ssao_gtao = false; // Mariner E18.
+
+	// Mariner E20: ReSTIR DI.
+	bool restir_enabled = false;
+	int restir_candidates = 8;
+	int restir_spatial_samples = 3;
+	bool restir_temporal = true;
+	bool restir_denoise = true;
+	void _update_restir();
+	bool ssao_bent_normals = true;
+	float ssao_gtao_thickness = 0.5; // Mariner F1.
 	void _update_ssao();
 
 	// SSIL
@@ -253,6 +265,21 @@ private:
 	Ref<Texture> adjustment_color_correction;
 	void _update_adjustment();
 
+	// Mariner F3: color grading.
+	bool color_grading_enabled = false;
+	float color_grading_temperature = 6500.0;
+	float color_grading_tint = 0.0;
+	Color color_grading_shadows = Color(1, 1, 1);
+	Color color_grading_midtones = Color(1, 1, 1);
+	Color color_grading_highlights = Color(1, 1, 1);
+	Vector4 color_grading_tonal_ranges = Vector4(0.0, 0.333, 0.55, 1.0);
+	Vector3 color_grading_slope = Vector3(1, 1, 1);
+	Vector3 color_grading_offset = Vector3(0, 0, 0);
+	Vector3 color_grading_power = Vector3(1, 1, 1);
+	float color_grading_saturation = 1.0;
+	bool color_grading_gamut_mapping = true;
+	void _update_color_grading();
+
 	// Path tracing (Mariner E5c)
 	bool pathtracing_enabled = false;
 	PathtracingDebugMode pathtracing_debug_mode = RT_DEBUG_DISABLED;
@@ -263,6 +290,24 @@ private:
 	int pathtracing_max_samples = 0;
 	float pathtracing_firefly_clamp = 0.0;
 	void _update_pathtracing();
+
+	// Dynamic diffuse GI probes (Mariner E12)
+	bool ddgi_enabled = false;
+	Vector3i ddgi_probe_count = Vector3i(24, 8, 24);
+	float ddgi_probe_spacing = 2.0;
+	int ddgi_rays_per_probe = 128;
+	float ddgi_hysteresis = 0.97;
+	float ddgi_energy = 1.0;
+	float ddgi_bias = 0.3;
+	float ddgi_specular_occlusion = 1.0;
+	int ddgi_probes_per_frame = 0;
+	bool ddgi_relocation = true;
+	float ddgi_sky_energy = 1.0;
+	float ddgi_lights_energy = 1.0;
+	bool ddgi_sea_enabled = false;
+	float ddgi_sea_level = 0.0;
+	Color ddgi_sea_color = Color(0.02, 0.08, 0.1);
+	void _update_ddgi();
 
 protected:
 	static void _bind_methods();
@@ -350,6 +395,24 @@ public:
 	float get_ssao_direct_light_affect() const;
 	void set_ssao_ao_channel_affect(float p_ao_channel_affect);
 	float get_ssao_ao_channel_affect() const;
+	void set_ssao_gtao(bool p_enabled);
+	bool is_ssao_gtao() const;
+
+	// Mariner E20: ReSTIR DI.
+	void set_restir_enabled(bool p_enabled);
+	bool is_restir_enabled() const;
+	void set_restir_candidates(int p_candidates);
+	int get_restir_candidates() const;
+	void set_restir_spatial_samples(int p_samples);
+	int get_restir_spatial_samples() const;
+	void set_restir_temporal(bool p_enabled);
+	bool is_restir_temporal() const;
+	void set_restir_denoise(bool p_enabled);
+	bool is_restir_denoise() const;
+	void set_ssao_bent_normals(bool p_enabled);
+	bool is_ssao_bent_normals() const;
+	void set_ssao_gtao_thickness(float p_thickness);
+	float get_ssao_gtao_thickness() const;
 
 	// SSIL
 	void set_ssil_enabled(bool p_enabled);
@@ -489,6 +552,32 @@ public:
 	void set_adjustment_color_correction(Ref<Texture> p_color_correction);
 	Ref<Texture> get_adjustment_color_correction() const;
 
+	// Mariner F3: color grading.
+	void set_color_grading_enabled(bool p_value);
+	bool is_color_grading_enabled() const;
+	void set_color_grading_temperature(float p_value);
+	float get_color_grading_temperature() const;
+	void set_color_grading_tint(float p_value);
+	float get_color_grading_tint() const;
+	void set_color_grading_shadows(const Color &p_value);
+	Color get_color_grading_shadows() const;
+	void set_color_grading_midtones(const Color &p_value);
+	Color get_color_grading_midtones() const;
+	void set_color_grading_highlights(const Color &p_value);
+	Color get_color_grading_highlights() const;
+	void set_color_grading_tonal_ranges(const Vector4 &p_value);
+	Vector4 get_color_grading_tonal_ranges() const;
+	void set_color_grading_slope(const Vector3 &p_value);
+	Vector3 get_color_grading_slope() const;
+	void set_color_grading_offset(const Vector3 &p_value);
+	Vector3 get_color_grading_offset() const;
+	void set_color_grading_power(const Vector3 &p_value);
+	Vector3 get_color_grading_power() const;
+	void set_color_grading_saturation(float p_value);
+	float get_color_grading_saturation() const;
+	void set_color_grading_gamut_mapping(bool p_value);
+	bool is_color_grading_gamut_mapping() const;
+
 	// Path tracing (Mariner E5c)
 	void set_pathtracing_enabled(bool p_enabled);
 	bool is_pathtracing_enabled() const;
@@ -506,6 +595,38 @@ public:
 	int get_pathtracing_max_samples() const;
 	void set_pathtracing_firefly_clamp(float p_clamp);
 	float get_pathtracing_firefly_clamp() const;
+
+	// Dynamic diffuse GI probes (Mariner E12)
+	void set_ddgi_enabled(bool p_enabled);
+	bool is_ddgi_enabled() const;
+	void set_ddgi_probe_count(const Vector3i &p_count);
+	Vector3i get_ddgi_probe_count() const;
+	void set_ddgi_probe_spacing(float p_spacing);
+	float get_ddgi_probe_spacing() const;
+	void set_ddgi_rays_per_probe(int p_rays);
+	int get_ddgi_rays_per_probe() const;
+	void set_ddgi_hysteresis(float p_hysteresis);
+	float get_ddgi_hysteresis() const;
+	void set_ddgi_energy(float p_energy);
+	float get_ddgi_energy() const;
+	void set_ddgi_bias(float p_bias);
+	float get_ddgi_bias() const;
+	void set_ddgi_specular_occlusion(float p_amount);
+	float get_ddgi_specular_occlusion() const;
+	void set_ddgi_probes_per_frame(int p_probes);
+	int get_ddgi_probes_per_frame() const;
+	void set_ddgi_relocation(bool p_enabled);
+	bool is_ddgi_relocation_enabled() const;
+	void set_ddgi_sky_energy(float p_energy);
+	float get_ddgi_sky_energy() const;
+	void set_ddgi_lights_energy(float p_energy);
+	float get_ddgi_lights_energy() const;
+	void set_ddgi_sea_enabled(bool p_enabled);
+	bool is_ddgi_sea_enabled() const;
+	void set_ddgi_sea_level(float p_level);
+	float get_ddgi_sea_level() const;
+	void set_ddgi_sea_color(const Color &p_color);
+	Color get_ddgi_sea_color() const;
 
 	Environment();
 	~Environment();

@@ -105,6 +105,7 @@ public:
 		SCALING_3D_MODE_METALFX_TEMPORAL,
 		SCALING_3D_MODE_NEAREST,
 		SCALING_3D_MODE_DLSS,
+		SCALING_3D_MODE_FSR3,
 		SCALING_3D_MODE_MAX
 	};
 
@@ -323,6 +324,11 @@ private:
 
 	Scaling3DMode scaling_3d_mode = SCALING_3D_MODE_BILINEAR;
 	float scaling_3d_scale = 1.0;
+	// Mariner E19: dynamic resolution.
+	bool dynamic_resolution_enabled = false;
+	float dynamic_resolution_target_ms = 16.6667;
+	float dynamic_resolution_min_scale = 0.5;
+	void _update_dynamic_resolution();
 	float fsr_sharpness = 0.2f;
 	float texture_mipmap_bias = 0.0f;
 	AnisotropicFiltering anisotropic_filtering_level = ANISOTROPY_4X;
@@ -333,6 +339,9 @@ private:
 	bool raytracing_scene = false;
 	uint32_t raytracing_scene_cull_mask = 0xFFFFF;
 	float raytracing_scene_distance = 0.0;
+	bool use_hiz_occlusion_culling = false; // Mariner E13.
+	Transform3D hiz_occlusion_reference;
+	float hiz_occlusion_reference_radius = 0.0;
 
 	Ref<ViewportTexture> default_texture;
 	HashSet<ViewportTexture *> viewport_textures;
@@ -615,6 +624,14 @@ public:
 	void set_scaling_3d_scale(float p_scaling_3d_scale);
 	float get_scaling_3d_scale() const;
 
+	void set_dynamic_resolution_enabled(bool p_enabled);
+	bool is_dynamic_resolution_enabled() const;
+	void set_dynamic_resolution_target_ms(float p_ms);
+	float get_dynamic_resolution_target_ms() const;
+	void set_dynamic_resolution_min_scale(float p_scale);
+	float get_dynamic_resolution_min_scale() const;
+	float get_dynamic_resolution_scale() const;
+
 	void set_fsr_sharpness(float p_fsr_sharpness);
 	float get_fsr_sharpness() const;
 
@@ -632,6 +649,14 @@ public:
 
 	void set_use_occlusion_culling(bool p_us_occlusion_culling);
 	bool is_using_occlusion_culling() const;
+
+	// Mariner E13: occlusion culling by the depth of earlier frames.
+	void set_use_hiz_occlusion_culling(bool p_enable);
+	bool is_using_hiz_occlusion_culling() const;
+	void set_hiz_occlusion_reference(const Transform3D &p_reference);
+	Transform3D get_hiz_occlusion_reference() const;
+	void set_hiz_occlusion_reference_radius(float p_radius);
+	float get_hiz_occlusion_reference_radius() const;
 
 	void set_raytracing_scene(bool p_enable);
 	bool is_raytracing_scene_enabled() const;

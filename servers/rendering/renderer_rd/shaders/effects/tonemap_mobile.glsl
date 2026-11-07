@@ -78,6 +78,7 @@ layout(constant_id = 14) const bool glow_mode_screen = false;
 layout(constant_id = 15) const bool glow_mode_softlight = false;
 layout(constant_id = 16) const bool glow_mode_replace = false;
 layout(constant_id = 17) const bool glow_mode_mix = false;
+layout(constant_id = 18) const bool tonemapper_gt7 = false; // Mariner E23.
 
 layout(push_constant, std430) uniform Params {
 	vec3 bcs;
@@ -97,6 +98,8 @@ layout(push_constant, std430) uniform Params {
 	float pad[3];
 }
 params;
+
+#include "tonemap_gt7_inc.glsl"
 
 layout(location = 0) out vec4 frag_color;
 
@@ -263,6 +266,8 @@ vec3 apply_tonemapping(vec3 color) { // inputs are LINEAR
 		return tonemap_filmic(color);
 	} else if (tonemapper_aces) {
 		return tonemap_aces(color);
+	} else if (tonemapper_gt7) {
+		return tonemap_gt7(color, params.tonemapper_params.x, params.tonemapper_params.y);
 	} else { // tonemapper_agx
 		return tonemap_agx(color);
 	}

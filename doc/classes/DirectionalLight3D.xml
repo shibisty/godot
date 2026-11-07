@@ -12,6 +12,10 @@
 		<link title="Faking global illumination">$DOCS_URL/tutorials/3d/global_illumination/faking_global_illumination.html</link>
 	</tutorials>
 	<members>
+		<member name="contact_shadow_length" type="float" setter="set_contact_shadow_length" getter="get_contact_shadow_length" default="0.0">
+			Length in meters of the screen space contact shadow rays of this light (0 disables them). A short ray towards the light per pixel of the depth pre-pass finds occluders the shadow map is too coarse for: gaps under objects, ropes, rivets, grass at the feet. Only for opaque surfaces, only within the screen, only for a light with shadows; the first such directional light uses them. Forward+ only; see also [member ProjectSettings.rendering/lights_and_shadows/contact_shadows/steps].
+			[b]Note:[/b] Mariner fork (patch E11).
+		</member>
 		<member name="directional_shadow_blend_splits" type="bool" setter="set_blend_splits" getter="is_blend_splits_enabled" default="false">
 			If [code]true[/code], shadow detail is sacrificed in exchange for smoother transitions between splits. Enabling shadow blend splitting also has a moderate performance cost. This is ignored when [member directional_shadow_mode] is [constant SHADOW_ORTHOGONAL].
 		</member>
@@ -36,6 +40,22 @@
 		<member name="directional_shadow_split_3" type="float" setter="set_param" getter="get_param" default="0.5">
 			The distance from shadow split 2 to split 3. Relative to [member directional_shadow_max_distance]. Only used when [member directional_shadow_mode] is [constant SHADOW_PARALLEL_4_SPLITS].
 		</member>
+		<member name="object_shadow_from_cascade" type="int" setter="set_object_shadow_from_cascade" getter="get_object_shadow_from_cascade" default="1">
+			The first cascade the [member object_shadow_layers] casters are left out of (0: out of all). With the default 1 they stay in the nearest cascade (finest detail next to the camera) and the object shadow covers the rest.
+			[b]Note:[/b] Mariner fork (patch E10b).
+		</member>
+		<member name="object_shadow_layers" type="int" setter="set_object_shadow_layers" getter="get_object_shadow_layers" default="0">
+			Render layers whose instances cast their shadow into a separate shadow map fitted to them (an object shadow, e.g. for the own ship) instead of the cascades from [member object_shadow_from_cascade] on. The object shadow has the same texel size at any distance, also beyond [member directional_shadow_max_distance], and the cascades do not redraw these (usually moving) casters. Forward+ only; elsewhere the casters stay in the cascades. 0 disables it.
+			[b]Note:[/b] Mariner fork (patch E10b).
+		</member>
+		<member name="object_shadow_size" type="int" setter="set_object_shadow_size" getter="get_object_shadow_size" default="2048">
+			Size of the object shadow map in texels (square, power of two, 64 to 16384). The map is fitted to the bounds of the [member object_shadow_layers] casters along the light: a 150 m ship at 4096 has texels of about 4 cm.
+			[b]Note:[/b] Mariner fork (patch E10b).
+		</member>
+		<member name="restir_shadow_mode" type="int" setter="set_restir_shadow_mode" getter="get_restir_shadow_mode" enum="DirectionalLight3D.RestirShadowMode" default="0">
+			How the ray traced shadow of this light is used when [member Light3D.light_restir] is on (see [member Environment.restir_enabled]). [constant RESTIR_SHADOW_REPLACE] uses it everywhere in place of the shadow maps. [constant RESTIR_SHADOW_BEYOND_SHADOW_MAPS] keeps the shadow maps where they reach and takes the traced shadow over as they fade out ([member directional_shadow_fade_start] to [member directional_shadow_max_distance]) and beyond: for scenes whose near shadow casters are not in the raytracing scene (foliage and grass drawn by compute shaders, terrain displaced in the vertex shader), while far occluders such as mountains still cast shadows at any distance.
+			[b]Note:[/b] Mariner fork (patch E20d).
+		</member>
 		<member name="sky_mode" type="int" setter="set_sky_mode" getter="get_sky_mode" enum="DirectionalLight3D.SkyMode" default="0">
 			Whether this [DirectionalLight3D] is visible in the sky, in the scene, or both in the sky and in the scene.
 		</member>
@@ -58,6 +78,12 @@
 		</constant>
 		<constant name="SKY_MODE_SKY_ONLY" value="2" enum="SkyMode">
 			Makes the light visible to sky shaders only. When using this mode the light will not cast light into the scene (either through direct lighting or through global illumination), but can be accessed through sky shaders. This can be useful, for example, when you want to control sky effects without illuminating the scene (during a night cycle, for example).
+		</constant>
+		<constant name="RESTIR_SHADOW_REPLACE" value="0" enum="RestirShadowMode">
+			The ray traced shadow replaces the shadow maps at all distances.
+		</constant>
+		<constant name="RESTIR_SHADOW_BEYOND_SHADOW_MAPS" value="1" enum="RestirShadowMode">
+			Shadow maps within their range, the ray traced shadow where they fade out and beyond.
 		</constant>
 	</constants>
 </class>

@@ -48,6 +48,7 @@
 #include "core/io/image_loader.h"
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
+#include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/object/message_queue.h"
 #include "core/object/script_language.h"
@@ -5265,6 +5266,12 @@ void Main::force_redraw() {
  * so that the engine closes cleanly without leaking memory or crashing.
  * The order matters as some of those steps are linked with each other.
  */
+static void _discard_rendering_device_data_callbacks() {
+	if (RenderingDevice::get_singleton()) {
+		RenderingDevice::get_singleton()->discard_pending_data_callbacks();
+	}
+}
+
 void Main::cleanup(bool p_force) {
 	Thread::make_main_thread();
 
@@ -5318,6 +5325,12 @@ void Main::cleanup(bool p_force) {
 	ResourceLoader::clear_translation_remaps();
 
 	WorkerThreadPool::get_singleton()->exit_languages_threads();
+
+	// Mariner fix: pending RenderingDevice readbacks hold their callbacks until the GPU frame completes, which on exit is
+	// in RenderingDevice::finalize() - after the script languages are gone. A GDScript lambda destroyed (or called) then
+	// corrupts the heap. Drop the callbacks while the languages are still alive.
+	RenderingServer::get_singleton()->call_on_render_thread(callable_mp_static(&_discard_rendering_device_data_callbacks));
+	RenderingServer::get_singleton()->sync();
 
 	ScriptServer::finish_languages();
 

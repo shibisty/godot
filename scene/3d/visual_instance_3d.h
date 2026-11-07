@@ -120,8 +120,27 @@ public:
 		VISIBILITY_RANGE_FADE_DEPENDENCIES = RSE::VISIBILITY_RANGE_FADE_DEPENDENCIES,
 	};
 
+	// Mariner E10: directional shadow cache.
+	enum ShadowCacheMode {
+		SHADOW_CACHE_MODE_AUTO = RSE::SHADOW_CACHE_MODE_AUTO,
+		SHADOW_CACHE_MODE_STATIC = RSE::SHADOW_CACHE_MODE_STATIC,
+		SHADOW_CACHE_MODE_DYNAMIC = RSE::SHADOW_CACHE_MODE_DYNAMIC,
+	};
+
+	// Mariner E12 DG-F: raytracing scene membership.
+	enum RaytracingMode {
+		RAYTRACING_MODE_DEFAULT = RSE::RAYTRACING_MODE_DEFAULT,
+		RAYTRACING_MODE_ONLY = RSE::RAYTRACING_MODE_ONLY,
+		RAYTRACING_MODE_DISABLED = RSE::RAYTRACING_MODE_DISABLED,
+	};
+
 private:
 	ShadowCastingSetting shadow_casting_setting = SHADOW_CASTING_SETTING_ON;
+	ShadowCacheMode shadow_cache_mode = SHADOW_CACHE_MODE_AUTO;
+	RaytracingMode raytracing_mode = RAYTRACING_MODE_DEFAULT;
+	float raytracing_opacity = 1.0;
+	bool shadow_translucent = false; // Mariner E21.
+	bool gpu_static = false; // Mariner E25a.
 	Ref<Material> material_override;
 	Ref<Material> material_overlay;
 
@@ -157,6 +176,20 @@ protected:
 public:
 	void set_cast_shadows_setting(ShadowCastingSetting p_shadow_casting_setting);
 	ShadowCastingSetting get_cast_shadows_setting() const;
+
+	void set_shadow_cache_mode(ShadowCacheMode p_mode);
+	ShadowCacheMode get_shadow_cache_mode() const;
+	void set_raytracing_mode(RaytracingMode p_mode);
+	RaytracingMode get_raytracing_mode() const;
+	void set_raytracing_opacity(float p_opacity);
+	float get_raytracing_opacity() const;
+
+	void set_shadow_translucent(bool p_enabled);
+	bool is_shadow_translucent() const;
+
+	void set_gpu_static(bool p_enabled);
+	bool is_gpu_static() const;
+	bool is_gpu_static_active() const;
 
 	void set_transparency(float p_transparency);
 	float get_transparency() const;
@@ -219,3 +252,5 @@ VARIANT_ENUM_CAST(GeometryInstance3D::ShadowCastingSetting);
 VARIANT_ENUM_CAST(GeometryInstance3D::GIMode);
 VARIANT_ENUM_CAST(GeometryInstance3D::LightmapScale);
 VARIANT_ENUM_CAST(GeometryInstance3D::VisibilityRangeFadeMode);
+VARIANT_ENUM_CAST(GeometryInstance3D::ShadowCacheMode);
+VARIANT_ENUM_CAST(GeometryInstance3D::RaytracingMode);

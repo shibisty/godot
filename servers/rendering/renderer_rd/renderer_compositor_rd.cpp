@@ -101,6 +101,26 @@ void RendererCompositorRD::blit_render_targets_to_screen(DisplayServerEnums::Win
 		return;
 	}
 
+	// Mariner E24b: FSR 3 frame generation - the generated frame goes to the screen first.
+	if (FSR3FrameGenerationScreen *fg = fsr3_frame_generation.getptr(p_screen)) {
+		bool presented = false;
+		if (fg->captured_frame == frame) {
+			for (int i = 0; i < p_amount; i++) {
+				if (p_render_targets[i].render_target == fg->render_target) {
+					_fsr3_frame_generation_present(p_screen, p_render_targets[i]);
+					presented = true;
+					break;
+				}
+			}
+		}
+		if (!presented && frame > fg->captured_frame + 2) {
+			// The viewport stopped using it: back to one image per frame.
+			_fsr3_frame_generation_free(*fg);
+			fsr3_frame_generation.erase(p_screen);
+			RD::get_singleton()->screen_set_extra_present_enabled(p_screen, false);
+		}
+	}
+
 	BlitPipelines blit_pipelines = _get_blit_pipelines_for_format(RD::get_singleton()->screen_get_framebuffer_format(p_screen));
 
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin_for_screen(p_screen);
@@ -196,6 +216,214 @@ void RendererCompositorRD::frame_generation_capture_hudless(DisplayServerEnums::
 	RendererRD::DLSSEffect::frame_generation_tag_hudless(hudless.texture);
 }
 
+void RendererCompositorRD::_fsr3_frame_generation_free(FSR3FrameGenerationScreen &p_screen) {
+	RenderingDevice *rd = RD::get_singleton();
+	if (p_screen.context) {
+		RendererRD::FSR3FrameGenerationEffect::free_context(p_screen.context);
+		p_screen.context = nullptr;
+	}
+	for (RID *rid : { &p_screen.hudless, &p_screen.final_color, &p_screen.output }) {
+		if (rid->is_valid()) {
+			rd->free_rid(*rid); // Also frees the framebuffers (dependencies).
+			*rid = RID();
+		}
+	}
+	p_screen.hudless_framebuffer = RID();
+	p_screen.final_framebuffer = RID();
+	p_screen.size = Size2i();
+}
+
+void RendererCompositorRD::fsr3_frame_generation_capture(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen &p_blit, const Ref<RenderSceneBuffers> &p_render_buffers) {
+	// Mariner E24b. Same moment as frame_generation_capture_hudless() (E3): the 3D image of the frame is final, its
+	// 2D canvases are not drawn yet. Keeps the HUD-less copy and the upscaler's surfaces of this frame.
+	RenderingDevice *rd = RD::get_singleton();
+	if (rd->get_device_api_name() != "Vulkan") {
+		// Presenting the extra image is implemented in the Vulkan driver only (for now).
+		WARN_PRINT_ONCE("AMD FSR 3 frame generation needs the Vulkan rendering driver (rendering/rendering_device/driver). Frame generation is off.");
+		return;
+	}
+	Ref<RenderSceneBuffersRD> rb = p_render_buffers;
+	const RendererRD::FSR3UpscalerEffect::SharedSurfaces *surfaces = (scene && rb.is_valid()) ? scene->get_fsr3_shared_surfaces(rb) : nullptr;
+	if (surfaces == nullptr || surfaces->frame != frame) {
+		return; // No FSR 3.1 upscale this frame (yet): nothing to interpolate from.
+	}
+	if (rd->screen_get_data_format(p_screen) == RD::DATA_FORMAT_MAX) {
+		return; // No swap chain yet or minimized.
+	}
+	const Size2i screen_size(rd->screen_get_width(p_screen), rd->screen_get_height(p_screen));
+	if (screen_size.width <= 0 || screen_size.height <= 0) {
+		return;
+	}
+	RID rd_texture = texture_storage->render_target_get_rd_texture(p_blit.render_target);
+	ERR_FAIL_COND(rd_texture.is_null());
+
+	FSR3FrameGenerationScreen &fg = fsr3_frame_generation[p_screen];
+	const Size2i max_render_size = rd->texture_size(surfaces->dilated_depth);
+	if (fg.size != screen_size || fg.max_render_size != max_render_size) {
+		_fsr3_frame_generation_free(fg);
+		RD::TextureFormat tf;
+		tf.format = RendererRD::FSR3FrameGenerationEffect::FORMAT;
+		tf.width = screen_size.width;
+		tf.height = screen_size.height;
+		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+		fg.hudless = rd->texture_create(tf, RD::TextureView());
+		fg.final_color = rd->texture_create(tf, RD::TextureView());
+		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+		fg.output = rd->texture_create(tf, RD::TextureView());
+		ERR_FAIL_COND(fg.hudless.is_null() || fg.final_color.is_null() || fg.output.is_null());
+		rd->set_resource_name(fg.hudless, "FSR3 Frame Generation HUD-less color");
+		rd->set_resource_name(fg.final_color, "FSR3 Frame Generation final color");
+		rd->set_resource_name(fg.output, "FSR3 Frame Generation output");
+		Vector<RID> fb;
+		fb.push_back(fg.hudless);
+		fg.hudless_framebuffer = rd->framebuffer_create(fb);
+		fb.write[0] = fg.final_color;
+		fg.final_framebuffer = rd->framebuffer_create(fb);
+
+		if (fsr3_frame_generation_effect == nullptr) {
+			fsr3_frame_generation_effect = memnew(RendererRD::FSR3FrameGenerationEffect); // Compiles its shaders.
+		}
+		fg.context = fsr3_frame_generation_effect->create_context(screen_size, max_render_size);
+		fg.size = screen_size;
+		fg.max_render_size = max_render_size;
+		fg.reset = true;
+		if (fg.context == nullptr) {
+			_fsr3_frame_generation_free(fg);
+			return;
+		}
+		rd->screen_set_extra_present_enabled(p_screen, true);
+	}
+	if (fg.context == nullptr) {
+		return;
+	}
+
+	const RD::ColorSpace color_space = rd->screen_get_color_space(p_screen);
+	const float reference_luminance = rd->get_context_driver()->window_get_hdr_output_reference_luminance(p_screen);
+	const float linear_luminance_scale = rd->get_context_driver()->window_get_hdr_output_linear_luminance_scale(p_screen);
+	const float output_max_value = rd->get_context_driver()->window_get_output_max_linear_value(p_screen);
+	const float reference_multiplier = _compute_reference_multiplier(color_space, reference_luminance, linear_luminance_scale);
+
+	BlitPipelines blit_pipelines = _get_blit_pipelines_for_format(rd->framebuffer_get_format(fg.hudless_framebuffer));
+	RID uniform_set = _get_render_target_blit_uniform_set(rd_texture);
+	BlitMode mode = _set_blit_push_constant(p_blit, Size2(screen_size), rd->screen_get_pre_rotation_degrees(p_screen), color_space, reference_multiplier, output_max_value);
+
+	rd->draw_command_begin_label("FSR3 Frame Generation HUD-less Color");
+	Color clear_color(0, 0, 0, 1);
+	RD::DrawListID draw_list = rd->draw_list_begin(fg.hudless_framebuffer, RD::DRAW_CLEAR_COLOR_0, VectorView<Color>(&clear_color, 1));
+	rd->draw_list_bind_render_pipeline(draw_list, blit_pipelines.pipelines[mode]);
+	rd->draw_list_bind_index_array(draw_list, blit.array);
+	rd->draw_list_bind_uniform_set(draw_list, uniform_set, 0);
+	rd->draw_list_set_push_constant(draw_list, &blit.push_constant, sizeof(BlitPushConstant));
+	rd->draw_list_draw(draw_list, true);
+	rd->draw_list_end();
+	rd->draw_command_end_label();
+
+	fg.render_target = p_blit.render_target;
+	fg.surfaces = *surfaces;
+	fg.captured_frame = frame;
+}
+
+void RendererCompositorRD::_fsr3_frame_generation_present(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen &p_blit) {
+	RenderingDevice *rd = RD::get_singleton();
+	FSR3FrameGenerationScreen &fg = fsr3_frame_generation[p_screen];
+	const Size2i screen_size(rd->screen_get_width(p_screen), rd->screen_get_height(p_screen));
+	if (fg.context == nullptr || screen_size != fg.size) {
+		return;
+	}
+	RID rd_texture = texture_storage->render_target_get_rd_texture(p_blit.render_target);
+	ERR_FAIL_COND(rd_texture.is_null());
+
+	const RD::ColorSpace color_space = rd->screen_get_color_space(p_screen);
+	const float reference_luminance = rd->get_context_driver()->window_get_hdr_output_reference_luminance(p_screen);
+	const float linear_luminance_scale = rd->get_context_driver()->window_get_hdr_output_linear_luminance_scale(p_screen);
+	const float output_max_value = rd->get_context_driver()->window_get_output_max_linear_value(p_screen);
+	const float reference_multiplier = _compute_reference_multiplier(color_space, reference_luminance, linear_luminance_scale);
+
+	// 1. The finished frame (with the UI), blitted exactly like the screen will get it.
+	{
+		BlitPipelines blit_pipelines = _get_blit_pipelines_for_format(rd->framebuffer_get_format(fg.final_framebuffer));
+		RID uniform_set = _get_render_target_blit_uniform_set(rd_texture);
+		BlitMode mode = _set_blit_push_constant(p_blit, Size2(screen_size), rd->screen_get_pre_rotation_degrees(p_screen), color_space, reference_multiplier, output_max_value);
+		rd->draw_command_begin_label("FSR3 Frame Generation Final Color");
+		Color clear_color(0, 0, 0, 1);
+		RD::DrawListID draw_list = rd->draw_list_begin(fg.final_framebuffer, RD::DRAW_CLEAR_COLOR_0, VectorView<Color>(&clear_color, 1));
+		rd->draw_list_bind_render_pipeline(draw_list, blit_pipelines.pipelines[mode]);
+		rd->draw_list_bind_index_array(draw_list, blit.array);
+		rd->draw_list_bind_uniform_set(draw_list, uniform_set, 0);
+		rd->draw_list_set_push_constant(draw_list, &blit.push_constant, sizeof(BlitPushConstant));
+		rd->draw_list_draw(draw_list, true);
+		rd->draw_list_end();
+		rd->draw_command_end_label();
+	}
+
+	// 2. Optical flow + interpolation between the previous frame and this one.
+	RendererRD::FSR3FrameGenerationEffect::Parameters params;
+	params.context = fg.context;
+	params.surfaces = &fg.surfaces;
+	params.hudless = fg.hudless;
+	params.final_color = fg.final_color;
+	params.output = fg.output;
+	if (color_space == RD::COLOR_SPACE_REC709_LINEAR) {
+		params.transfer_function = RendererRD::FSR3FrameGenerationEffect::TRANSFER_FUNCTION_SCRGB;
+		params.min_luminance = 0.0f;
+		params.max_luminance = 80.0f * MAX(output_max_value, 1.0f) * MAX(reference_multiplier, 1.0f);
+	} else {
+		params.transfer_function = RendererRD::FSR3FrameGenerationEffect::TRANSFER_FUNCTION_SRGB;
+		params.min_luminance = 0.0f;
+		params.max_luminance = 1.0f;
+	}
+	params.reset = fg.reset;
+	rd->draw_command_begin_label("FSR3 Frame Generation");
+	const bool interpolated = fsr3_frame_generation_effect->dispatch(params);
+	rd->draw_command_end_label();
+	const bool had_previous = !fg.reset;
+	fg.reset = false;
+	if (!interpolated || !had_previous) {
+		return; // The first frame has nothing to interpolate from.
+	}
+
+	// 3. The generated frame on its own swap chain image, presented before this frame's.
+	if (rd->screen_prepare_extra_for_drawing(p_screen) != OK) {
+		return; // No free image in time (or the driver can't): this frame goes alone.
+	}
+	BlitPipelines blit_pipelines = _get_blit_pipelines_for_format(rd->screen_get_framebuffer_format(p_screen));
+	RID uniform_set = _get_render_target_blit_uniform_set(fg.output);
+	// Already in the swap chain's encoding: copy as is (full screen, no conversion).
+	blit.push_constant = {};
+	blit.push_constant.src_rect[2] = 1.0f;
+	blit.push_constant.src_rect[3] = 1.0f;
+	blit.push_constant.dst_rect[2] = 1.0f;
+	blit.push_constant.dst_rect[3] = 1.0f;
+	blit.push_constant.rotation_cos = 1.0f;
+	blit.push_constant.upscale = 1.0f;
+	blit.push_constant.aspect_ratio = 1.0f;
+	blit.push_constant.target_color_space = color_space;
+	blit.push_constant.source_is_srgb = color_space != RD::COLOR_SPACE_REC709_LINEAR; // sRGB target: no conversion.
+	blit.push_constant.reference_multiplier = 1.0f;
+	blit.push_constant.output_max_value = 1e30f;
+	rd->draw_command_begin_label("FSR3 Frame Generation Present");
+	RD::DrawListID draw_list = rd->draw_list_begin_for_screen_extra(p_screen);
+	ERR_FAIL_COND(draw_list == RD::INVALID_ID);
+	rd->draw_list_bind_render_pipeline(draw_list, blit_pipelines.pipelines[BLIT_MODE_NORMAL]);
+	rd->draw_list_bind_index_array(draw_list, blit.array);
+	rd->draw_list_bind_uniform_set(draw_list, uniform_set, 0);
+	rd->draw_list_set_push_constant(draw_list, &blit.push_constant, sizeof(BlitPushConstant));
+	rd->draw_list_draw(draw_list, true);
+	rd->draw_list_end();
+	rd->draw_command_end_label();
+	fg.presented++;
+}
+
+uint64_t RendererCompositorRD::fsr3_frame_generation_get_presented_count(DisplayServerEnums::WindowID p_screen) const {
+	const FSR3FrameGenerationScreen *fg = fsr3_frame_generation.getptr(p_screen);
+	return fg ? fg->presented : 0;
+}
+
+RID RendererCompositorRD::fsr3_frame_generation_get_output_texture(DisplayServerEnums::WindowID p_screen) const {
+	const FSR3FrameGenerationScreen *fg = fsr3_frame_generation.getptr(p_screen);
+	return fg ? fg->output : RID();
+}
+
 void RendererCompositorRD::begin_frame(double frame_step) {
 	frame++;
 	delta = frame_step;
@@ -261,6 +489,14 @@ void RendererCompositorRD::finalize() {
 		}
 	}
 	frame_generation_hudless.clear();
+	for (KeyValue<DisplayServerEnums::WindowID, FSR3FrameGenerationScreen> &E : fsr3_frame_generation) {
+		_fsr3_frame_generation_free(E.value);
+	}
+	fsr3_frame_generation.clear();
+	if (fsr3_frame_generation_effect) {
+		memdelete(fsr3_frame_generation_effect);
+		fsr3_frame_generation_effect = nullptr;
+	}
 
 	texture_storage->_tex_blit_shader_free();
 	memdelete(scene);

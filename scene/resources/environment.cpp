@@ -38,6 +38,7 @@
 #include "scene/resources/gradient_texture.h"
 #include "scene/resources/sky.h"
 #include "servers/rendering/rendering_server.h"
+#include "servers/rendering/storage/environment_storage.h"
 
 RID Environment::get_rid() const {
 	return environment;
@@ -410,6 +411,85 @@ void Environment::_update_ssao() {
 			ssao_sharpness,
 			ssao_direct_light_affect,
 			ssao_ao_channel_affect);
+	RS::get_singleton()->environment_set_ssao_gtao(environment, ssao_gtao, ssao_bent_normals, ssao_gtao_thickness);
+}
+
+void Environment::_update_restir() {
+	RS::get_singleton()->environment_set_restir(environment, restir_enabled, restir_candidates, restir_spatial_samples, restir_temporal, restir_denoise);
+}
+
+void Environment::set_restir_enabled(bool p_enabled) {
+	restir_enabled = p_enabled;
+	_update_restir();
+	notify_property_list_changed();
+}
+
+bool Environment::is_restir_enabled() const {
+	return restir_enabled;
+}
+
+void Environment::set_restir_candidates(int p_candidates) {
+	restir_candidates = CLAMP(p_candidates, 1, 32);
+	_update_restir();
+}
+
+int Environment::get_restir_candidates() const {
+	return restir_candidates;
+}
+
+void Environment::set_restir_spatial_samples(int p_samples) {
+	restir_spatial_samples = CLAMP(p_samples, 0, 8);
+	_update_restir();
+}
+
+int Environment::get_restir_spatial_samples() const {
+	return restir_spatial_samples;
+}
+
+void Environment::set_restir_temporal(bool p_enabled) {
+	restir_temporal = p_enabled;
+	_update_restir();
+}
+
+bool Environment::is_restir_temporal() const {
+	return restir_temporal;
+}
+
+void Environment::set_restir_denoise(bool p_enabled) {
+	restir_denoise = p_enabled;
+	_update_restir();
+}
+
+bool Environment::is_restir_denoise() const {
+	return restir_denoise;
+}
+
+void Environment::set_ssao_gtao(bool p_enabled) {
+	ssao_gtao = p_enabled;
+	_update_ssao();
+}
+
+bool Environment::is_ssao_gtao() const {
+	return ssao_gtao;
+}
+
+void Environment::set_ssao_bent_normals(bool p_enabled) {
+	ssao_bent_normals = p_enabled;
+	_update_ssao();
+}
+
+bool Environment::is_ssao_bent_normals() const {
+	return ssao_bent_normals;
+}
+
+// Mariner F1.
+void Environment::set_ssao_gtao_thickness(float p_thickness) {
+	ssao_gtao_thickness = MAX(p_thickness, 0.0f);
+	_update_ssao();
+}
+
+float Environment::get_ssao_gtao_thickness() const {
+	return ssao_gtao_thickness;
 }
 
 // SSIL
@@ -1089,6 +1169,120 @@ Ref<Texture> Environment::get_adjustment_color_correction() const {
 	return adjustment_color_correction;
 }
 
+// Mariner F3: color grading.
+
+void Environment::_update_color_grading() {
+	RS::get_singleton()->environment_set_color_grading(environment, color_grading_enabled, color_grading_temperature, color_grading_tint, color_grading_shadows, color_grading_midtones, color_grading_highlights, color_grading_tonal_ranges, color_grading_slope, color_grading_offset, color_grading_power, color_grading_saturation, color_grading_gamut_mapping);
+}
+
+void Environment::set_color_grading_enabled(bool p_value) {
+	color_grading_enabled = p_value;
+	_update_color_grading();
+}
+
+bool Environment::is_color_grading_enabled() const {
+	return color_grading_enabled;
+}
+
+void Environment::set_color_grading_temperature(float p_value) {
+	color_grading_temperature = CLAMP(p_value, 1667.0f, 25000.0f);
+	_update_color_grading();
+}
+
+float Environment::get_color_grading_temperature() const {
+	return color_grading_temperature;
+}
+
+void Environment::set_color_grading_tint(float p_value) {
+	color_grading_tint = CLAMP(p_value, -1.0f, 1.0f);
+	_update_color_grading();
+}
+
+float Environment::get_color_grading_tint() const {
+	return color_grading_tint;
+}
+
+void Environment::set_color_grading_shadows(const Color &p_value) {
+	color_grading_shadows = p_value;
+	_update_color_grading();
+}
+
+Color Environment::get_color_grading_shadows() const {
+	return color_grading_shadows;
+}
+
+void Environment::set_color_grading_midtones(const Color &p_value) {
+	color_grading_midtones = p_value;
+	_update_color_grading();
+}
+
+Color Environment::get_color_grading_midtones() const {
+	return color_grading_midtones;
+}
+
+void Environment::set_color_grading_highlights(const Color &p_value) {
+	color_grading_highlights = p_value;
+	_update_color_grading();
+}
+
+Color Environment::get_color_grading_highlights() const {
+	return color_grading_highlights;
+}
+
+void Environment::set_color_grading_tonal_ranges(const Vector4 &p_value) {
+	color_grading_tonal_ranges = p_value;
+	_update_color_grading();
+}
+
+Vector4 Environment::get_color_grading_tonal_ranges() const {
+	return color_grading_tonal_ranges;
+}
+
+void Environment::set_color_grading_slope(const Vector3 &p_value) {
+	color_grading_slope = p_value;
+	_update_color_grading();
+}
+
+Vector3 Environment::get_color_grading_slope() const {
+	return color_grading_slope;
+}
+
+void Environment::set_color_grading_offset(const Vector3 &p_value) {
+	color_grading_offset = p_value;
+	_update_color_grading();
+}
+
+Vector3 Environment::get_color_grading_offset() const {
+	return color_grading_offset;
+}
+
+void Environment::set_color_grading_power(const Vector3 &p_value) {
+	color_grading_power = p_value;
+	_update_color_grading();
+}
+
+Vector3 Environment::get_color_grading_power() const {
+	return color_grading_power;
+}
+
+void Environment::set_color_grading_saturation(float p_value) {
+	color_grading_saturation = MAX(p_value, 0.0f);
+	_update_color_grading();
+}
+
+float Environment::get_color_grading_saturation() const {
+	return color_grading_saturation;
+}
+
+void Environment::set_color_grading_gamut_mapping(bool p_value) {
+	color_grading_gamut_mapping = p_value;
+	_update_color_grading();
+}
+
+bool Environment::is_color_grading_gamut_mapping() const {
+	return color_grading_gamut_mapping;
+}
+
 void Environment::_update_adjustment() {
 	RID color_correction = adjustment_color_correction.is_valid() ? adjustment_color_correction->get_rid() : RID();
 
@@ -1182,6 +1376,150 @@ void Environment::_update_pathtracing() {
 	RS::get_singleton()->environment_set_pathtracing_accumulation(environment, pathtracing_accumulate, pathtracing_max_samples, pathtracing_firefly_clamp);
 }
 
+// Dynamic diffuse GI probes (Mariner E12)
+
+void Environment::set_ddgi_enabled(bool p_enabled) {
+	ddgi_enabled = p_enabled;
+	_update_ddgi();
+}
+
+bool Environment::is_ddgi_enabled() const {
+	return ddgi_enabled;
+}
+
+void Environment::set_ddgi_probe_count(const Vector3i &p_count) {
+	ddgi_probe_count = RendererEnvironmentStorage::ddgi_clamp_probe_count(p_count);
+	_update_ddgi();
+}
+
+Vector3i Environment::get_ddgi_probe_count() const {
+	return ddgi_probe_count;
+}
+
+void Environment::set_ddgi_probe_spacing(float p_spacing) {
+	ddgi_probe_spacing = CLAMP(p_spacing, 0.1f, 64.0f);
+	_update_ddgi();
+}
+
+float Environment::get_ddgi_probe_spacing() const {
+	return ddgi_probe_spacing;
+}
+
+void Environment::set_ddgi_rays_per_probe(int p_rays) {
+	ddgi_rays_per_probe = CLAMP((p_rays + 31) / 32 * 32, 32, 256);
+	_update_ddgi();
+}
+
+int Environment::get_ddgi_rays_per_probe() const {
+	return ddgi_rays_per_probe;
+}
+
+void Environment::set_ddgi_hysteresis(float p_hysteresis) {
+	ddgi_hysteresis = CLAMP(p_hysteresis, 0.0f, 0.995f);
+	_update_ddgi();
+}
+
+float Environment::get_ddgi_hysteresis() const {
+	return ddgi_hysteresis;
+}
+
+void Environment::set_ddgi_energy(float p_energy) {
+	ddgi_energy = MAX(p_energy, 0.0f);
+	_update_ddgi();
+}
+
+float Environment::get_ddgi_energy() const {
+	return ddgi_energy;
+}
+
+void Environment::set_ddgi_bias(float p_bias) {
+	ddgi_bias = MAX(p_bias, 0.0f);
+	_update_ddgi();
+}
+
+float Environment::get_ddgi_bias() const {
+	return ddgi_bias;
+}
+
+void Environment::set_ddgi_specular_occlusion(float p_amount) {
+	ddgi_specular_occlusion = CLAMP(p_amount, 0.0f, 1.0f);
+	_update_ddgi();
+}
+
+float Environment::get_ddgi_specular_occlusion() const {
+	return ddgi_specular_occlusion;
+}
+
+void Environment::set_ddgi_probes_per_frame(int p_probes) {
+	ddgi_probes_per_frame = MAX(p_probes, 0);
+	_update_ddgi();
+}
+
+int Environment::get_ddgi_probes_per_frame() const {
+	return ddgi_probes_per_frame;
+}
+
+void Environment::set_ddgi_relocation(bool p_enabled) {
+	ddgi_relocation = p_enabled;
+	_update_ddgi();
+}
+
+bool Environment::is_ddgi_relocation_enabled() const {
+	return ddgi_relocation;
+}
+
+void Environment::set_ddgi_sky_energy(float p_energy) {
+	ddgi_sky_energy = MAX(p_energy, 0.0f);
+	_update_ddgi();
+}
+
+float Environment::get_ddgi_sky_energy() const {
+	return ddgi_sky_energy;
+}
+
+void Environment::set_ddgi_lights_energy(float p_energy) {
+	ddgi_lights_energy = MAX(p_energy, 0.0f);
+	_update_ddgi();
+}
+
+float Environment::get_ddgi_lights_energy() const {
+	return ddgi_lights_energy;
+}
+
+void Environment::set_ddgi_sea_enabled(bool p_enabled) {
+	ddgi_sea_enabled = p_enabled;
+	_update_ddgi();
+}
+
+bool Environment::is_ddgi_sea_enabled() const {
+	return ddgi_sea_enabled;
+}
+
+void Environment::set_ddgi_sea_level(float p_level) {
+	ddgi_sea_level = p_level;
+	_update_ddgi();
+}
+
+float Environment::get_ddgi_sea_level() const {
+	return ddgi_sea_level;
+}
+
+void Environment::set_ddgi_sea_color(const Color &p_color) {
+	ddgi_sea_color = p_color;
+	_update_ddgi();
+}
+
+Color Environment::get_ddgi_sea_color() const {
+	return ddgi_sea_color;
+}
+
+void Environment::_update_ddgi() {
+	RS::get_singleton()->environment_set_ddgi(environment, ddgi_enabled, ddgi_probe_count, ddgi_probe_spacing, ddgi_rays_per_probe, ddgi_hysteresis, ddgi_energy, ddgi_bias, ddgi_specular_occlusion);
+	RS::get_singleton()->environment_set_ddgi_update(environment, ddgi_probes_per_frame, ddgi_relocation);
+	RS::get_singleton()->environment_set_ddgi_channels(environment, ddgi_sky_energy, ddgi_lights_energy);
+	RS::get_singleton()->environment_set_ddgi_sea(environment, ddgi_sea_enabled, ddgi_sea_level, ddgi_sea_color);
+}
+
 // Private methods, constructor and destructor
 
 void Environment::_validate_property(PropertyInfo &p_property) const {
@@ -1224,7 +1562,7 @@ void Environment::_validate_property(PropertyInfo &p_property) const {
 	}
 
 	if (p_property.name == "tonemap_white") {
-		if (tone_mapper == TONE_MAPPER_LINEAR || tone_mapper == TONE_MAPPER_AGX) {
+		if (tone_mapper == TONE_MAPPER_LINEAR || tone_mapper == TONE_MAPPER_AGX || tone_mapper == TONE_MAPPER_GT7) {
 			p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 		}
 		return;
@@ -1391,7 +1729,7 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_tonemap_agx_contrast"), &Environment::get_tonemap_agx_contrast);
 
 	ADD_GROUP("Tonemap", "tonemap_");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "tonemap_mode", PROPERTY_HINT_ENUM, "Linear,Reinhard,Filmic,ACES,AgX"), "set_tonemapper", "get_tonemapper");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "tonemap_mode", PROPERTY_HINT_ENUM, "Linear,Reinhard,Filmic,ACES,AgX,Gran Turismo 7"), "set_tonemapper", "get_tonemapper");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tonemap_exposure", PROPERTY_HINT_RANGE, "0,4,0.01,or_greater"), "set_tonemap_exposure", "get_tonemap_exposure");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tonemap_white", PROPERTY_HINT_RANGE, "1,16,0.01,or_greater"), "set_tonemap_white", "get_tonemap_white");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tonemap_agx_white", PROPERTY_HINT_RANGE, "2,16.5,0.01,or_greater"), "set_tonemap_agx_white", "get_tonemap_agx_white");
@@ -1436,6 +1774,12 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_ssao_direct_light_affect"), &Environment::get_ssao_direct_light_affect);
 	ClassDB::bind_method(D_METHOD("set_ssao_ao_channel_affect", "amount"), &Environment::set_ssao_ao_channel_affect);
 	ClassDB::bind_method(D_METHOD("get_ssao_ao_channel_affect"), &Environment::get_ssao_ao_channel_affect);
+	ClassDB::bind_method(D_METHOD("set_ssao_gtao", "enabled"), &Environment::set_ssao_gtao);
+	ClassDB::bind_method(D_METHOD("is_ssao_gtao"), &Environment::is_ssao_gtao);
+	ClassDB::bind_method(D_METHOD("set_ssao_bent_normals", "enabled"), &Environment::set_ssao_bent_normals);
+	ClassDB::bind_method(D_METHOD("is_ssao_bent_normals"), &Environment::is_ssao_bent_normals);
+	ClassDB::bind_method(D_METHOD("set_ssao_gtao_thickness", "thickness"), &Environment::set_ssao_gtao_thickness);
+	ClassDB::bind_method(D_METHOD("get_ssao_gtao_thickness"), &Environment::get_ssao_gtao_thickness);
 
 	ADD_GROUP("SSAO", "ssao_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ssao_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_ssao_enabled", "is_ssao_enabled");
@@ -1447,6 +1791,28 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ssao_sharpness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_ssao_sharpness", "get_ssao_sharpness");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ssao_light_affect", PROPERTY_HINT_RANGE, "0.00,1,0.01"), "set_ssao_direct_light_affect", "get_ssao_direct_light_affect");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ssao_ao_channel_affect", PROPERTY_HINT_RANGE, "0.00,1,0.01"), "set_ssao_ao_channel_affect", "get_ssao_ao_channel_affect");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ssao_gtao"), "set_ssao_gtao", "is_ssao_gtao");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ssao_bent_normals"), "set_ssao_bent_normals", "is_ssao_bent_normals");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ssao_gtao_thickness", PROPERTY_HINT_RANGE, "0,4,0.01,or_greater,suffix:m"), "set_ssao_gtao_thickness", "get_ssao_gtao_thickness");
+
+	// Mariner E20: ReSTIR DI.
+	ClassDB::bind_method(D_METHOD("set_restir_enabled", "enabled"), &Environment::set_restir_enabled);
+	ClassDB::bind_method(D_METHOD("is_restir_enabled"), &Environment::is_restir_enabled);
+	ClassDB::bind_method(D_METHOD("set_restir_candidates", "candidates"), &Environment::set_restir_candidates);
+	ClassDB::bind_method(D_METHOD("get_restir_candidates"), &Environment::get_restir_candidates);
+	ClassDB::bind_method(D_METHOD("set_restir_spatial_samples", "samples"), &Environment::set_restir_spatial_samples);
+	ClassDB::bind_method(D_METHOD("get_restir_spatial_samples"), &Environment::get_restir_spatial_samples);
+	ClassDB::bind_method(D_METHOD("set_restir_temporal", "enabled"), &Environment::set_restir_temporal);
+	ClassDB::bind_method(D_METHOD("is_restir_temporal"), &Environment::is_restir_temporal);
+	ClassDB::bind_method(D_METHOD("set_restir_denoise", "enabled"), &Environment::set_restir_denoise);
+	ClassDB::bind_method(D_METHOD("is_restir_denoise"), &Environment::is_restir_denoise);
+
+	ADD_GROUP("ReSTIR", "restir_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "restir_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_restir_enabled", "is_restir_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "restir_candidates", PROPERTY_HINT_RANGE, "1,32,1"), "set_restir_candidates", "get_restir_candidates");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "restir_spatial_samples", PROPERTY_HINT_RANGE, "0,8,1"), "set_restir_spatial_samples", "get_restir_spatial_samples");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "restir_temporal"), "set_restir_temporal", "is_restir_temporal");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "restir_denoise"), "set_restir_denoise", "is_restir_denoise");
 
 	// SSIL
 	ClassDB::bind_method(D_METHOD("set_ssil_enabled", "enabled"), &Environment::set_ssil_enabled);
@@ -1675,6 +2041,47 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "adjustment_saturation", PROPERTY_HINT_RANGE, "0.0,2.0,0.01,or_less,or_greater"), "set_adjustment_saturation", "get_adjustment_saturation");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "adjustment_color_correction", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D,Texture3D"), "set_adjustment_color_correction", "get_adjustment_color_correction");
 
+	// Mariner F3: color grading.
+
+	ClassDB::bind_method(D_METHOD("set_color_grading_enabled", "value"), &Environment::set_color_grading_enabled);
+	ClassDB::bind_method(D_METHOD("is_color_grading_enabled"), &Environment::is_color_grading_enabled);
+	ClassDB::bind_method(D_METHOD("set_color_grading_temperature", "value"), &Environment::set_color_grading_temperature);
+	ClassDB::bind_method(D_METHOD("get_color_grading_temperature"), &Environment::get_color_grading_temperature);
+	ClassDB::bind_method(D_METHOD("set_color_grading_tint", "value"), &Environment::set_color_grading_tint);
+	ClassDB::bind_method(D_METHOD("get_color_grading_tint"), &Environment::get_color_grading_tint);
+	ClassDB::bind_method(D_METHOD("set_color_grading_shadows", "value"), &Environment::set_color_grading_shadows);
+	ClassDB::bind_method(D_METHOD("get_color_grading_shadows"), &Environment::get_color_grading_shadows);
+	ClassDB::bind_method(D_METHOD("set_color_grading_midtones", "value"), &Environment::set_color_grading_midtones);
+	ClassDB::bind_method(D_METHOD("get_color_grading_midtones"), &Environment::get_color_grading_midtones);
+	ClassDB::bind_method(D_METHOD("set_color_grading_highlights", "value"), &Environment::set_color_grading_highlights);
+	ClassDB::bind_method(D_METHOD("get_color_grading_highlights"), &Environment::get_color_grading_highlights);
+	ClassDB::bind_method(D_METHOD("set_color_grading_tonal_ranges", "value"), &Environment::set_color_grading_tonal_ranges);
+	ClassDB::bind_method(D_METHOD("get_color_grading_tonal_ranges"), &Environment::get_color_grading_tonal_ranges);
+	ClassDB::bind_method(D_METHOD("set_color_grading_slope", "value"), &Environment::set_color_grading_slope);
+	ClassDB::bind_method(D_METHOD("get_color_grading_slope"), &Environment::get_color_grading_slope);
+	ClassDB::bind_method(D_METHOD("set_color_grading_offset", "value"), &Environment::set_color_grading_offset);
+	ClassDB::bind_method(D_METHOD("get_color_grading_offset"), &Environment::get_color_grading_offset);
+	ClassDB::bind_method(D_METHOD("set_color_grading_power", "value"), &Environment::set_color_grading_power);
+	ClassDB::bind_method(D_METHOD("get_color_grading_power"), &Environment::get_color_grading_power);
+	ClassDB::bind_method(D_METHOD("set_color_grading_saturation", "value"), &Environment::set_color_grading_saturation);
+	ClassDB::bind_method(D_METHOD("get_color_grading_saturation"), &Environment::get_color_grading_saturation);
+	ClassDB::bind_method(D_METHOD("set_color_grading_gamut_mapping", "value"), &Environment::set_color_grading_gamut_mapping);
+	ClassDB::bind_method(D_METHOD("is_color_grading_gamut_mapping"), &Environment::is_color_grading_gamut_mapping);
+
+	ADD_GROUP("Color Grading", "color_grading_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "color_grading_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_color_grading_enabled", "is_color_grading_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "color_grading_temperature", PROPERTY_HINT_RANGE, "1667,25000,1,suffix:K"), "set_color_grading_temperature", "get_color_grading_temperature");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "color_grading_tint", PROPERTY_HINT_RANGE, "-1,1,0.01"), "set_color_grading_tint", "get_color_grading_tint");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "color_grading_shadows", PROPERTY_HINT_COLOR_NO_ALPHA), "set_color_grading_shadows", "get_color_grading_shadows");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "color_grading_midtones", PROPERTY_HINT_COLOR_NO_ALPHA), "set_color_grading_midtones", "get_color_grading_midtones");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "color_grading_highlights", PROPERTY_HINT_COLOR_NO_ALPHA), "set_color_grading_highlights", "get_color_grading_highlights");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR4, "color_grading_tonal_ranges"), "set_color_grading_tonal_ranges", "get_color_grading_tonal_ranges");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "color_grading_slope"), "set_color_grading_slope", "get_color_grading_slope");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "color_grading_offset"), "set_color_grading_offset", "get_color_grading_offset");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "color_grading_power"), "set_color_grading_power", "get_color_grading_power");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "color_grading_saturation", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), "set_color_grading_saturation", "get_color_grading_saturation");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "color_grading_gamut_mapping"), "set_color_grading_gamut_mapping", "is_color_grading_gamut_mapping");
+
 	// Path tracing (Mariner E5c)
 
 	ClassDB::bind_method(D_METHOD("set_pathtracing_enabled", "enabled"), &Environment::set_pathtracing_enabled);
@@ -1704,6 +2111,56 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "pathtracing_max_samples", PROPERTY_HINT_RANGE, "0,65536,1,or_greater"), "set_pathtracing_max_samples", "get_pathtracing_max_samples");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "pathtracing_firefly_clamp", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater"), "set_pathtracing_firefly_clamp", "get_pathtracing_firefly_clamp");
 
+	// Dynamic diffuse GI probes (Mariner E12)
+
+	ClassDB::bind_method(D_METHOD("set_ddgi_enabled", "enabled"), &Environment::set_ddgi_enabled);
+	ClassDB::bind_method(D_METHOD("is_ddgi_enabled"), &Environment::is_ddgi_enabled);
+	ClassDB::bind_method(D_METHOD("set_ddgi_probe_count", "count"), &Environment::set_ddgi_probe_count);
+	ClassDB::bind_method(D_METHOD("get_ddgi_probe_count"), &Environment::get_ddgi_probe_count);
+	ClassDB::bind_method(D_METHOD("set_ddgi_probe_spacing", "spacing"), &Environment::set_ddgi_probe_spacing);
+	ClassDB::bind_method(D_METHOD("get_ddgi_probe_spacing"), &Environment::get_ddgi_probe_spacing);
+	ClassDB::bind_method(D_METHOD("set_ddgi_rays_per_probe", "rays"), &Environment::set_ddgi_rays_per_probe);
+	ClassDB::bind_method(D_METHOD("get_ddgi_rays_per_probe"), &Environment::get_ddgi_rays_per_probe);
+	ClassDB::bind_method(D_METHOD("set_ddgi_hysteresis", "hysteresis"), &Environment::set_ddgi_hysteresis);
+	ClassDB::bind_method(D_METHOD("get_ddgi_hysteresis"), &Environment::get_ddgi_hysteresis);
+	ClassDB::bind_method(D_METHOD("set_ddgi_energy", "energy"), &Environment::set_ddgi_energy);
+	ClassDB::bind_method(D_METHOD("get_ddgi_energy"), &Environment::get_ddgi_energy);
+	ClassDB::bind_method(D_METHOD("set_ddgi_bias", "bias"), &Environment::set_ddgi_bias);
+	ClassDB::bind_method(D_METHOD("get_ddgi_bias"), &Environment::get_ddgi_bias);
+	ClassDB::bind_method(D_METHOD("set_ddgi_specular_occlusion", "amount"), &Environment::set_ddgi_specular_occlusion);
+	ClassDB::bind_method(D_METHOD("get_ddgi_specular_occlusion"), &Environment::get_ddgi_specular_occlusion);
+	ClassDB::bind_method(D_METHOD("set_ddgi_probes_per_frame", "probes"), &Environment::set_ddgi_probes_per_frame);
+	ClassDB::bind_method(D_METHOD("get_ddgi_probes_per_frame"), &Environment::get_ddgi_probes_per_frame);
+	ClassDB::bind_method(D_METHOD("set_ddgi_relocation", "enabled"), &Environment::set_ddgi_relocation);
+	ClassDB::bind_method(D_METHOD("is_ddgi_relocation_enabled"), &Environment::is_ddgi_relocation_enabled);
+	ClassDB::bind_method(D_METHOD("set_ddgi_sky_energy", "energy"), &Environment::set_ddgi_sky_energy);
+	ClassDB::bind_method(D_METHOD("get_ddgi_sky_energy"), &Environment::get_ddgi_sky_energy);
+	ClassDB::bind_method(D_METHOD("set_ddgi_lights_energy", "energy"), &Environment::set_ddgi_lights_energy);
+	ClassDB::bind_method(D_METHOD("get_ddgi_lights_energy"), &Environment::get_ddgi_lights_energy);
+	ClassDB::bind_method(D_METHOD("set_ddgi_sea_enabled", "enabled"), &Environment::set_ddgi_sea_enabled);
+	ClassDB::bind_method(D_METHOD("is_ddgi_sea_enabled"), &Environment::is_ddgi_sea_enabled);
+	ClassDB::bind_method(D_METHOD("set_ddgi_sea_level", "level"), &Environment::set_ddgi_sea_level);
+	ClassDB::bind_method(D_METHOD("get_ddgi_sea_level"), &Environment::get_ddgi_sea_level);
+	ClassDB::bind_method(D_METHOD("set_ddgi_sea_color", "color"), &Environment::set_ddgi_sea_color);
+	ClassDB::bind_method(D_METHOD("get_ddgi_sea_color"), &Environment::get_ddgi_sea_color);
+
+	ADD_GROUP("DDGI", "ddgi_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_ddgi_enabled", "is_ddgi_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3I, "ddgi_probe_count"), "set_ddgi_probe_count", "get_ddgi_probe_count");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_probe_spacing", PROPERTY_HINT_RANGE, "0.1,64,0.01,suffix:m"), "set_ddgi_probe_spacing", "get_ddgi_probe_spacing");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddgi_rays_per_probe", PROPERTY_HINT_RANGE, "32,256,32"), "set_ddgi_rays_per_probe", "get_ddgi_rays_per_probe");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_hysteresis", PROPERTY_HINT_RANGE, "0,0.995,0.001"), "set_ddgi_hysteresis", "get_ddgi_hysteresis");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_energy", PROPERTY_HINT_RANGE, "0,4,0.01,or_greater"), "set_ddgi_energy", "get_ddgi_energy");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_bias", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater,suffix:m"), "set_ddgi_bias", "get_ddgi_bias");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_specular_occlusion", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_ddgi_specular_occlusion", "get_ddgi_specular_occlusion");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddgi_probes_per_frame", PROPERTY_HINT_RANGE, "0,16384,1,or_greater"), "set_ddgi_probes_per_frame", "get_ddgi_probes_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_relocation"), "set_ddgi_relocation", "is_ddgi_relocation_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_sky_energy", PROPERTY_HINT_RANGE, "0,16,0.01,or_greater"), "set_ddgi_sky_energy", "get_ddgi_sky_energy");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_lights_energy", PROPERTY_HINT_RANGE, "0,16,0.01,or_greater"), "set_ddgi_lights_energy", "get_ddgi_lights_energy");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_sea_enabled"), "set_ddgi_sea_enabled", "is_ddgi_sea_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_sea_level", PROPERTY_HINT_RANGE, "-100,100,0.01,or_less,or_greater,suffix:m"), "set_ddgi_sea_level", "get_ddgi_sea_level");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "ddgi_sea_color", PROPERTY_HINT_COLOR_NO_ALPHA), "set_ddgi_sea_color", "get_ddgi_sea_color");
+
 	// Constants
 
 	BIND_ENUM_CONSTANT(BG_CLEAR_COLOR);
@@ -1728,6 +2185,7 @@ void Environment::_bind_methods() {
 	BIND_ENUM_CONSTANT(TONE_MAPPER_FILMIC);
 	BIND_ENUM_CONSTANT(TONE_MAPPER_ACES);
 	BIND_ENUM_CONSTANT(TONE_MAPPER_AGX);
+	BIND_ENUM_CONSTANT(TONE_MAPPER_GT7);
 
 	BIND_ENUM_CONSTANT(GLOW_BLEND_MODE_ADDITIVE);
 	BIND_ENUM_CONSTANT(GLOW_BLEND_MODE_SCREEN);
@@ -1790,7 +2248,9 @@ Environment::Environment() {
 	_update_glow();
 	_update_fog();
 	_update_adjustment();
+	_update_color_grading();
 	_update_pathtracing();
+	_update_ddgi();
 	_update_volumetric_fog();
 	_update_bg_energy();
 	notify_property_list_changed();

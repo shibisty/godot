@@ -2281,7 +2281,9 @@ void RenderForwardMobile::_fill_render_list(RenderListType p_render_list, const 
 
 			// LOD
 
-			if (p_render_data->scene_data->screen_mesh_lod_threshold > 0.0 && mesh_storage->mesh_surface_has_lod(surf->surface)) {
+			// Mariner E25c: not for indirect multimeshes - their draw commands hold the full mesh's index count, a LOD's
+			// index buffer would be read past its end.
+			if (p_render_data->scene_data->screen_mesh_lod_threshold > 0.0 && mesh_storage->mesh_surface_has_lod(surf->surface) && !(inst->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_INDIRECT)) {
 				uint32_t indices = 0;
 				surf->sort.lod_index = mesh_storage->mesh_surface_get_lod(surf->surface, inst->lod_model_scale * inst->lod_bias, lod_distance * p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, indices);
 				if (p_render_data->render_info) {
@@ -3574,6 +3576,16 @@ RenderForwardMobile::RenderForwardMobile() {
 	}
 	// defines += "\n#define SDFGI_OCT_SIZE " + itos(gi.sdfgi_get_lightprobe_octahedron_size()) + "\n";
 	defines += "\n#define MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS " + itos(MAX_DIRECTIONAL_LIGHTS) + "\n";
+	// Mariner M1-M3.
+	if (GLOBAL_GET("rendering/shading/overrides/multiscatter_diffuse")) {
+		defines += "\n#define DIFFUSE_MULTISCATTER\n";
+	}
+	if (GLOBAL_GET("rendering/shading/overrides/micro_shadowing")) {
+		defines += "\n#define MICRO_SHADOWING\n";
+	}
+	if (GLOBAL_GET("rendering/shading/overrides/multi_bounce_ao")) {
+		defines += "\n#define MULTI_BOUNCE_AO\n";
+	}
 
 	bool force_vertex_shading = GLOBAL_GET("rendering/shading/overrides/force_vertex_shading");
 	if (force_vertex_shading) {

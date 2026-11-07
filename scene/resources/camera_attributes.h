@@ -32,6 +32,7 @@
 
 #include "core/io/resource.h"
 #include "core/templates/rid.h"
+#include "scene/resources/texture.h"
 
 class CameraAttributes : public Resource {
 	GDCLASS(CameraAttributes, Resource);
@@ -54,6 +55,35 @@ protected:
 	float auto_exposure_scale = 0.4;
 	virtual void _update_auto_exposure() {}
 
+	// Mariner E15a: motion blur.
+	bool motion_blur_enabled = false;
+	float motion_blur_intensity = 0.5;
+	float motion_blur_camera_motion = 1.0;
+	float motion_blur_max_length = 0.04;
+	void _update_motion_blur();
+
+	// Mariner E15b: lens flare and lens dirt.
+	bool lens_flare_enabled = false;
+	float lens_flare_intensity = 0.02;
+	float lens_flare_threshold = 4.0;
+	int lens_flare_ghosts = 4;
+	float lens_flare_ghost_spacing = 0.35;
+	float lens_flare_halo_width = 0.45;
+	float lens_flare_chromatic = 0.006;
+	float lens_flare_sun_streaks = 1.0;
+	int lens_flare_streak_count = 6;
+	float lens_dirt_intensity = 1.0;
+	Ref<Texture2D> lens_dirt_texture;
+	void _update_lens_flare();
+
+	// Mariner E23: image effects.
+	float image_chromatic_aberration = 0.0;
+	float image_lens_distortion = 0.0;
+	float image_film_grain = 0.0;
+	float image_film_grain_size = 1.5;
+	float image_sharpening = 0.0;
+	void _update_image_effects();
+
 public:
 	virtual RID get_rid() const override;
 	virtual float calculate_exposure_normalization() const { return 1.0; }
@@ -69,6 +99,49 @@ public:
 	float get_auto_exposure_speed() const;
 	void set_auto_exposure_scale(float p_auto_exposure_scale);
 	float get_auto_exposure_scale() const;
+
+	void set_motion_blur_enabled(bool p_enabled);
+	bool is_motion_blur_enabled() const;
+	void set_motion_blur_intensity(float p_intensity);
+	float get_motion_blur_intensity() const;
+	void set_motion_blur_camera_motion(float p_amount);
+	float get_motion_blur_camera_motion() const;
+	void set_motion_blur_max_length(float p_length);
+	float get_motion_blur_max_length() const;
+
+	void set_image_chromatic_aberration(float p_value);
+	float get_image_chromatic_aberration() const;
+	void set_image_lens_distortion(float p_value);
+	float get_image_lens_distortion() const;
+	void set_image_film_grain(float p_value);
+	float get_image_film_grain() const;
+	void set_image_film_grain_size(float p_value);
+	float get_image_film_grain_size() const;
+	void set_image_sharpening(float p_value);
+	float get_image_sharpening() const;
+
+	void set_lens_flare_enabled(bool p_enabled);
+	bool is_lens_flare_enabled() const;
+	void set_lens_flare_intensity(float p_value);
+	float get_lens_flare_intensity() const;
+	void set_lens_flare_threshold(float p_value);
+	float get_lens_flare_threshold() const;
+	void set_lens_flare_ghosts(int p_value);
+	int get_lens_flare_ghosts() const;
+	void set_lens_flare_ghost_spacing(float p_value);
+	float get_lens_flare_ghost_spacing() const;
+	void set_lens_flare_halo_width(float p_value);
+	float get_lens_flare_halo_width() const;
+	void set_lens_flare_chromatic(float p_value);
+	float get_lens_flare_chromatic() const;
+	void set_lens_flare_sun_streaks(float p_value);
+	float get_lens_flare_sun_streaks() const;
+	void set_lens_flare_streak_count(int p_value);
+	int get_lens_flare_streak_count() const;
+	void set_lens_dirt_intensity(float p_value);
+	float get_lens_dirt_intensity() const;
+	void set_lens_dirt_texture(const Ref<Texture2D> &p_texture);
+	Ref<Texture2D> get_lens_dirt_texture() const;
 
 	CameraAttributes();
 	~CameraAttributes();

@@ -159,6 +159,15 @@ uint32_t Light3D::get_shadow_caster_mask() const {
 	return shadow_caster_mask;
 }
 
+void Light3D::set_restir(bool p_enable) {
+	restir = p_enable;
+	RS::get_singleton()->light_set_restir(light, restir);
+}
+
+bool Light3D::is_restir() const {
+	return restir;
+}
+
 AABB Light3D::get_aabb() const {
 	if (type == RSE::LIGHT_DIRECTIONAL) {
 		return AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2));
@@ -344,6 +353,8 @@ void Light3D::_validate_property(PropertyInfo &p_property) const {
 		p_property.usage = PROPERTY_USAGE_NONE;
 	} else if (get_light_type() == RSE::LIGHT_AREA && p_property.name == "light_projector") {
 		p_property.usage = PROPERTY_USAGE_NONE;
+	} else if (get_light_type() != RSE::LIGHT_OMNI && get_light_type() != RSE::LIGHT_SPOT && p_property.name == "light_restir") {
+		p_property.usage = PROPERTY_USAGE_NONE; // Mariner E20: omni and spot lights only.
 	}
 }
 
@@ -381,6 +392,8 @@ void Light3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_shadow_reverse_cull_face", "enable"), &Light3D::set_shadow_reverse_cull_face);
 	ClassDB::bind_method(D_METHOD("get_shadow_reverse_cull_face"), &Light3D::get_shadow_reverse_cull_face);
 
+	ClassDB::bind_method(D_METHOD("set_restir", "enable"), &Light3D::set_restir);
+	ClassDB::bind_method(D_METHOD("is_restir"), &Light3D::is_restir);
 	ClassDB::bind_method(D_METHOD("set_shadow_caster_mask", "caster_mask"), &Light3D::set_shadow_caster_mask);
 	ClassDB::bind_method(D_METHOD("get_shadow_caster_mask"), &Light3D::get_shadow_caster_mask);
 
@@ -410,6 +423,7 @@ void Light3D::_bind_methods() {
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "light_specular", PROPERTY_HINT_RANGE, "0,16,0.001,or_greater"), "set_param", "get_param", PARAM_SPECULAR);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "light_bake_mode", PROPERTY_HINT_ENUM, "Disabled,Static,Dynamic"), "set_bake_mode", "get_bake_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "light_cull_mask", PROPERTY_HINT_LAYERS_3D_RENDER), "set_cull_mask", "get_cull_mask");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "light_restir"), "set_restir", "is_restir");
 
 	ADD_GROUP("Shadow", "shadow_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "shadow_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_shadow", "has_shadow");
@@ -556,6 +570,55 @@ DirectionalLight3D::SkyMode DirectionalLight3D::get_sky_mode() const {
 	return sky_mode;
 }
 
+void DirectionalLight3D::_update_object_shadow() {
+	RS::get_singleton()->light_directional_set_object_shadow(light, object_shadow_layers, object_shadow_size, object_shadow_from_cascade);
+}
+
+void DirectionalLight3D::set_object_shadow_layers(uint32_t p_layers) {
+	object_shadow_layers = p_layers;
+	_update_object_shadow();
+}
+
+uint32_t DirectionalLight3D::get_object_shadow_layers() const {
+	return object_shadow_layers;
+}
+
+void DirectionalLight3D::set_object_shadow_size(int p_size) {
+	object_shadow_size = CLAMP(int(Math::nearest_power_of_2_templated(uint32_t(MAX(p_size, 64)))), 64, 16384);
+	_update_object_shadow();
+}
+
+int DirectionalLight3D::get_object_shadow_size() const {
+	return object_shadow_size;
+}
+
+void DirectionalLight3D::set_object_shadow_from_cascade(int p_cascade) {
+	object_shadow_from_cascade = CLAMP(p_cascade, 0, 4);
+	_update_object_shadow();
+}
+
+int DirectionalLight3D::get_object_shadow_from_cascade() const {
+	return object_shadow_from_cascade;
+}
+
+void DirectionalLight3D::set_contact_shadow_length(float p_length) {
+	contact_shadow_length = MAX(0.0f, p_length);
+	RS::get_singleton()->light_directional_set_contact_shadow(light, contact_shadow_length);
+}
+
+float DirectionalLight3D::get_contact_shadow_length() const {
+	return contact_shadow_length;
+}
+
+void DirectionalLight3D::set_restir_shadow_mode(RestirShadowMode p_mode) {
+	restir_shadow_mode = p_mode;
+	RS::get_singleton()->light_directional_set_restir_shadow_mode(light, int(p_mode));
+}
+
+DirectionalLight3D::RestirShadowMode DirectionalLight3D::get_restir_shadow_mode() const {
+	return restir_shadow_mode;
+}
+
 void DirectionalLight3D::_validate_property(PropertyInfo &p_property) const {
 	if (Engine::get_singleton()->is_editor_hint()) {
 		if (shadow_mode == SHADOW_ORTHOGONAL && (p_property.name == "directional_shadow_split_1" || p_property.name == "directional_shadow_blend_splits")) {
@@ -588,6 +651,17 @@ void DirectionalLight3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_sky_mode", "mode"), &DirectionalLight3D::set_sky_mode);
 	ClassDB::bind_method(D_METHOD("get_sky_mode"), &DirectionalLight3D::get_sky_mode);
 
+	ClassDB::bind_method(D_METHOD("set_object_shadow_layers", "layers"), &DirectionalLight3D::set_object_shadow_layers);
+	ClassDB::bind_method(D_METHOD("get_object_shadow_layers"), &DirectionalLight3D::get_object_shadow_layers);
+	ClassDB::bind_method(D_METHOD("set_object_shadow_size", "size"), &DirectionalLight3D::set_object_shadow_size);
+	ClassDB::bind_method(D_METHOD("get_object_shadow_size"), &DirectionalLight3D::get_object_shadow_size);
+	ClassDB::bind_method(D_METHOD("set_object_shadow_from_cascade", "cascade"), &DirectionalLight3D::set_object_shadow_from_cascade);
+	ClassDB::bind_method(D_METHOD("get_object_shadow_from_cascade"), &DirectionalLight3D::get_object_shadow_from_cascade);
+	ClassDB::bind_method(D_METHOD("set_contact_shadow_length", "length"), &DirectionalLight3D::set_contact_shadow_length);
+	ClassDB::bind_method(D_METHOD("get_contact_shadow_length"), &DirectionalLight3D::get_contact_shadow_length);
+	ClassDB::bind_method(D_METHOD("set_restir_shadow_mode", "mode"), &DirectionalLight3D::set_restir_shadow_mode);
+	ClassDB::bind_method(D_METHOD("get_restir_shadow_mode"), &DirectionalLight3D::get_restir_shadow_mode);
+
 	ADD_GROUP("Directional Shadow", "directional_shadow_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "directional_shadow_mode", PROPERTY_HINT_ENUM, "Orthogonal (Fast),PSSM 2 Splits (Average),PSSM 4 Splits (Slow)"), "set_shadow_mode", "get_shadow_mode");
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "directional_shadow_split_1", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_param", "get_param", PARAM_SHADOW_SPLIT_1_OFFSET);
@@ -600,6 +674,17 @@ void DirectionalLight3D::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sky_mode", PROPERTY_HINT_ENUM, "Light and Sky,Light Only,Sky Only"), "set_sky_mode", "get_sky_mode");
 
+	ADD_GROUP("Object Shadow", "object_shadow_");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "object_shadow_layers", PROPERTY_HINT_LAYERS_3D_RENDER), "set_object_shadow_layers", "get_object_shadow_layers");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "object_shadow_size", PROPERTY_HINT_ENUM, "512:512,1024:1024,2048:2048,4096:4096,8192:8192"), "set_object_shadow_size", "get_object_shadow_size");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "object_shadow_from_cascade", PROPERTY_HINT_RANGE, "0,4,1"), "set_object_shadow_from_cascade", "get_object_shadow_from_cascade");
+
+	ADD_GROUP("Contact Shadow", "contact_shadow_");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "contact_shadow_length", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), "set_contact_shadow_length", "get_contact_shadow_length");
+
+	ADD_GROUP("ReSTIR Shadow", "restir_shadow_");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "restir_shadow_mode", PROPERTY_HINT_ENUM, "Replace,Beyond Shadow Maps"), "set_restir_shadow_mode", "get_restir_shadow_mode");
+
 	BIND_ENUM_CONSTANT(SHADOW_ORTHOGONAL);
 	BIND_ENUM_CONSTANT(SHADOW_PARALLEL_2_SPLITS);
 	BIND_ENUM_CONSTANT(SHADOW_PARALLEL_4_SPLITS);
@@ -607,6 +692,9 @@ void DirectionalLight3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(SKY_MODE_LIGHT_AND_SKY);
 	BIND_ENUM_CONSTANT(SKY_MODE_LIGHT_ONLY);
 	BIND_ENUM_CONSTANT(SKY_MODE_SKY_ONLY);
+
+	BIND_ENUM_CONSTANT(RESTIR_SHADOW_REPLACE);
+	BIND_ENUM_CONSTANT(RESTIR_SHADOW_BEYOND_SHADOW_MAPS);
 }
 
 DirectionalLight3D::DirectionalLight3D() :

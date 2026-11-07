@@ -140,6 +140,7 @@ private:
 			Transform3D mesh_to_skeleton_xform;
 
 			Vector4 uv_scale;
+			float uv_density = 0.0f; // Mariner E17.
 
 			RID blend_shape_buffer;
 			uint32_t blend_shape_buffer_size = 0;
@@ -265,6 +266,23 @@ private:
 		RID uniform_set_2d;
 		RID command_buffer; //used if indirect setting is used
 
+		// Mariner E14b: instances of an indirect multimesh culled per shadow pass (section), by the renderer.
+		bool indirect_shadow_culling = false;
+		uint32_t shadow_sections = 0; // Allocated sections.
+		RID shadow_data_buffer; // Sections x instances x stride floats.
+		RID shadow_command_buffer; // Sections x surfaces x INDIRECT_MULTIMESH_COMMAND_STRIDE.
+		RID shadow_counter_buffer; // One counter per section.
+		RID shadow_uniform_set; // Transforms set of the scene shader over shadow_data_buffer.
+
+		// Mariner E25a: the same for the camera of each scene render (one section per geometry instance).
+		bool indirect_view_culling = false;
+		uint32_t view_sections = 0;
+		RID view_data_buffer;
+		RID view_command_buffer;
+		RID view_counter_buffer;
+		RID view_uniform_set;
+		RID cull_state_buffer; // Mariner E25b / E25c: per instance occlusion timer and visibility range state (2 uints).
+
 		bool dirty = false;
 		MultiMesh *dirty_list = nullptr;
 
@@ -278,6 +296,8 @@ private:
 	MultiMesh *multimesh_dirty_list = nullptr;
 
 	_FORCE_INLINE_ void _multimesh_make_local(MultiMesh *multimesh) const;
+	void _multimesh_free_command_buffer(MultiMesh *multimesh);
+	void _multimesh_update_command_buffer(MultiMesh *multimesh);
 	_FORCE_INLINE_ void _multimesh_enable_motion_vectors(MultiMesh *multimesh);
 	_FORCE_INLINE_ void _multimesh_update_motion_vectors_data_cache(MultiMesh *multimesh);
 	_FORCE_INLINE_ bool _multimesh_uses_motion_vectors(MultiMesh *multimesh);
@@ -397,6 +417,7 @@ public:
 
 	virtual void mesh_surface_set_material(RID p_mesh, int p_surface, RID p_material) override;
 	virtual RID mesh_surface_get_material(RID p_mesh, int p_surface) const override;
+	virtual float mesh_surface_get_uv_density(RID p_mesh, int p_surface) const override;
 
 	virtual RenderingServerTypes::SurfaceData mesh_get_surface(RID p_mesh, int p_surface) const override;
 
@@ -546,6 +567,19 @@ public:
 			r_index_count = s->lods[current_lod].index_count;
 			return current_lod + 1;
 		}
+	}
+
+	// Mariner E25c: the LODs of a surface for the GPU LOD selection of indirect multimeshes.
+	_FORCE_INLINE_ uint32_t mesh_surface_get_lod_count(void *p_surface) const {
+		return reinterpret_cast<Mesh::Surface *>(p_surface)->lod_count;
+	}
+	_FORCE_INLINE_ float mesh_surface_get_lod_edge_length(void *p_surface, uint32_t p_lod) const {
+		return reinterpret_cast<Mesh::Surface *>(p_surface)->lods[p_lod].edge_length;
+	}
+	// p_lod 0: the full mesh, otherwise LOD p_lod - 1 (as mesh_surface_get_index_array()).
+	_FORCE_INLINE_ uint32_t mesh_surface_get_lod_index_count(void *p_surface, uint32_t p_lod) const {
+		Mesh::Surface *s = reinterpret_cast<Mesh::Surface *>(p_surface);
+		return p_lod == 0 ? (s->index_count ? s->index_count : s->vertex_count) : s->lods[p_lod - 1].index_count;
 	}
 
 	_FORCE_INLINE_ RID mesh_surface_get_index_array(void *p_surface, uint32_t p_lod) const {
@@ -744,6 +778,43 @@ public:
 	void _multimesh_get_motion_vectors_offsets(RID p_multimesh, uint32_t &r_current_offset, uint32_t &r_prev_offset);
 	bool _multimesh_uses_motion_vectors_offsets(RID p_multimesh);
 	bool _multimesh_uses_motion_vectors(RID p_multimesh);
+
+	// Mariner E14b.
+	virtual void multimesh_set_indirect_shadow_culling(RID p_multimesh, bool p_enable) override;
+	virtual bool multimesh_get_indirect_shadow_culling(RID p_multimesh) const override;
+	virtual RID multimesh_get_shadow_command_buffer_rd_rid(RID p_multimesh) const override;
+	struct MultiMeshShadowCull {
+		RID source_buffer; // The multimesh's instance data.
+		RID source_command_buffer;
+		RID data_buffer;
+		RID command_buffer;
+		RID counter_buffer;
+		RID uniform_set;
+		RID state_buffer; // Mariner E25b / E25c: MultiMesh::cull_state_buffer.
+		uint32_t capacity = 0; // Instances per section.
+		uint32_t stride = 0; // Floats per instance.
+		uint32_t source_offset = 0; // Instances (motion vectors: the current half).
+		uint32_t surface_count = 0;
+		AABB mesh_aabb;
+		// Mariner E25c: mesh LOD per instance (camera sections). Each section is split into `buckets` sections by the
+		// instances' LOD distance; bucket b draws surface s with LOD bucket_lods[b][s] (0: the full mesh). Set by the
+		// renderer after preparing for passes x buckets sections.
+		static constexpr uint32_t MAX_LOD_BUCKETS = 8;
+		static constexpr uint32_t MAX_LOD_SURFACES = 8;
+		uint32_t buckets = 1;
+		uint8_t bucket_lods[MAX_LOD_BUCKETS][MAX_LOD_SURFACES] = {};
+	};
+	// Buffers for p_sections sections (grown as needed); false if the multimesh can't be culled (no data, no mesh).
+	bool multimesh_shadow_cull_prepare(RID p_multimesh, uint32_t p_sections, RID p_shader, uint32_t p_set, MultiMeshShadowCull &r_cull);
+	void _multimesh_free_shadow_cull(MultiMesh *multimesh);
+
+	// Mariner E25a: instances of an indirect multimesh culled for the camera of each scene render.
+	virtual void multimesh_set_indirect_view_culling(RID p_multimesh, bool p_enable) override;
+	virtual bool multimesh_get_indirect_view_culling(RID p_multimesh) const override;
+	virtual RID multimesh_get_view_command_buffer_rd_rid(RID p_multimesh) const override;
+	bool multimesh_view_cull_prepare(RID p_multimesh, uint32_t p_sections, RID p_shader, uint32_t p_set, MultiMeshShadowCull &r_cull);
+	void _multimesh_free_view_cull(MultiMesh *multimesh);
+	bool _multimesh_cull_prepare(MultiMesh *multimesh, uint32_t p_sections, uint32_t p_min_sections, uint32_t &r_sections, RID &r_data, RID &r_commands, RID &r_counters, RID &r_uniform_set, RID p_shader, uint32_t p_set, MultiMeshShadowCull &r_cull);
 
 	_FORCE_INLINE_ bool multimesh_uses_indirect(RID p_multimesh) const {
 		MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);

@@ -74,6 +74,8 @@ public:
 	virtual void particles_set_interpolate(RID p_particles, bool p_enable) = 0;
 	virtual void particles_set_fractional_delta(RID p_particles, bool p_enable) = 0;
 	virtual void particles_set_collision_base_size(RID p_particles, real_t p_size) = 0;
+	// Mariner E22: the particles also collide with the depth of the frame (the largest camera view of the previous frame).
+	virtual void particles_set_screen_space_collision(RID p_particles, bool p_enable) {}
 
 	virtual void particles_set_transform_align(RID p_particles, RSE::ParticlesTransformAlign p_transform_align) = 0;
 	virtual void particles_set_transform_align_channel_filter(RID p_particles, RSE::ParticlesTransformAlignCustomSrc p_channel_filter) = 0;

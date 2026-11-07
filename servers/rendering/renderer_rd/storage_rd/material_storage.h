@@ -254,9 +254,12 @@ private:
 		bool must_update_buffer_materials = false;
 
 		HashMap<RID, int32_t> instance_buffer_pos;
+		uint32_t allocate_hint = 0; // Mariner E14a: where the next free search starts.
+		uint32_t failed_instances = 0; // Mariner E14a: instances that found no room (reported once).
 	} global_shader_uniforms;
 
 	int32_t _global_shader_uniform_allocate(uint32_t p_elements);
+	int32_t _global_shader_uniform_find(uint32_t p_from, uint32_t p_to, uint32_t p_elements);
 	void _global_shader_uniform_store_in_buffer(int32_t p_index, RSE::GlobalShaderParameterType p_type, const Variant &p_value);
 	void _global_shader_uniform_mark_buffer_dirty(int32_t p_index, int32_t p_elements);
 
@@ -452,7 +455,9 @@ public:
 	virtual void global_shader_parameters_load_settings(bool p_load_textures = true) override;
 	virtual void global_shader_parameters_clear() override;
 
-	virtual int32_t global_shader_parameters_instance_allocate(RID p_instance) override;
+	virtual int32_t global_shader_parameters_instance_allocate(RID p_instance, uint32_t p_elements) override;
+	uint32_t global_shader_parameters_instance_slots_used() const; // Mariner E14a (tests, diagnostics).
+	uint32_t global_shader_parameters_instance_failed_count() const;
 	virtual void global_shader_parameters_instance_free(RID p_instance) override;
 	virtual void global_shader_parameters_instance_update(RID p_instance, int p_index, const Variant &p_value, int p_flags_count = 0) override;
 
@@ -498,6 +503,7 @@ public:
 
 	virtual void material_set_param(RID p_material, const StringName &p_param, const Variant &p_value) override;
 	virtual Variant material_get_param(RID p_material, const StringName &p_param) const override;
+	virtual void material_get_textures(RID p_material, LocalVector<RID> &r_textures) const override;
 
 	virtual void material_set_next_pass(RID p_material, RID p_next_material) override;
 	virtual void material_set_render_priority(RID p_material, int priority) override;

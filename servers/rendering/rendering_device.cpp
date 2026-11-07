@@ -5484,6 +5484,7 @@ Error RenderingDevice::screen_prepare_for_drawing(DisplayServerEnums::WindowID p
 
 	// Erase the framebuffer corresponding to this screen from the map in case any of the operations fail.
 	screen_framebuffers.erase(p_screen);
+	screen_extra_framebuffers.erase(p_screen);
 
 	// If this frame has already queued this swap chain for presentation, we present it and remove it from the pending list.
 	uint32_t to_present_index = 0;
@@ -5502,7 +5503,7 @@ Error RenderingDevice::screen_prepare_for_drawing(DisplayServerEnums::WindowID p
 		// Flush everything so nothing can be using the swap chain before resizing it.
 		_flush_and_stall_for_all_frames();
 
-		Error err = driver->swap_chain_resize(main_queue, it->value, _get_swap_chain_desired_count());
+		Error err = driver->swap_chain_resize(main_queue, it->value, _get_swap_chain_desired_count() + (screen_extra_present_enabled.has(p_screen) ? 1 : 0));
 		if (err != OK) {
 			// Resize is allowed to fail silently because the window can be minimized.
 			return err;
@@ -5522,6 +5523,49 @@ Error RenderingDevice::screen_prepare_for_drawing(DisplayServerEnums::WindowID p
 	screen_framebuffers[p_screen] = framebuffer;
 	frames[frame].swap_chains_to_present.push_back(it->value);
 
+	return OK;
+}
+
+void RenderingDevice::screen_set_extra_present_enabled(DisplayServerEnums::WindowID p_screen, bool p_enabled) {
+	_THREAD_SAFE_METHOD_
+
+	if (screen_extra_present_enabled.has(p_screen) == p_enabled) {
+		return;
+	}
+	if (p_enabled) {
+		screen_extra_present_enabled.insert(p_screen);
+	} else {
+		screen_extra_present_enabled.erase(p_screen);
+	}
+	// The swap chain is recreated with the new image count the next time it is acquired.
+	RenderingContextDriver::SurfaceID surface = context->surface_get_from_window(p_screen);
+	if (surface != 0) {
+		context->surface_set_needs_resize(surface, true);
+	}
+}
+
+bool RenderingDevice::screen_is_extra_present_enabled(DisplayServerEnums::WindowID p_screen) const {
+	_THREAD_SAFE_METHOD_
+
+	return screen_extra_present_enabled.has(p_screen);
+}
+
+Error RenderingDevice::screen_prepare_extra_for_drawing(DisplayServerEnums::WindowID p_screen) {
+	_THREAD_SAFE_METHOD_
+
+	HashMap<DisplayServerEnums::WindowID, RDD::SwapChainID>::ConstIterator it = screen_swap_chains.find(p_screen);
+	ERR_FAIL_COND_V_MSG(it == screen_swap_chains.end(), ERR_CANT_CREATE, "A swap chain was not created for the screen.");
+	ERR_FAIL_COND_V_MSG(!screen_framebuffers.has(p_screen), ERR_CANT_CREATE, "screen_prepare_for_drawing() must come first.");
+	if (!screen_extra_present_enabled.has(p_screen)) {
+		return ERR_UNCONFIGURED;
+	}
+
+	screen_extra_framebuffers.erase(p_screen);
+	RDD::FramebufferID framebuffer = driver->swap_chain_acquire_extra_framebuffer(main_queue, it->value);
+	if (framebuffer.id == 0) {
+		return ERR_UNAVAILABLE; // Unsupported by the driver, or no free image in time.
+	}
+	screen_extra_framebuffers[p_screen] = framebuffer;
 	return OK;
 }
 
@@ -5611,6 +5655,8 @@ Error RenderingDevice::screen_free(DisplayServerEnums::WindowID p_screen) {
 	const RDD::SwapChainID swap_chain = it->value;
 	driver->swap_chain_free(swap_chain);
 	screen_framebuffers.erase(screen);
+	screen_extra_framebuffers.erase(screen);
+	screen_extra_present_enabled.erase(screen);
 	screen_swap_chains.erase(screen);
 
 	return OK;
@@ -5633,6 +5679,40 @@ RenderingDevice::DrawListID RenderingDevice::draw_list_begin_for_screen(DisplayS
 	ERR_FAIL_COND_V_MSG(surface == 0, 0, "A surface was not created for the screen.");
 	ERR_FAIL_COND_V_MSG(sc_it == screen_swap_chains.end(), INVALID_ID, "Screen was never prepared.");
 	ERR_FAIL_COND_V_MSG(fb_it == screen_framebuffers.end(), INVALID_ID, "Framebuffer was never prepared.");
+
+	Rect2i viewport = Rect2i(0, 0, context->surface_get_width(surface), context->surface_get_height(surface));
+
+	_draw_list_start(viewport);
+#ifdef DEBUG_ENABLED
+	draw_list_framebuffer_format = screen_get_framebuffer_format(p_screen);
+#endif
+	draw_list_subpass_count = 1;
+
+	RDD::RenderPassClearValue clear_value;
+	clear_value.color = p_clear_color;
+
+	RDD::RenderPassID render_pass = driver->swap_chain_get_render_pass(sc_it->value);
+	draw_graph.add_draw_list_begin(render_pass, fb_it->value, viewport, RDG::ATTACHMENT_OPERATION_CLEAR, clear_value, RDD::PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, RDD::BreadcrumbMarker::BLIT_PASS, split_swapchain_into_its_own_cmd_buffer);
+
+	draw_graph.add_draw_list_set_viewport(viewport);
+	draw_graph.add_draw_list_set_scissor(viewport);
+
+	return int64_t(ID_TYPE_DRAW_LIST) << ID_BASE_SHIFT;
+}
+
+RenderingDevice::DrawListID RenderingDevice::draw_list_begin_for_screen_extra(DisplayServerEnums::WindowID p_screen, const Color &p_clear_color) {
+	ERR_RENDER_THREAD_GUARD_V(INVALID_ID);
+
+	ERR_FAIL_COND_V_MSG(draw_list.active, INVALID_ID, "Only one draw list can be active at the same time.");
+	ERR_FAIL_COND_V_MSG(compute_list.active, INVALID_ID, "Only one draw/compute list can be active at the same time.");
+	ERR_FAIL_COND_V_MSG(raytracing_list.active, INVALID_ID, "Only one draw/raytracing list can be active at the same time.");
+
+	RenderingContextDriver::SurfaceID surface = context->surface_get_from_window(p_screen);
+	HashMap<DisplayServerEnums::WindowID, RDD::SwapChainID>::ConstIterator sc_it = screen_swap_chains.find(p_screen);
+	HashMap<DisplayServerEnums::WindowID, RDD::FramebufferID>::ConstIterator fb_it = screen_extra_framebuffers.find(p_screen);
+	ERR_FAIL_COND_V_MSG(surface == 0, 0, "A surface was not created for the screen.");
+	ERR_FAIL_COND_V_MSG(sc_it == screen_swap_chains.end(), INVALID_ID, "Screen was never prepared.");
+	ERR_FAIL_COND_V_MSG(fb_it == screen_extra_framebuffers.end(), INVALID_ID, "Extra framebuffer was never prepared (screen_prepare_extra_for_drawing()).");
 
 	Rect2i viewport = Rect2i(0, 0, context->surface_get_width(surface), context->surface_get_height(surface));
 
@@ -9297,7 +9377,9 @@ void RenderingDevice::_stall_for_frame(uint32_t p_frame) {
 					array_offset += region.size;
 				}
 
-				request.callback.call(packed_byte_array);
+				if (request.callback.is_valid()) {
+					request.callback.call(packed_byte_array);
+				}
 			}
 
 			frames[p_frame].download_buffer_staging_buffers.clear();
@@ -9348,7 +9430,9 @@ void RenderingDevice::_stall_for_frame(uint32_t p_frame) {
 					driver->buffer_unmap(frames[p_frame].download_texture_staging_buffers[local_index]);
 				}
 
-				request.callback.call(packed_byte_array);
+				if (request.callback.is_valid()) {
+					request.callback.call(packed_byte_array);
+				}
 			}
 
 			GodotProfileZoneGrouped(_profile_zone, "clear buffers");
@@ -9356,6 +9440,19 @@ void RenderingDevice::_stall_for_frame(uint32_t p_frame) {
 			frames[p_frame].download_buffer_texture_copy_regions.clear();
 			frames[p_frame].download_texture_mipmap_offsets.clear();
 			frames[p_frame].download_texture_get_data_requests.clear();
+		}
+	}
+}
+
+void RenderingDevice::discard_pending_data_callbacks() {
+	ERR_RENDER_THREAD_GUARD();
+
+	for (Frame &f : frames) {
+		for (BufferGetDataRequest &request : f.download_buffer_get_data_requests) {
+			request.callback = Callable();
+		}
+		for (TextureGetDataRequest &request : f.download_texture_get_data_requests) {
+			request.callback = Callable();
 		}
 	}
 }

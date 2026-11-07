@@ -16,6 +16,13 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="get_streaming_mip" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the finest mip level currently loaded when the texture streams (0 is the full size), or [code]-1[/code] when it was loaded whole. See [member ProjectSettings.rendering/textures/streaming/enabled].
+				[b]Note:[/b] [method Texture2D.get_image] of a streamed texture reads the full image from its file.
+			</description>
+		</method>
 		<method name="load">
 			<return type="int" enum="Error" />
 			<param index="0" name="path" type="String" />

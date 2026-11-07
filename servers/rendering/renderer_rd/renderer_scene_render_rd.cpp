@@ -472,7 +472,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 	RSE::ViewportScaling3DMode scale_mode = rb->get_scaling_3d_mode();
 	// DLSS reports "not ready" during its warm-up frames or when no DLSS mode fits the resolution; the internal
 	// texture is used then.
-	bool use_upscaled_texture = rb->has_upscaled_texture() && rb->get_upscaler_ready() && (scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR2 || scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL || scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS);
+	bool use_upscaled_texture = rb->has_upscaled_texture() && rb->get_upscaler_ready() && (scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR2 || scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL || scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS || scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR3);
 	SpatialUpscaler *spatial_upscaler = nullptr;
 	if (can_use_effects) {
 		if (scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR) {
@@ -485,7 +485,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 	}
 
 	// SMAA causes issues when enabled with temporal upscalers.
-	bool temporal_upscaler_active = scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS || scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR2 || scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL;
+	bool temporal_upscaler_active = scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS || scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR2 || scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR3 || scale_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL;
 	bool use_fxaa = rb->get_screen_space_aa() == RSE::VIEWPORT_SCREEN_SPACE_AA_FXAA;
 	bool use_smaa = smaa && rb->get_screen_space_aa() == RSE::VIEWPORT_SCREEN_SPACE_AA_SMAA && !temporal_upscaler_active;
 	// If doing bilinear or nearest scaling + FXAA / SMAA, the framebuffer must be scaled in a framebuffer copy after AA is applied.
@@ -496,6 +496,31 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 	Size2i color_size = use_upscaled_texture ? target_size : rb->get_internal_size();
 
 	bool dest_is_msaa_2d = rb->get_view_count() == 1 && texture_storage->render_target_get_msaa(render_target) != RSE::VIEWPORT_MSAA_DISABLED;
+
+	// Mariner E15a: motion blur by the motion vectors, on the (upscaled) HDR color, before depth of field.
+	if (can_use_effects && can_use_storage && motion_blur && rb->get_view_count() == 1 && RSG::camera_attributes->camera_attributes_uses_motion_blur(p_render_data->camera_attributes)) {
+		RID velocity = _render_buffers_get_velocity_texture(rb);
+		if (velocity.is_null()) {
+			WARN_PRINT_ONCE("Motion blur needs motion vectors: enable TAA, FSR 2 or DLSS, or call RenderingServer.viewport_set_force_motion_vectors(viewport_rid, true).");
+		} else {
+			RENDER_TIMESTAMP("Motion Blur");
+			RD::get_singleton()->draw_command_begin_label("Motion Blur");
+			const RID cam_attributes = p_render_data->camera_attributes;
+			const RenderSceneDataRD *scene_data = p_render_data->scene_data;
+			RendererRD::MotionBlur::Settings settings;
+			settings.projection = scene_data->get_cam_projection();
+			Projection correction;
+			correction.set_depth_correction(true, true, false);
+			settings.reprojection = (correction * scene_data->prev_cam_projection) * Projection(scene_data->prev_cam_transform.affine_inverse() * scene_data->cam_transform) * (correction * scene_data->cam_projection).inverse();
+			settings.intensity = RSG::camera_attributes->camera_attributes_get_motion_blur_intensity(cam_attributes);
+			settings.camera_motion = RSG::camera_attributes->camera_attributes_get_motion_blur_camera_motion(cam_attributes);
+			settings.max_length = RSG::camera_attributes->camera_attributes_get_motion_blur_max_length(cam_attributes);
+			settings.samples = GLOBAL_GET_CACHED(int, "rendering/camera/motion_blur/samples");
+			settings.frame = RSG::rasterizer->get_frame_number();
+			motion_blur->process(rb.ptr(), color_texture, color_size, velocity, rb->get_depth_texture(), settings);
+			RD::get_singleton()->draw_command_end_label();
+		}
+	}
 
 	bool using_dof = RSG::camera_attributes->camera_attributes_uses_dof(p_render_data->camera_attributes);
 
@@ -552,6 +577,41 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 				bokeh_dof->bokeh_dof_raster(buffers, p_render_data->camera_attributes, z_near, z_far, p_render_data->scene_data->cam_orthogonal);
 			}
 		}
+		RD::get_singleton()->draw_command_end_label();
+	}
+
+	// Mariner E15b: lens flare and lens dirt, added to the HDR color after depth of field.
+	RendererCameraAttributes::LensFlare lens_flare_settings;
+	if (can_use_effects && can_use_storage && lens_flare && rb->get_view_count() == 1 && RSG::camera_attributes->camera_attributes_get_lens_flare(p_render_data->camera_attributes, lens_flare_settings)) {
+		RENDER_TIMESTAMP("Lens Flare");
+		RD::get_singleton()->draw_command_begin_label("Lens Flare");
+		RendererRD::LensFlare::Settings settings;
+		settings.intensity = lens_flare_settings.intensity;
+		settings.threshold = lens_flare_settings.threshold;
+		settings.ghosts = lens_flare_settings.ghosts;
+		settings.ghost_spacing = lens_flare_settings.ghost_spacing;
+		settings.halo_width = lens_flare_settings.halo_width;
+		settings.chromatic = lens_flare_settings.chromatic;
+		settings.dirt_intensity = lens_flare_settings.dirt_intensity;
+		if (lens_flare_settings.dirt_texture.is_valid()) {
+			settings.dirt_texture = texture_storage->texture_get_rd_texture(lens_flare_settings.dirt_texture);
+		}
+		settings.streak_count = lens_flare_settings.streak_count;
+		Vector3 sun_direction;
+		Color sun_color;
+		float sun_diameter = 0.0;
+		if (lens_flare_settings.sun_streaks > 0.0f && RendererRD::LightStorage::get_singleton()->get_frame_sun(sun_direction, sun_color, sun_diameter)) {
+			const Projection projection = p_render_data->scene_data->get_cam_projection();
+			const Vector4 clip = projection.xform(Vector4(sun_direction.x, sun_direction.y, sun_direction.z, 0.0));
+			settings.sun = true;
+			settings.sun_in_front = clip.w > 0.0;
+			if (settings.sun_in_front) {
+				settings.sun_uv = Vector2(clip.x / clip.w, clip.y / clip.w) * 0.5 + Vector2(0.5, 0.5);
+			}
+			settings.sun_radius = Math::tan(Math::deg_to_rad(MAX(sun_diameter, 0.5f) * 0.5f)) * Math::abs(projection.columns[1][1]) * 0.5f;
+			settings.sun_color = sun_color * (lens_flare_settings.sun_streaks * 0.5f);
+		}
+		lens_flare->process(rb.ptr(), color_texture, color_size, rb->get_depth_texture(), settings);
 		RD::get_singleton()->draw_command_end_label();
 	}
 
@@ -756,6 +816,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		tonemap.convert_to_srgb = !using_hdr;
 
 		if (can_use_effects && p_render_data->environment.is_valid()) {
+			tonemap.color_grading = environment_get_color_grading(p_render_data->environment); // Mariner F3.
 			tonemap.use_bcs = environment_get_adjustments_enabled(p_render_data->environment);
 			tonemap.brightness = environment_get_adjustments_brightness(p_render_data->environment);
 			tonemap.contrast = environment_get_adjustments_contrast(p_render_data->environment);
@@ -769,6 +830,16 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 
 		tonemap.luminance_multiplier = rb->get_luminance_multiplier();
 		tonemap.view_count = rb->get_view_count();
+
+		// Mariner E23: lens distortion, chromatic aberration and film grain of the camera attributes (Forward+).
+		if (can_use_effects && can_use_storage) {
+			const RendererCameraAttributes::ImageEffects image_effects = RSG::camera_attributes->camera_attributes_get_image_effects(p_render_data->camera_attributes);
+			tonemap.chromatic_aberration = image_effects.chromatic_aberration;
+			tonemap.lens_distortion = image_effects.lens_distortion;
+			tonemap.film_grain = image_effects.film_grain;
+			tonemap.film_grain_size = image_effects.film_grain_size;
+			tonemap.frame = uint32_t(RSG::rasterizer->get_frame_number());
+		}
 
 		RID dest_fb;
 		RD::DataFormat dest_fb_format;
@@ -896,6 +967,18 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		}
 
 		RD::get_singleton()->draw_command_end_label();
+	}
+
+	// Mariner E23: contrast adaptive sharpening of the final image (after tonemapping, SMAA and spatial upscaling).
+	if (cas && can_use_effects && can_use_storage && rb->get_view_count() == 1 && !dest_is_msaa_2d) {
+		const float sharpening = RSG::camera_attributes->camera_attributes_get_image_effects(p_render_data->camera_attributes).sharpening;
+		if (sharpening > 0.0f) {
+			RENDER_TIMESTAMP("CAS");
+			RD::get_singleton()->draw_command_begin_label("CAS");
+			const bool using_hdr = texture_storage->render_target_is_using_hdr(render_target);
+			cas->process(rb.ptr(), texture_storage->render_target_get_rd_texture(render_target), texture_storage->render_target_get_rd_framebuffer(render_target), target_size, sharpening, using_hdr ? p_render_data->window_output_max_value : 1.0f);
+			RD::get_singleton()->draw_command_end_label();
+		}
 	}
 
 	texture_storage->render_target_disable_clear_request(render_target);
@@ -1475,6 +1558,8 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 
 		render_data.render_info = r_render_info;
 		render_data.rt_instances = raytracing_instances;
+		render_data.rt_lights = raytracing_lights;
+		render_data.ddgi_volume = ddgi_volume;
 
 		if (p_render_buffers.is_valid() && p_reflection_probe.is_null()) {
 			render_data.transparent_bg = texture_storage->render_target_get_transparent(rb->get_render_target());
@@ -1872,6 +1957,11 @@ void RendererSceneRenderRD::init() {
 	}
 
 	bokeh_dof = memnew(RendererRD::BokehDOF(!can_use_storage));
+	if (can_use_storage) {
+		motion_blur = memnew(RendererRD::MotionBlur); // Mariner E15a.
+		lens_flare = memnew(RendererRD::LensFlare); // Mariner E15b.
+		cas = memnew(RendererRD::CAS); // Mariner E23.
+	}
 	copy_effects = memnew(RendererRD::CopyEffects(raster_effects));
 	debug_effects = memnew(RendererRD::DebugEffects);
 	luminance = memnew(RendererRD::Luminance(!can_use_storage));
@@ -1894,6 +1984,18 @@ RendererSceneRenderRD::~RendererSceneRenderRD() {
 		memdelete(forward_id_storage);
 	}
 
+	if (cas) {
+		memdelete(cas); // Mariner E23.
+		cas = nullptr;
+	}
+	if (lens_flare) {
+		memdelete(lens_flare); // Mariner E15b.
+		lens_flare = nullptr;
+	}
+	if (motion_blur) {
+		memdelete(motion_blur); // Mariner E15a.
+		motion_blur = nullptr;
+	}
 	if (bokeh_dof) {
 		memdelete(bokeh_dof);
 	}

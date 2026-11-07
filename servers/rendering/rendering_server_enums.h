@@ -461,6 +461,7 @@ enum ViewportScaling3DMode {
 	VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL,
 	VIEWPORT_SCALING_3D_MODE_NEAREST,
 	VIEWPORT_SCALING_3D_MODE_DLSS,
+	VIEWPORT_SCALING_3D_MODE_FSR3, // AMD FSR 3.1 upscaler (Forward+).
 	VIEWPORT_SCALING_3D_MODE_MAX,
 	VIEWPORT_SCALING_3D_MODE_OFF = 255, // for internal use only
 };
@@ -475,7 +476,7 @@ enum ViewportScaling3DType {
 inline ViewportScaling3DType scaling_3d_mode_type(ViewportScaling3DMode p_mode) {
 	if (p_mode == VIEWPORT_SCALING_3D_MODE_NEAREST || p_mode == VIEWPORT_SCALING_3D_MODE_BILINEAR || p_mode == VIEWPORT_SCALING_3D_MODE_FSR || p_mode == VIEWPORT_SCALING_3D_MODE_METALFX_SPATIAL) {
 		return VIEWPORT_SCALING_3D_TYPE_SPATIAL;
-	} else if (p_mode == VIEWPORT_SCALING_3D_MODE_FSR2 || p_mode == VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL || p_mode == VIEWPORT_SCALING_3D_MODE_DLSS) {
+	} else if (p_mode == VIEWPORT_SCALING_3D_MODE_FSR2 || p_mode == VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL || p_mode == VIEWPORT_SCALING_3D_MODE_DLSS || p_mode == VIEWPORT_SCALING_3D_MODE_FSR3) {
 		return VIEWPORT_SCALING_3D_TYPE_TEMPORAL;
 	}
 	return VIEWPORT_SCALING_3D_TYPE_NONE;
@@ -675,6 +676,7 @@ enum EnvironmentToneMapper {
 	ENV_TONE_MAPPER_FILMIC,
 	ENV_TONE_MAPPER_ACES,
 	ENV_TONE_MAPPER_AGX,
+	ENV_TONE_MAPPER_GT7, // Mariner E23.
 };
 
 enum EnvironmentSSRRoughnessQuality {
@@ -803,6 +805,20 @@ enum ShadowCastingSetting {
 	SHADOW_CASTING_SETTING_ON,
 	SHADOW_CASTING_SETTING_DOUBLE_SIDED,
 	SHADOW_CASTING_SETTING_SHADOWS_ONLY,
+};
+
+// Mariner E10: how an instance takes part in the directional shadow cache.
+enum ShadowCacheMode {
+	SHADOW_CACHE_MODE_AUTO, // Static once its transform and base stayed unchanged for a while, unless it animates its own depth.
+	SHADOW_CACHE_MODE_STATIC, // Always cached (also with TIME in the shader or GPU-written multimesh data).
+	SHADOW_CACHE_MODE_DYNAMIC, // Never cached: drawn every frame.
+};
+
+// Mariner E12 DG-F: how a geometry instance takes part in the raytracing scene (TLAS) of viewports.
+enum RaytracingMode {
+	RAYTRACING_MODE_DEFAULT, // Drawn and in the raytracing scene.
+	RAYTRACING_MODE_ONLY, // Only in the raytracing scene: not drawn, no shadow maps (stand-ins for GI / reflections).
+	RAYTRACING_MODE_DISABLED, // Drawn, not in the raytracing scene.
 };
 
 enum VisibilityRangeFadeMode {

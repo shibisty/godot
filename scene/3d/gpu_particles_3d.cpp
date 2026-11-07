@@ -238,6 +238,15 @@ real_t GPUParticles3D::get_collision_base_size() const {
 	return collision_base_size;
 }
 
+void GPUParticles3D::set_screen_space_collision(bool p_enable) {
+	screen_space_collision = p_enable;
+	RS::get_singleton()->particles_set_screen_space_collision(particles, p_enable);
+}
+
+bool GPUParticles3D::is_screen_space_collision() const {
+	return screen_space_collision;
+}
+
 void GPUParticles3D::set_draw_order(DrawOrder p_order) {
 	draw_order = p_order;
 	RS::get_singleton()->particles_set_draw_order(particles, RSE::ParticlesDrawOrder(p_order));
@@ -813,6 +822,8 @@ void GPUParticles3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_process_material"), &GPUParticles3D::get_process_material);
 	ClassDB::bind_method(D_METHOD("get_speed_scale"), &GPUParticles3D::get_speed_scale);
 	ClassDB::bind_method(D_METHOD("get_collision_base_size"), &GPUParticles3D::get_collision_base_size);
+	ClassDB::bind_method(D_METHOD("set_screen_space_collision", "enable"), &GPUParticles3D::set_screen_space_collision);
+	ClassDB::bind_method(D_METHOD("is_screen_space_collision"), &GPUParticles3D::is_screen_space_collision);
 	ClassDB::bind_method(D_METHOD("get_interp_to_end"), &GPUParticles3D::get_interp_to_end);
 
 	ClassDB::bind_method(D_METHOD("set_use_fixed_seed", "use_fixed_seed"), &GPUParticles3D::set_use_fixed_seed);
@@ -887,6 +898,7 @@ void GPUParticles3D::_bind_methods() {
 
 	ADD_GROUP("Collision", "collision_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "collision_base_size", PROPERTY_HINT_RANGE, "0,128,0.01,or_greater,suffix:m"), "set_collision_base_size", "get_collision_base_size");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "collision_screen_space"), "set_screen_space_collision", "is_screen_space_collision");
 	ADD_GROUP("Drawing", "");
 	ADD_PROPERTY(PropertyInfo(Variant::AABB, "visibility_aabb", PROPERTY_HINT_NONE, "suffix:m"), "set_visibility_aabb", "get_visibility_aabb");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "local_coords"), "set_use_local_coordinates", "get_use_local_coordinates");

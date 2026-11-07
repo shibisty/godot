@@ -30,6 +30,7 @@
 
 #include "mesh.h"
 
+#include "core/config/project_settings.h"
 #include "core/math/convex_hull.h"
 #include "core/object/class_db.h"
 #include "core/templates/pair.h"
@@ -1530,6 +1531,9 @@ Array ArrayMesh::_get_surfaces() const {
 		}
 		data["aabb"] = surface.aabb;
 		data["uv_scale"] = surface.uv_scale;
+		if (surface.uv_density > 0.0f) {
+			data["uv_density"] = surface.uv_density; // Mariner E17.
+		}
 		if (surface.index_count) {
 			data["index_data"] = surface.index_data;
 			data["index_count"] = surface.index_count;
@@ -1642,6 +1646,14 @@ void ArrayMesh::_set_surfaces(const Array &p_surfaces) {
 			surface.blend_shape_data = d["blend_shapes"];
 		}
 
+		// Mariner E17: meshes saved before the density was stored get it measured once, when texture streaming is on.
+		bool measure_uv_density = false;
+		if (d.has("uv_density")) {
+			surface.uv_density = d["uv_density"];
+		} else {
+			measure_uv_density = GLOBAL_GET("rendering/textures/streaming/enabled").booleanize();
+		}
+
 		Ref<Material> material;
 		if (d.has("material")) {
 			material = d["material"];
@@ -1671,6 +1683,10 @@ void ArrayMesh::_set_surfaces(const Array &p_surfaces) {
 							(RSE::ARRAY_FLAG_FORMAT_CURRENT_VERSION >> RSE::ARRAY_FLAG_FORMAT_VERSION_SHIFT) & RSE::ARRAY_FLAG_FORMAT_VERSION_MASK));
 		}
 #endif
+
+		if (measure_uv_density) {
+			surface.uv_density = RS::get_singleton()->mesh_surface_data_compute_uv_density(surface);
+		}
 
 		surface_data.push_back(surface);
 		surface_materials.push_back(material);
@@ -1780,7 +1796,7 @@ void ArrayMesh::_recompute_aabb() {
 }
 
 // TODO: Need to add binding to add_surface using future MeshSurfaceData object.
-void ArrayMesh::add_surface(BitField<ArrayFormat> p_format, PrimitiveType p_primitive, const Vector<uint8_t> &p_array, const Vector<uint8_t> &p_attribute_array, const Vector<uint8_t> &p_skin_array, int p_vertex_count, const Vector<uint8_t> &p_index_array, int p_index_count, const AABB &p_aabb, const Vector<uint8_t> &p_blend_shape_data, const Vector<AABB> &p_bone_aabbs, const Vector<RenderingServerTypes::SurfaceData::LOD> &p_lods, const Vector4 p_uv_scale) {
+void ArrayMesh::add_surface(BitField<ArrayFormat> p_format, PrimitiveType p_primitive, const Vector<uint8_t> &p_array, const Vector<uint8_t> &p_attribute_array, const Vector<uint8_t> &p_skin_array, int p_vertex_count, const Vector<uint8_t> &p_index_array, int p_index_count, const AABB &p_aabb, const Vector<uint8_t> &p_blend_shape_data, const Vector<AABB> &p_bone_aabbs, const Vector<RenderingServerTypes::SurfaceData::LOD> &p_lods, const Vector4 p_uv_scale, float p_uv_density) {
 	ERR_FAIL_COND(surfaces.size() == RSE::MAX_MESH_SURFACES);
 	_create_if_empty();
 
@@ -1809,6 +1825,8 @@ void ArrayMesh::add_surface(BitField<ArrayFormat> p_format, PrimitiveType p_prim
 	sd.bone_aabbs = p_bone_aabbs;
 	sd.lods = p_lods;
 	sd.uv_scale = p_uv_scale;
+	// Mariner E17: a negative density means unknown; it is measured only when texture streaming needs it.
+	sd.uv_density = p_uv_density >= 0.0f ? p_uv_density : (GLOBAL_GET("rendering/textures/streaming/enabled").booleanize() ? RS::get_singleton()->mesh_surface_data_compute_uv_density(sd) : 0.0f);
 
 	RenderingServer::get_singleton()->mesh_add_surface(mesh, sd);
 
@@ -1836,7 +1854,7 @@ void ArrayMesh::add_surface_from_arrays(PrimitiveType p_primitive, const Array &
 	print_line("primitive: " + itos(surface.primitive));
 	*/
 
-	add_surface(surface.format, PrimitiveType(surface.primitive), surface.vertex_data, surface.attribute_data, surface.skin_data, surface.vertex_count, surface.index_data, surface.index_count, surface.aabb, surface.blend_shape_data, surface.bone_aabbs, surface.lods, surface.uv_scale);
+	add_surface(surface.format, PrimitiveType(surface.primitive), surface.vertex_data, surface.attribute_data, surface.skin_data, surface.vertex_count, surface.index_data, surface.index_count, surface.aabb, surface.blend_shape_data, surface.bone_aabbs, surface.lods, surface.uv_scale, surface.uv_density);
 }
 
 Array ArrayMesh::surface_get_arrays(int p_surface) const {

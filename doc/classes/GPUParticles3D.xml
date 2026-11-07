@@ -86,6 +86,10 @@
 			The base diameter for particle collision in meters. If particles appear to sink into the ground when colliding, increase this value. If particles appear to float when colliding, decrease this value. Only effective if [member ParticleProcessMaterial.collision_mode] is [constant ParticleProcessMaterial.COLLISION_RIGID] or [constant ParticleProcessMaterial.COLLISION_HIDE_ON_CONTACT].
 			[b]Note:[/b] Particles always have a spherical collision shape.
 		</member>
+		<member name="collision_screen_space" type="bool" setter="set_screen_space_collision" getter="is_screen_space_collision" default="false">
+			If [code]true[/code], particles also collide with what the camera sees, using the depth buffer of the 3D view: rain lands on the deck, sparks bounce off a hull without any [GPUParticlesCollision3D] node. Works only with [member local_coords] disabled and with [member ParticleProcessMaterial.collision_mode] set to rigid or hide on contact. Surfaces outside the view or hidden behind nearer geometry are unknown, so particles there keep falling.
+			[b]Note:[/b] Draw such particles with a material that does not write depth (for example a transparent one), otherwise they collide with themselves. Only supported by the Forward+ renderer.
+		</member>
 		<member name="draw_order" type="int" setter="set_draw_order" getter="get_draw_order" enum="GPUParticles3D.DrawOrder" default="0">
 			Particle draw order.
 			[b]Note:[/b] [constant DRAW_ORDER_INDEX] is the only option that supports motion vectors for effects like TAA. It is suggested to use this draw order if the particles are opaque to fix ghosting artifacts.

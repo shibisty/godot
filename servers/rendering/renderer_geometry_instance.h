@@ -61,6 +61,13 @@ public:
 	virtual void set_lightmap_capture(const Color *p_sh9) = 0;
 	virtual void set_instance_shader_uniforms_offset(int32_t p_offset) = 0;
 	virtual void set_cast_double_sided_shadows(bool p_enable) = 0;
+	// Mariner E12 DG-F: only in the raytracing scene (not drawn); share of rays the instance stops there (1: opaque).
+	virtual void set_raytracing_data(bool p_only, float p_opacity) {}
+	// Mariner E25b: GeometryInstance3D.ignore_occlusion_culling, for the occlusion culling done by the renderer.
+	virtual void set_ignore_occlusion_culling(bool p_enable) {}
+	// Mariner E25c: visibility range (fade disabled) applied per instance by the renderer's GPU culling of an indirect
+	// multimesh with view culling (GPU static batches); all 0: none.
+	virtual void set_gpu_visibility_range(float p_begin, float p_end, float p_begin_margin, float p_end_margin) {}
 
 	virtual void reset_motion_vectors() = 0;
 
@@ -108,6 +115,10 @@ public:
 
 	float parent_fade_alpha = 1.0;
 	float force_alpha = 1.0;
+	float raytracing_opacity = 1.0; // Mariner E12 DG-F.
+	bool raytracing_only = false;
+	bool ignore_occlusion_culling = false; // Mariner E25b.
+	float gpu_visibility_range[4] = {}; // Mariner E25c: begin, end, begin margin, end margin.
 
 	int32_t shader_uniforms_offset = -1;
 
@@ -148,6 +159,20 @@ public:
 	virtual void set_use_dynamic_gi(bool p_enable) override;
 	virtual void set_instance_shader_uniforms_offset(int32_t p_offset) override;
 	virtual void set_cast_double_sided_shadows(bool p_enable) override;
+	virtual void set_raytracing_data(bool p_only, float p_opacity) override {
+		raytracing_only = p_only;
+		raytracing_opacity = p_opacity;
+	}
+	virtual void set_ignore_occlusion_culling(bool p_enable) override {
+		ignore_occlusion_culling = p_enable;
+	}
+	virtual void set_gpu_visibility_range(float p_begin, float p_end, float p_begin_margin, float p_end_margin) override {
+		gpu_visibility_range[0] = p_begin;
+		gpu_visibility_range[1] = p_end;
+		gpu_visibility_range[2] = p_begin_margin;
+		gpu_visibility_range[3] = p_end_margin;
+	}
+	_FORCE_INLINE_ bool has_gpu_visibility_range() const { return gpu_visibility_range[0] > 0.0f || gpu_visibility_range[1] > 0.0f; }
 
 	virtual void reset_motion_vectors() override;
 

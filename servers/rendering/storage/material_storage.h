@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/templates/local_vector.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/rendering_server_types.h"
 #include "servers/rendering/storage/utilities.h"
@@ -51,7 +52,8 @@ public:
 	virtual void global_shader_parameters_load_settings(bool p_load_textures = true) = 0;
 	virtual void global_shader_parameters_clear() = 0;
 
-	virtual int32_t global_shader_parameters_instance_allocate(RID p_instance) = 0;
+	// Mariner E14a: p_elements (1..16) — the slots the instance needs (highest instance uniform index + 1).
+	virtual int32_t global_shader_parameters_instance_allocate(RID p_instance, uint32_t p_elements) = 0;
 	virtual void global_shader_parameters_instance_free(RID p_instance) = 0;
 	virtual void global_shader_parameters_instance_update(RID p_instance, int p_index, const Variant &p_value, int p_flags_count = 0) = 0;
 
@@ -85,6 +87,8 @@ public:
 
 	virtual void material_set_param(RID p_material, const StringName &p_param, const Variant &p_value) = 0;
 	virtual Variant material_get_param(RID p_material, const StringName &p_param) const = 0;
+	// Mariner E17: appends the textures a material samples (parameters, shader defaults, next passes) for texture streaming.
+	virtual void material_get_textures(RID p_material, LocalVector<RID> &r_textures) const {}
 
 	virtual void material_set_next_pass(RID p_material, RID p_next_material) = 0;
 

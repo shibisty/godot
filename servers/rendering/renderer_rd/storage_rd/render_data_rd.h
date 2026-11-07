@@ -100,4 +100,9 @@ public:
 
 	/* Raytracing scene (TLAS) instances, nullptr when the viewport has no raytracing scene. */
 	const PagedArray<RenderGeometryInstance *> *rt_instances = nullptr;
+	/* Mariner E12: omni / spot light instances within the raytracing range (also outside the view frustum). */
+	const PagedArray<RID> *rt_lights = nullptr;
+	bool restir_active = false; // Mariner E20: ReSTIR DI lights this frame's opaque pass (decided after the TLAS build).
+	/* Mariner E12 DG2: DDGI probe volume of the scenario (ship), nullptr for reflection probes. */
+	const RendererSceneRender::DDGIVolumeData *ddgi_volume = nullptr;
 };

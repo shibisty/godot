@@ -2031,10 +2031,14 @@ void TextureStorage::texture_replace(RID p_texture, RID p_by_texture) {
 		return;
 	}
 
-	if (tex->rd_texture_srgb.is_valid()) {
+	// As in Texture::cleanup(): the RD texture may be gone already (a texture made with texture_rd_create() is a view
+	// of an RD texture owned by the caller, and freeing that frees the view too).
+	if (RD::get_singleton()->texture_is_valid(tex->rd_texture_srgb)) {
 		RD::get_singleton()->free_rid(tex->rd_texture_srgb);
 	}
-	RD::get_singleton()->free_rid(tex->rd_texture);
+	if (RD::get_singleton()->texture_is_valid(tex->rd_texture)) {
+		RD::get_singleton()->free_rid(tex->rd_texture);
+	}
 
 	if (tex->canvas_texture) {
 		memdelete(tex->canvas_texture);

@@ -510,6 +510,11 @@ public:
 	// Acquire the framebuffer that can be used for drawing. This must be called only once every time a new frame will be rendered.
 	virtual FramebufferID swap_chain_acquire_framebuffer(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain, bool &r_resize_required) = 0;
 
+	// Mariner E24b (frame generation): acquire a second framebuffer of the swap chain in the same frame. It is presented
+	// before the one swap_chain_acquire_framebuffer() returned, by the same command_queue_execute_and_present() call.
+	// Returns an empty ID where unsupported. The swap chain needs one image more than usual (see RenderingDevice).
+	virtual FramebufferID swap_chain_acquire_extra_framebuffer(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain) { return FramebufferID(); }
+
 	// Retrieve the render pass that can be used to draw on the swap chain's framebuffers.
 	virtual RenderPassID swap_chain_get_render_pass(SwapChainID p_swap_chain) = 0;
 

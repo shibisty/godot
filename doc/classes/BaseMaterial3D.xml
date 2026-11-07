@@ -247,6 +247,9 @@
 		<member name="heightmap_deep_parallax" type="bool" setter="set_heightmap_deep_parallax" getter="is_heightmap_deep_parallax_enabled" default="false">
 			If [code]true[/code], uses parallax occlusion mapping to represent depth in the material instead of simple offset mapping (see [member heightmap_enabled]). This results in a more convincing depth effect, but is much more expensive on the GPU. Only enable this on materials where it makes a significant visual difference.
 		</member>
+		<member name="heightmap_depth_offset" type="bool" setter="set_heightmap_depth_offset" getter="is_heightmap_depth_offset_enabled" default="false">
+			If [code]true[/code], the depth of each pixel is that of the point of the relief seen there (below the mesh surface, as far along the view ray as the parallax shifted the texture), not of the flat mesh: objects standing on the surface sink into the grooves, and contact shadows, SSAO and the shadow maps see the relief (the light is computed at that point, [code]LIGHT_VERTEX[/code]). Writing the depth disables early depth testing for this material. Mariner engine patch E16.
+		</member>
 		<member name="heightmap_enabled" type="bool" setter="set_feature" getter="get_feature" default="false">
 			If [code]true[/code], height mapping is enabled (also called "parallax mapping" or "depth mapping"). See also [member normal_enabled]. Height mapping is a demanding feature on the GPU, so it should only be used on materials where it makes a significant visual difference.
 			[b]Note:[/b] Height mapping is not supported if triplanar mapping is used on the same material. The value of [member heightmap_enabled] will be ignored if [member uv1_triplanar] is enabled.
@@ -272,6 +275,12 @@
 		<member name="heightmap_scale" type="float" setter="set_heightmap_scale" getter="get_heightmap_scale" default="5.0">
 			The heightmap scale to use for the parallax effect (see [member heightmap_enabled]). The default value is tuned so that the highest point (value = 255) appears to be 5 cm higher than the lowest point (value = 0). Higher values result in a deeper appearance, but may result in artifacts appearing when looking at the material from oblique angles, especially when the camera moves. Negative values can be used to invert the parallax effect, but this is different from inverting the texture using [member heightmap_flip_texture] as the material will also appear to be "closer" to the camera. In most cases, [member heightmap_scale] should be kept to a positive value.
 			[b]Note:[/b] If the height map effect looks strange regardless of this value, try adjusting [member heightmap_flip_binormal] and [member heightmap_flip_tangent]. See also [member heightmap_texture] for recommendations on authoring heightmap textures, as the way the heightmap texture is authored affects how [member heightmap_scale] behaves.
+		</member>
+		<member name="heightmap_self_shadow" type="bool" setter="set_heightmap_self_shadow" getter="is_heightmap_self_shadow_enabled" default="false">
+			If [code]true[/code], the relief of the heightmap shadows itself from the main light (the first directional light, usually the sun): from the point seen, the heightmap is searched along the light up to the top of the relief; relief above that ray blocks the light, nearer more (a soft penumbra). Applies to that light only (through the [code]MAIN_LIGHT_SHADOW[/code] built-in of [code]fragment()[/code], which custom shaders can write too, with [code]MAIN_LIGHT_DIRECTION[/code] in view space). Forward+ and Mobile. Mariner engine patch E16.
+		</member>
+		<member name="heightmap_self_shadow_strength" type="float" setter="set_heightmap_self_shadow_strength" getter="get_heightmap_self_shadow_strength" default="1.0">
+			How dark the relief's self-shadow is ([code]0.0[/code]: no self-shadow).
 		</member>
 		<member name="heightmap_texture" type="Texture2D" setter="set_texture" getter="get_texture">
 			The texture to use as a height map. See also [member heightmap_enabled].

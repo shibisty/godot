@@ -96,6 +96,8 @@ ToneMapper::ToneMapper(bool p_use_mobile_version) {
 
 		tonemap.shader_version = tonemap.shader.version_create();
 
+		color_grading_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(ColorGradingUBO));
+
 		for (int i = 0; i < TONEMAP_MODE_MAX; i++) {
 			if (tonemap.shader.is_variant_enabled(i)) {
 				tonemap.pipelines[i].setup(tonemap.shader.version_get_shader(tonemap.shader_version, i), RD::RENDER_PRIMITIVE_TRIANGLES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), RD::PipelineDepthStencilState(), RD::PipelineColorBlendState::create_disabled(), 0);
@@ -111,7 +113,66 @@ ToneMapper::~ToneMapper() {
 		tonemap_mobile.shader.version_free(tonemap_mobile.shader_version);
 	} else {
 		tonemap.shader.version_free(tonemap.shader_version);
+		if (color_grading_buffer.is_valid()) {
+			RD::get_singleton()->free_rid(color_grading_buffer);
+		}
 	}
+}
+
+// Mariner F3. CIE 1931 xy of the Planckian locus, Kim et al. cubic spline (US patent 7024034, 2006), 1667-25000 K.
+static Vector2 _planckian_xy(float p_t) {
+	const double t = CLAMP(double(p_t), 1667.0, 25000.0);
+	const double t2 = t * t;
+	const double t3 = t2 * t;
+	double x;
+	if (t <= 4000.0) {
+		x = -0.2661239e9 / t3 - 0.2343589e6 / t2 + 0.8776956e3 / t + 0.179910;
+	} else {
+		x = -3.0258469e9 / t3 + 2.1070379e6 / t2 + 0.2226347e3 / t + 0.240390;
+	}
+	const double x2 = x * x;
+	const double x3 = x2 * x;
+	double y;
+	if (t <= 2222.0) {
+		y = -1.1063814 * x3 - 1.34811020 * x2 + 2.18555832 * x - 0.20219683;
+	} else if (t <= 4000.0) {
+		y = -0.9549476 * x3 - 1.37418593 * x2 + 2.09137015 * x - 0.16748867;
+	} else {
+		y = 3.0817580 * x3 - 5.87338670 * x2 + 3.75112997 * x - 0.37001483;
+	}
+	return Vector2(x, y);
+}
+
+static Vector3 _white_lms(float p_temperature, float p_tint) {
+	Vector2 xy = _planckian_xy(p_temperature);
+	// Tint moves the white point along the normal of the locus (in xy, the locus at 6500 K runs at about -45 deg):
+	// positive is greener, so the image turns magenta when it is neutralized.
+	const Vector2 tangent = (_planckian_xy(p_temperature * 1.02f) - _planckian_xy(p_temperature * 0.98f)).normalized();
+	const Vector2 normal = Vector2(-tangent.y, tangent.x) * (tangent.x > 0.0 ? 1.0 : -1.0);
+	xy += normal * (p_tint * 0.05f);
+	const Vector3 xyz = Vector3(xy.x / xy.y, 1.0, (1.0 - xy.x - xy.y) / xy.y);
+	// CAT02 (CIECAM02).
+	const Basis cat02(0.7328, 0.4296, -0.1624, -0.7036, 1.6975, 0.0061, 0.0030, 0.0136, 0.9834);
+	return cat02.xform(xyz);
+}
+
+Basis ToneMapper::white_balance_matrix(float p_temperature, float p_tint) {
+	if (Math::is_equal_approx(p_temperature, 6500.0f) && Math::is_zero_approx(p_tint)) {
+		return Basis();
+	}
+	const Basis rgb_to_xyz(0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522, 0.0721750, 0.0193339, 0.1191920, 0.9503041);
+	const Basis cat02(0.7328, 0.4296, -0.1624, -0.7036, 1.6975, 0.0061, 0.0030, 0.0136, 0.9834);
+	const Vector3 src = _white_lms(p_temperature, p_tint);
+	const Vector3 dst = _white_lms(6500.0, 0.0);
+	const Basis gain = Basis::from_scale(Vector3(dst.x / src.x, dst.y / src.y, dst.z / src.z));
+	Basis m = rgb_to_xyz.inverse() * cat02.inverse() * gain * cat02 * rgb_to_xyz;
+	// Keep the luminance of white: only the hue of the light changes.
+	const Vector3 white = m.xform(Vector3(1, 1, 1));
+	const float y = white.dot(Vector3(0.2126, 0.7152, 0.0722));
+	if (y > 0.0) {
+		m = Basis::from_scale(Vector3(1, 1, 1) / y) * m;
+	}
+	return m;
 }
 
 void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const TonemapSettings &p_settings) {
@@ -170,6 +231,56 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 
 	tonemap.push_constant.flags |= p_settings.convert_to_srgb ? TONEMAP_FLAG_CONVERT_TO_SRGB : 0;
 
+	if (p_settings.color_grading.enabled) {
+		// Mariner F3.
+		const RendererEnvironmentStorage::ColorGrading &cg = p_settings.color_grading;
+		tonemap.push_constant.flags |= TONEMAP_FLAG_USE_COLOR_GRADING;
+		ColorGradingUBO ubo = {};
+		const Basis wb = white_balance_matrix(cg.temperature, cg.tint);
+		for (int c = 0; c < 3; c++) {
+			const Vector3 column = wb.get_column(c);
+			ubo.white_balance[c * 4 + 0] = column.x;
+			ubo.white_balance[c * 4 + 1] = column.y;
+			ubo.white_balance[c * 4 + 2] = column.z;
+		}
+		const Color tones[3] = { cg.shadows, cg.midtones, cg.highlights };
+		float *tone_dst[3] = { ubo.shadows, ubo.midtones, ubo.highlights };
+		for (int i = 0; i < 3; i++) {
+			// Linear multipliers; the colors are picked in sRGB.
+			const Color l = tones[i].srgb_to_linear();
+			tone_dst[i][0] = l.r;
+			tone_dst[i][1] = l.g;
+			tone_dst[i][2] = l.b;
+		}
+		ubo.tonal_ranges[0] = cg.tonal_ranges.x;
+		ubo.tonal_ranges[1] = MAX(cg.tonal_ranges.y, cg.tonal_ranges.x + 1e-4f);
+		ubo.tonal_ranges[2] = cg.tonal_ranges.z;
+		ubo.tonal_ranges[3] = MAX(cg.tonal_ranges.w, cg.tonal_ranges.z + 1e-4f);
+		for (int i = 0; i < 3; i++) {
+			ubo.slope[i] = cg.slope[i];
+			ubo.offset[i] = cg.offset[i];
+			ubo.power[i] = cg.power[i];
+		}
+		ubo.slope[3] = cg.saturation;
+		ubo.offset[3] = cg.gamut_mapping ? 1.0 : 0.0;
+		RD::get_singleton()->buffer_update(color_grading_buffer, 0, sizeof(ColorGradingUBO), &ubo);
+	}
+
+	// Mariner E23: lens distortion, chromatic aberration and film grain; not for multiview.
+	if (p_settings.view_count == 1) {
+		if (p_settings.chromatic_aberration > 0.0f || p_settings.lens_distortion != 0.0f) {
+			tonemap.push_constant.flags |= TONEMAP_FLAG_USE_LENS_DISTORTION;
+			tonemap.push_constant.image_effects[0] = p_settings.chromatic_aberration;
+			tonemap.push_constant.image_effects[1] = p_settings.lens_distortion;
+		}
+		if (p_settings.film_grain > 0.0f) {
+			tonemap.push_constant.flags |= TONEMAP_FLAG_USE_FILM_GRAIN;
+			tonemap.push_constant.image_effects[2] = p_settings.film_grain;
+			// Integer part: seed of the frame; fraction: grain size / 4 (1 to 4 pixels).
+			tonemap.push_constant.image_effects[3] = float(p_settings.frame % 4096u) + CLAMP(p_settings.film_grain_size, 1.0f, 3.99f) * 0.25f;
+		}
+	}
+
 	if (p_settings.view_count > 1) {
 		// Use USE_MULTIVIEW versions
 		mode += 4;
@@ -213,7 +324,8 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 0, u_source_color), 0);
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 1, u_exposure_texture), 1);
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 2, u_glow_texture, u_glow_map), 2);
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 3, u_color_correction_texture), 3);
+	RD::Uniform u_color_grading(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 1, color_grading_buffer); // Mariner F3.
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 3, u_color_correction_texture, u_color_grading), 3);
 
 	RD::get_singleton()->draw_list_set_push_constant(draw_list, &tonemap.push_constant, sizeof(TonemapPushConstant));
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
@@ -264,6 +376,7 @@ void ToneMapper::tonemapper_mobile(RID p_source_color, RID p_dst_framebuffer, co
 	spec_constant |= p_settings.tonemap_mode == RSE::ENV_TONE_MAPPER_FILMIC ? TONEMAP_MOBILE_FLAG_TONEMAPPER_FILMIC : 0;
 	spec_constant |= p_settings.tonemap_mode == RSE::ENV_TONE_MAPPER_ACES ? TONEMAP_MOBILE_FLAG_TONEMAPPER_ACES : 0;
 	spec_constant |= p_settings.tonemap_mode == RSE::ENV_TONE_MAPPER_AGX ? TONEMAP_MOBILE_FLAG_TONEMAPPER_AGX : 0;
+	spec_constant |= p_settings.tonemap_mode == RSE::ENV_TONE_MAPPER_GT7 ? TONEMAP_MOBILE_FLAG_TONEMAPPER_GT7 : 0;
 	spec_constant |= p_settings.glow_mode == RSE::ENV_GLOW_BLEND_MODE_ADDITIVE ? TONEMAP_MOBILE_FLAG_GLOW_MODE_ADD : 0;
 	spec_constant |= p_settings.glow_mode == RSE::ENV_GLOW_BLEND_MODE_SCREEN ? TONEMAP_MOBILE_FLAG_GLOW_MODE_SCREEN : 0;
 	spec_constant |= p_settings.glow_mode == RSE::ENV_GLOW_BLEND_MODE_SOFTLIGHT ? TONEMAP_MOBILE_FLAG_GLOW_MODE_SOFTLIGHT : 0;
@@ -354,6 +467,7 @@ void ToneMapper::tonemapper_subpass(RD::DrawListID p_subpass_draw_list, RID p_so
 	spec_constant |= p_settings.tonemap_mode == RSE::ENV_TONE_MAPPER_FILMIC ? TONEMAP_MOBILE_FLAG_TONEMAPPER_FILMIC : 0;
 	spec_constant |= p_settings.tonemap_mode == RSE::ENV_TONE_MAPPER_ACES ? TONEMAP_MOBILE_FLAG_TONEMAPPER_ACES : 0;
 	spec_constant |= p_settings.tonemap_mode == RSE::ENV_TONE_MAPPER_AGX ? TONEMAP_MOBILE_FLAG_TONEMAPPER_AGX : 0;
+	spec_constant |= p_settings.tonemap_mode == RSE::ENV_TONE_MAPPER_GT7 ? TONEMAP_MOBILE_FLAG_TONEMAPPER_GT7 : 0;
 	//spec_constant |= p_settings.glow_mode == RSE::ENV_GLOW_BLEND_MODE_ADDITIVE ? TONEMAP_MOBILE_FLAG_GLOW_MODE_ADD : 0;
 	//spec_constant |= p_settings.glow_mode == RSE::ENV_GLOW_BLEND_MODE_SCREEN ? TONEMAP_MOBILE_FLAG_GLOW_MODE_SCREEN : 0;
 	//spec_constant |= p_settings.glow_mode == RSE::ENV_GLOW_BLEND_MODE_SOFTLIGHT ? TONEMAP_MOBILE_FLAG_GLOW_MODE_SOFTLIGHT : 0;

@@ -70,6 +70,7 @@ private:
 		uint32_t max_sdfgi_cascade = 2;
 		uint32_t cull_mask = 0xFFFFFFFF;
 		uint32_t shadow_caster_mask = 0xFFFFFFFF;
+		bool restir = false; // Mariner E20.
 		bool distance_fade = false;
 		real_t distance_fade_begin = 40.0;
 		real_t distance_fade_shadow = 50.0;
@@ -77,6 +78,11 @@ private:
 		RSE::LightOmniShadowMode omni_shadow_mode = RSE::LIGHT_OMNI_SHADOW_DUAL_PARABOLOID;
 		RSE::LightDirectionalShadowMode directional_shadow_mode = RSE::LIGHT_DIRECTIONAL_SHADOW_ORTHOGONAL;
 		bool directional_blend_splits = false;
+		uint32_t directional_object_shadow_layers = 0; // Mariner E10b.
+		int directional_object_shadow_size = 2048;
+		int directional_object_shadow_from_cascade = 1;
+		float directional_contact_shadow_length = 0.0; // Mariner E11.
+		int directional_restir_shadow_mode = 0; // Mariner E20d: 0 replace the shadow maps, 1 only beyond them.
 		RSE::LightDirectionalSkyMode directional_sky_mode = RSE::LIGHT_DIRECTIONAL_SKY_MODE_LIGHT_AND_SKY;
 		Vector2 area_size = Vector2(1, 1);
 		bool area_normalize_energy = true;
@@ -125,6 +131,9 @@ private:
 
 		Rect2 directional_rect;
 
+		bool directional_object_shadow = false; // Mariner E10b: shadow_transform[4] holds the object shadow this frame.
+		bool directional_translucent_shadow = false; // Mariner E21: shadow_transform[5] holds the translucent shadow.
+
 		HashSet<RID> shadow_atlases; //shadow atlases where this light is registered
 
 		ForwardID forward_id = -1;
@@ -154,7 +163,8 @@ private:
 		float specular_amount;
 		float shadow_opacity;
 
-		float pad[2];
+		float restir; // Mariner E20: 1.0 if the opaque pass gets this light from ReSTIR DI (it skips it), else 0.0.
+		float pad;
 		float atlas_rect[4]; // in omni, used for atlas uv, in spot, used for projector uv
 		float shadow_matrix[16];
 		float shadow_bias;
@@ -222,6 +232,15 @@ private:
 		float uv_scale2[2];
 		float uv_scale3[2];
 		float uv_scale4[2];
+		// Mariner E10b: object shadow (view space -> object shadow map), params: enabled, bias, normal bias, pixel size.
+		float object_shadow_matrix[16];
+		float object_shadow_params[4];
+		// Mariner E11: contact shadows, x: this light reads the contact shadow mask (1) or not (0).
+		float contact_shadow_params[4];
+		// Mariner E21: translucent shadow (view space -> map uv and normalized distance), params: enabled, far
+		// distance, bias, texel size.
+		float translucent_shadow_matrix[16];
+		float translucent_shadow_params[4];
 	};
 
 	uint32_t max_directional_lights;
@@ -511,6 +530,8 @@ public:
 	virtual void light_set_reverse_cull_face_mode(RID p_light, bool p_enabled) override;
 	virtual void light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_mask) override;
 	virtual uint32_t light_get_shadow_caster_mask(RID p_light) const override;
+	virtual void light_set_restir(RID p_light, bool p_enable) override;
+	virtual bool light_is_restir(RID p_light) const override;
 	virtual void light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) override;
 	virtual void light_set_max_sdfgi_cascade(RID p_light, uint32_t p_cascade) override;
 
@@ -519,6 +540,58 @@ public:
 	virtual void light_directional_set_shadow_mode(RID p_light, RSE::LightDirectionalShadowMode p_mode) override;
 	virtual void light_directional_set_blend_splits(RID p_light, bool p_enable) override;
 	virtual bool light_directional_get_blend_splits(RID p_light) const override;
+
+	// Mariner E10b.
+	virtual void light_directional_set_object_shadow(RID p_light, uint32_t p_layers, int p_size, int p_from_cascade) override;
+	virtual uint32_t light_directional_get_object_shadow_layers(RID p_light) const override;
+	virtual int light_directional_get_object_shadow_size(RID p_light) const override;
+	virtual int light_directional_get_object_shadow_from_cascade(RID p_light) const override;
+	virtual void light_instance_set_directional_object_shadow(RID p_light_instance, bool p_enabled) override;
+	virtual void light_instance_set_directional_translucent_shadow(RID p_light_instance, bool p_enabled) override;
+
+	// Mariner E11.
+	virtual void light_directional_set_contact_shadow(RID p_light, float p_length) override;
+	virtual float light_directional_get_contact_shadow(RID p_light) const override;
+	virtual void light_directional_set_restir_shadow_mode(RID p_light, int p_mode) override;
+	virtual int light_directional_get_restir_shadow_mode(RID p_light) const override;
+	// The directional light with contact shadows chosen by the last update_light_buffers() (the first with shadows
+	// and a ray length): view space direction towards the light and the length. False if none.
+	bool get_directional_contact_shadow(Vector3 &r_direction, float &r_length) const;
+	// Mariner E20b: ray traced shadows of directional lights (Light3D.light_restir) of the last update_light_buffers():
+	// the DirectionalLightData of such a light has contact_shadow_params.y = its index + 1 (channel of the mask).
+	enum {
+		MAX_DIRECTIONAL_RT_SHADOWS = 2,
+	};
+	struct DirectionalRtShadow {
+		Vector3 to_light; // World space.
+		float tan_radius = 0.0; // Tangent of the angular radius of the light disk (soft shadows).
+	};
+	uint32_t get_directional_rt_shadows(const DirectionalRtShadow **r_shadows) const {
+		*r_shadows = directional_rt_shadows;
+		return directional_rt_shadow_count;
+	}
+	// Mariner E15b: the brightest directional light of the frame (lens flare of the sun). View space direction.
+	bool get_frame_sun(Vector3 &r_direction, Color &r_color, float &r_angular_diameter) const;
+	bool light_instance_has_directional_object_shadow(RID p_light_instance) const;
+	// The object shadow map (one, for the first light that uses it), created at the requested size.
+	RID directional_object_shadow_get_texture(int p_size);
+	RID directional_object_shadow_get_fb() const { return directional_object_shadow.fb; }
+	RID directional_object_shadow_get_current_texture() const { return directional_object_shadow.depth; }
+	// Mariner E21: the translucent shadow map (one, for the first directional light): transmitted colour and distance
+	// along the light of the nearest translucent caster, rendered by the material pass (5 colour attachments + depth).
+	struct DirectionalTranslucentShadow {
+		RID color; // RGBA8: transmitted colour.
+		RID normal; // RGBA8, unused (material pass layout).
+		RID orm; // RGBA8, unused.
+		RID emission; // RGBA16F, unused.
+		RID distance; // R32F: distance from the map's near plane.
+		RID depth; // Depth attachment.
+		RID fb;
+		int size = 0;
+	};
+	const DirectionalTranslucentShadow &directional_translucent_shadow_get(int p_size);
+	RID directional_translucent_shadow_get_color() const { return directional_translucent_shadow.color; }
+	RID directional_translucent_shadow_get_distance() const { return directional_translucent_shadow.distance; }
 	virtual void light_directional_set_sky_mode(RID p_light, RSE::LightDirectionalSkyMode p_mode) override;
 	virtual RSE::LightDirectionalSkyMode light_directional_get_sky_mode(RID p_light) const override;
 
@@ -1184,6 +1257,34 @@ public:
 		return directional_shadow.fb;
 	}
 
+private:
+	struct DirectionalObjectShadow {
+		RID depth;
+		RID fb;
+		int size = 0;
+		bool use_16_bits = false;
+	} directional_object_shadow;
+	DirectionalTranslucentShadow directional_translucent_shadow;
+	void _free_directional_translucent_shadow();
+
+	struct DirectionalContactShadow {
+		bool active = false;
+		Vector3 direction;
+		float length = 0.0;
+	} directional_contact_shadow; // Mariner E11.
+
+	// Mariner E20b: directional lights with Light3D.light_restir - shadows ray traced per pixel (ReSTIR pass).
+	DirectionalRtShadow directional_rt_shadows[MAX_DIRECTIONAL_RT_SHADOWS];
+	uint32_t directional_rt_shadow_count = 0;
+
+	struct {
+		bool active = false;
+		Vector3 direction; // View space, towards the light.
+		Color color; // Linear color x energy (exposure normalized).
+		float angular_diameter = 0.0; // Degrees.
+	} frame_sun; // Mariner E15b: the brightest directional light of the last light update.
+
+public:
 	_FORCE_INLINE_ void directional_shadow_increase_current_light() {
 		directional_shadow.current_light++;
 	}
