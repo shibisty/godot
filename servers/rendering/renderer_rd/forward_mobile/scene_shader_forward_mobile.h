@@ -129,7 +129,7 @@ public:
 				uint32_t directional_lights : 2;
 				uint32_t decals : 1;
 				uint32_t directional_light_blend_splits : 8;
-				uint32_t padding_1 : 1;
+				uint32_t alpha_fringe_pass : 1; // Mariner AA: render_mode alpha_fringe, drawing the edge (alpha list; was padding).
 			};
 		};
 
@@ -249,6 +249,7 @@ public:
 		bool uses_blend_alpha = false;
 		bool uses_alpha_clip = false;
 		bool uses_alpha_antialiasing = false;
+		bool uses_alpha_fringe = false; // Mariner AA: render_mode alpha_fringe (also drawn in the alpha list: the edge)
 		bool uses_depth_prepass_alpha = false;
 		bool uses_discard = false;
 		bool uses_roughness = false;

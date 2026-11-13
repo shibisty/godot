@@ -810,6 +810,13 @@ const RT_MaterialData &RenderRaytracing::_process_material(RID p_material_rid, u
 	if (p_uses_alpha_scissor) {
 		mat.alpha_scissor = 0.5f;
 		first_float({ "alpha_scissor_threshold" }, mat.alpha_scissor);
+		// Mariner AA2: BaseMaterial3D.alpha_mask_mode (the marker is in the generated uniform's comment).
+		if (code.contains("// Mariner AA2: alpha mask ")) {
+			mat.alpha_mask_texture_idx = texture("texture_alpha_mask", false);
+			if (mat.alpha_mask_texture_idx != 0 && code.contains("// Mariner AA2: alpha mask MSDF")) {
+				mat.flags |= RT_MAT_FLAG_ALPHA_MSDF;
+			}
+		}
 	}
 
 	// Vertex color as albedo: BaseMaterial3D flag (in the generated code) or a `use_vertex_color` parameter.

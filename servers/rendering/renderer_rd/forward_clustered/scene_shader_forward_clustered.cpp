@@ -66,6 +66,7 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	uses_depth_prepass_alpha = false;
 	uses_transparent_motion_vectors = false;
 	uses_opaque_late = false;
+	uses_alpha_fringe = false;
 	uses_discard = false;
 	uses_roughness = false;
 	uses_normal = false;
@@ -133,6 +134,7 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	actions.render_mode_flags["depth_prepass_alpha"] = &uses_depth_prepass_alpha;
 	actions.render_mode_flags["motion_vectors_transparent"] = &uses_transparent_motion_vectors;
 	actions.render_mode_flags["opaque_late"] = &uses_opaque_late;
+	actions.render_mode_flags["alpha_fringe"] = &uses_alpha_fringe;
 	actions.usage_flag_pointers["PREVIOUS_FRAME"] = &uses_time; // animated: include in the motion pass
 
 	actions.usage_flag_pointers["SSS_STRENGTH"] = &uses_sss;
@@ -451,7 +453,14 @@ void SceneShaderForwardClustered::ShaderData::_create_pipeline(PipelineKey p_pip
 			}
 
 			blend_state = blend_state_color_blend;
-			if ((p_pipeline_key.color_pass_flags & PIPELINE_COLOR_PASS_FLAG_MOTION_VECTORS) && !uses_transparent_motion_vectors) {
+			if (uses_alpha_fringe && blend_state.attachments.size() > 0) {
+				// Mariner AA: the edge of render_mode alpha_fringe leaves the colour buffer's alpha alone - it is the
+				// reactive mask of FSR 2/3, and the edge is exact every frame (it must accumulate like opaque geometry).
+				blend_state.attachments.write[0].write_a = false;
+			}
+			// Mariner AA: the edge of render_mode alpha_fringe writes the surface's motion vectors too (temporal AA and
+			// upscalers reproject the edge pixels with the leaf, not with what is behind it).
+			if ((p_pipeline_key.color_pass_flags & PIPELINE_COLOR_PASS_FLAG_MOTION_VECTORS) && !uses_transparent_motion_vectors && !uses_alpha_fringe) {
 				// Mariner: transparent pass with motion vectors bound - only materials that opted in write them.
 				RD::PipelineColorBlendState::Attachment &mv = blend_state.attachments.write[2];
 				mv.write_r = false;
@@ -748,6 +757,8 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.renames["ALPHA_HASH_SCALE"] = "alpha_hash_scale";
 		actions.renames["ALPHA_ANTIALIASING_EDGE"] = "alpha_antialiasing_edge";
 		actions.renames["ALPHA_TEXTURE_COORDINATE"] = "alpha_texture_coordinate";
+		actions.renames["ALPHA_FRINGE_COORDINATE"] = "alpha_fringe_coordinate";
+		actions.renames["ALPHA_FRINGE_FAR"] = "alpha_fringe_far";
 
 		//builtins
 
@@ -907,6 +918,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.render_mode_defines["cull_disabled"] = "#define DO_SIDE_CHECK\n";
 		actions.render_mode_defines["particle_trails"] = "#define USE_PARTICLE_TRAILS\n";
 		actions.render_mode_defines["depth_prepass_alpha"] = "#define USE_OPAQUE_PREPASS\n";
+		actions.render_mode_defines["alpha_fringe"] = "#define ALPHA_FRINGE_USED\n";
 
 		bool force_lambert = GLOBAL_GET("rendering/shading/overrides/force_lambert_over_burley");
 

@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/io/image.h"
 #include "core/io/resource.h"
 #include "core/templates/self_list.h"
 #include "scene/resources/shader.h"
@@ -170,6 +171,7 @@ public:
 		TEXTURE_INTERIOR_MASK,
 		TEXTURE_PLANAR_REFLECTION, // Mariner G6.
 		TEXTURE_DISPLACEMENT, // Mariner G7.
+		TEXTURE_ALPHA_MASK, // Mariner AA2.
 		TEXTURE_MAX
 	};
 
@@ -202,7 +204,17 @@ public:
 		ALPHA_ANTIALIASING_OFF,
 		ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE,
 		ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE_AND_TO_ONE,
+		ALPHA_ANTIALIASING_FRINGE, // Mariner AA: analytic edge of the alpha scissor (Forward+), no MSAA.
 		ALPHA_ANTIALIASING_MAX
+	};
+
+	// Mariner AA2: what the alpha scissor / hash / blend tests - the albedo alpha (coverage) or a distance field in
+	// alpha_mask_texture (0.5 on the contour): one channel (SDF) or the median of three (MSDF, sharp corners).
+	enum AlphaMaskMode {
+		ALPHA_MASK_ALBEDO,
+		ALPHA_MASK_SDF,
+		ALPHA_MASK_MSDF,
+		ALPHA_MASK_MAX
 	};
 
 	enum ShadingMode {
@@ -392,6 +404,7 @@ private:
 		uint64_t detail_uv : Math::get_num_bits(DETAIL_UV_MAX - 1);
 		uint64_t transparency : Math::get_num_bits(TRANSPARENCY_MAX - 1);
 		uint64_t alpha_antialiasing_mode : Math::get_num_bits(ALPHA_ANTIALIASING_MAX - 1);
+		uint64_t alpha_mask_mode : Math::get_num_bits(ALPHA_MASK_MAX - 1); // Mariner AA2.
 		uint64_t shading_mode : Math::get_num_bits(SHADING_MODE_MAX - 1);
 		uint64_t blend_mode : Math::get_num_bits(BLEND_MODE_MAX - 1);
 		uint64_t depth_draw_mode : Math::get_num_bits(DEPTH_DRAW_MAX - 1);
@@ -428,6 +441,9 @@ private:
 		// flag bitfield
 		uint32_t feature_mask;
 		uint32_t flags;
+
+		// Mariner AA3: the first word of bit fields is full (24 bytes; hashed and compared as bytes, zeroed by memset).
+		uint64_t wire_antialiasing : 1;
 
 		MaterialKey() {
 			memset(this, 0, sizeof(MaterialKey));
@@ -473,10 +489,12 @@ private:
 		mk.billboard_mode = billboard_mode;
 		mk.deep_parallax = deep_parallax;
 		mk.grow = grow_enabled;
+		mk.wire_antialiasing = wire_antialiasing;
 		mk.proximity_fade = proximity_fade_enabled;
 		mk.distance_fade = distance_fade;
 		mk.emission_op = emission_op;
 		mk.alpha_antialiasing_mode = alpha_antialiasing_mode;
+		mk.alpha_mask_mode = alpha_mask_mode;
 		mk.orm = orm;
 		mk.heightmap_self_shadow = heightmap_self_shadow;
 		mk.heightmap_depth_offset = heightmap_depth_offset;
@@ -643,6 +661,7 @@ private:
 	float alpha_hash_scale = 0.0f;
 	float alpha_antialiasing_edge = 0.0f;
 	bool grow_enabled = false;
+	bool wire_antialiasing = false; // Mariner AA3.
 	float ao_light_affect = 0.0f;
 	float grow = 0.0f;
 	int particles_anim_h_frames = 0;
@@ -740,6 +759,7 @@ private:
 	TextureChannel refraction_texture_channel;
 
 	AlphaAntiAliasing alpha_antialiasing_mode = ALPHA_ANTIALIASING_OFF;
+	AlphaMaskMode alpha_mask_mode = ALPHA_MASK_ALBEDO; // Mariner AA2.
 
 	float z_clip_scale = 1.0;
 	float fov_override = 75.0;
@@ -953,6 +973,11 @@ public:
 	void set_transparency(Transparency p_transparency);
 	Transparency get_transparency() const;
 
+	// Mariner AA2.
+	void set_alpha_mask_mode(AlphaMaskMode p_mode);
+	AlphaMaskMode get_alpha_mask_mode() const;
+	static Ref<Image> bake_alpha_mask(const Ref<Image> &p_source, const Vector2i &p_size, AlphaMaskMode p_mode, float p_range = 4.0);
+
 	void set_alpha_antialiasing(AlphaAntiAliasing p_alpha_aa);
 	AlphaAntiAliasing get_alpha_antialiasing() const;
 
@@ -1031,6 +1056,10 @@ public:
 
 	void set_grow_enabled(bool p_enable);
 	bool is_grow_enabled() const;
+
+	// Mariner AA3: thin tubes (wires, cables, thin branches) along the local Y axis, at least a pixel wide.
+	void set_wire_antialiasing(bool p_enable);
+	bool is_wire_antialiasing() const;
 
 	void set_grow(float p_grow);
 	float get_grow() const;
@@ -1119,6 +1148,7 @@ VARIANT_ENUM_CAST(BaseMaterial3D::TextureFilter)
 VARIANT_ENUM_CAST(BaseMaterial3D::ShadingMode)
 VARIANT_ENUM_CAST(BaseMaterial3D::Transparency)
 VARIANT_ENUM_CAST(BaseMaterial3D::AlphaAntiAliasing)
+VARIANT_ENUM_CAST(BaseMaterial3D::AlphaMaskMode)
 VARIANT_ENUM_CAST(BaseMaterial3D::DetailUV)
 VARIANT_ENUM_CAST(BaseMaterial3D::Feature)
 VARIANT_ENUM_CAST(BaseMaterial3D::Metal)

@@ -190,9 +190,10 @@ bool pt_alpha_test(uint inst, uint prim, vec2 candidate_bary) {
 	uint i0, i1, i2;
 	get_triangle_indices_ex(geom, prim, i0, i1, i2);
 	float alpha = mat.albedo_color.a;
-	if (mat.albedo_texture_idx != 0u) {
+	uint alpha_tex = rt_alpha_texture(mat); // Mariner AA2: or a distance-field mask.
+	if (alpha_tex != 0u) {
 		vec2 uv = fetch_uv(geom, i0, i1, i2, bary) * mat.uv1_scale + mat.uv1_offset;
-		alpha *= sample_material_texture(mat.albedo_texture_idx, uv, mat.flags, 0.0).a;
+		alpha *= rt_alpha_value(mat, sample_material_texture(alpha_tex, uv, mat.flags, 0.0));
 	}
 	if ((mat.flags & MAT_FLAG_USE_VERTEX_COLOR) != 0u) {
 		alpha *= fetch_color(geom, i0, i1, i2, bary).a;

@@ -129,6 +129,7 @@ public:
 				uint32_t fog_use_legacy_blending : 1;
 				uint32_t cluster_has_area_light : 1;
 				uint32_t multimesh_has_custom_data2 : 1; // Mariner E14c.
+				uint32_t alpha_fringe_pass : 1; // Mariner AA: render_mode alpha_fringe, drawing the edge (transparent pass).
 			};
 		};
 
@@ -266,6 +267,7 @@ public:
 		bool uses_time = false;
 		bool uses_transparent_motion_vectors = false; // Mariner: render_mode motion_vectors_transparent
 		bool uses_opaque_late = false; // Mariner: render_mode opaque_late
+		bool uses_alpha_fringe = false; // Mariner AA: render_mode alpha_fringe (also drawn in the transparent pass: the edge)
 		bool uses_vertex_time = false;
 		bool uses_fragment_time = false;
 		bool writes_modelview_or_projection = false;

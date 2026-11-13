@@ -64,6 +64,7 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 	uses_alpha = false;
 	uses_alpha_clip = false;
 	uses_alpha_antialiasing = false;
+	uses_alpha_fringe = false;
 	uses_blend_alpha = false;
 	uses_depth_prepass_alpha = false;
 	uses_discard = false;
@@ -129,6 +130,7 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 	actions.usage_flag_pointers["ALPHA_ANTIALIASING_EDGE"] = &uses_alpha_antialiasing;
 	actions.usage_flag_pointers["ALPHA_TEXTURE_COORDINATE"] = &uses_alpha_antialiasing;
 	actions.render_mode_flags["depth_prepass_alpha"] = &uses_depth_prepass_alpha;
+	actions.render_mode_flags["alpha_fringe"] = &uses_alpha_fringe; // Mariner AA.
 
 	actions.usage_flag_pointers["SSS_STRENGTH"] = &uses_sss;
 	actions.usage_flag_pointers["SSS_TRANSMITTANCE_DEPTH"] = &uses_transmittance;
@@ -406,6 +408,12 @@ void SceneShaderForwardMobile::ShaderData::_create_pipeline(PipelineKey p_pipeli
 				// Alpha does not write to depth.
 				depth_stencil_state.enable_depth_write = false;
 			}
+			if (uses_alpha_fringe && p_pipeline_key.shader_specialization.alpha_fringe_pass) {
+				// Mariner AA: the edge of render_mode alpha_fringe is blended over what is behind without writing depth, and
+				// leaves the colour buffer's alpha alone (as in Forward+).
+				depth_stencil_state.enable_depth_write = false;
+				blend_state.attachments.write[0].write_a = false;
+			}
 		} else if (p_pipeline_key.version == SHADER_VERSION_SHADOW_PASS || p_pipeline_key.version == SHADER_VERSION_SHADOW_PASS_MULTIVIEW || p_pipeline_key.version == SHADER_VERSION_SHADOW_PASS_DP) {
 			// Contains nothing.
 		} else if (p_pipeline_key.version == SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL) {
@@ -675,6 +683,8 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 		actions.renames["ALPHA_HASH_SCALE"] = "alpha_hash_scale_highp";
 		actions.renames["ALPHA_ANTIALIASING_EDGE"] = "alpha_antialiasing_edge_highp";
 		actions.renames["ALPHA_TEXTURE_COORDINATE"] = "alpha_texture_coordinate";
+		actions.renames["ALPHA_FRINGE_COORDINATE"] = "alpha_fringe_coordinate"; // Mariner AA.
+		actions.renames["ALPHA_FRINGE_FAR"] = "alpha_fringe_far";
 
 		//builtins
 
@@ -829,6 +839,7 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 
 		actions.render_mode_defines["skip_vertex_transform"] = "#define SKIP_TRANSFORM_USED\n";
 		actions.render_mode_defines["world_vertex_coords"] = "#define VERTEX_WORLD_COORDS_USED\n";
+		actions.render_mode_defines["alpha_fringe"] = "#define ALPHA_FRINGE_USED\n"; // Mariner AA.
 		actions.render_mode_defines["ensure_correct_normals"] = "#define ENSURE_CORRECT_NORMALS\n";
 		actions.render_mode_defines["cull_front"] = "#define DO_SIDE_CHECK\n";
 		actions.render_mode_defines["cull_disabled"] = "#define DO_SIDE_CHECK\n";

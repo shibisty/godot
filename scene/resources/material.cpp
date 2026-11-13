@@ -39,6 +39,7 @@
 #include "core/os/os.h"
 #include "core/version.h"
 #include "scene/main/scene_tree.h"
+#include "scene/resources/alpha_mask_bake.h"
 #include "scene/resources/texture.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -661,6 +662,7 @@ void BaseMaterial3D::init_shaders() {
 	shader_names->texture_names[TEXTURE_INTERIOR_MASK] = "texture_interior_mask";
 	shader_names->texture_names[TEXTURE_PLANAR_REFLECTION] = "texture_planar_reflection"; // Mariner G6.
 	shader_names->texture_names[TEXTURE_DISPLACEMENT] = "texture_displacement"; // Mariner G7.
+	shader_names->texture_names[TEXTURE_ALPHA_MASK] = "texture_alpha_mask"; // Mariner AA2.
 	shader_names->texture_names[TEXTURE_RIM] = "texture_rim";
 	shader_names->texture_names[TEXTURE_CLEARCOAT] = "texture_clearcoat";
 	shader_names->texture_names[TEXTURE_FLOWMAP] = "texture_flowmap";
@@ -931,6 +933,8 @@ void BaseMaterial3D::_update_shader() {
 			code += ", alpha_to_coverage";
 		} else if (alpha_antialiasing_mode == ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE_AND_TO_ONE) {
 			code += ", alpha_to_coverage_and_one";
+		} else if (alpha_antialiasing_mode == ALPHA_ANTIALIASING_FRINGE && transparency == TRANSPARENCY_ALPHA_SCISSOR) {
+			code += ", alpha_fringe";
 		}
 	}
 
@@ -1025,6 +1029,11 @@ uniform float msdf_outline_size : hint_range(0.0, 250.0, 1.0);
 )";
 	}
 
+	if (alpha_mask_mode != ALPHA_MASK_ALBEDO && transparency != TRANSPARENCY_DISABLED) {
+		// Mariner AA2: the alpha mask (a distance field; RenderRaytracing reads this marker for the path tracer).
+		code += vformat("uniform sampler2D texture_alpha_mask : hint_default_white, %s; // Mariner AA2: alpha mask %s\n", texfilter_str, alpha_mask_mode == ALPHA_MASK_MSDF ? "MSDF" : "SDF");
+	}
+
 	// Alpha scissor is only valid if there is no antialiasing edge.
 	// Alpha hash is valid whenever, but not with alpha scissor.
 	if (transparency == TRANSPARENCY_ALPHA_SCISSOR) {
@@ -1033,7 +1042,7 @@ uniform float msdf_outline_size : hint_range(0.0, 250.0, 1.0);
 		code += "uniform float alpha_hash_scale : hint_range(0.0, 2.0, 0.01);\n";
 	}
 	// If alpha antialiasing isn't off, add in the edge variable.
-	if (alpha_antialiasing_mode != ALPHA_ANTIALIASING_OFF &&
+	if (alpha_antialiasing_mode != ALPHA_ANTIALIASING_OFF && alpha_antialiasing_mode != ALPHA_ANTIALIASING_FRINGE &&
 			(transparency == TRANSPARENCY_ALPHA_SCISSOR || transparency == TRANSPARENCY_ALPHA_HASH)) {
 		code += "uniform float alpha_antialiasing_edge : hint_range(0.0, 1.0, 0.01);\n";
 	}
@@ -1327,6 +1336,16 @@ uniform vec3 uv2_offset;
 		code += "uniform float fov_override : hint_range(1.0, 179.0, 0.1);\n";
 	}
 
+	const bool wire_aa = wire_antialiasing && transparency == TRANSPARENCY_ALPHA; // Mariner AA3.
+	if (wire_aa) {
+		code += R"(
+// Mariner AA3: wire antialiasing (Persson) - widened to at least a pixel, faded by the true width.
+varying float wire_fade;
+varying float wire_r_px;
+varying float wire_u_px;
+)";
+	}
+
 	// Generate vertex shader.
 	code += R"(
 void vertex() {)";
@@ -1597,6 +1616,37 @@ void vertex() {)";
 		code += R"(
 	// Grow: Enabled
 	VERTEX += NORMAL * grow;
+)";
+	}
+
+	if (wire_aa) {
+		// Mariner AA3: the tube's axis is the local Y axis, its radius the vertex's distance from it (tapers work). The
+		// tube is widened to at least a pixel plus 0.75 pixel for the edge, its alpha faded by the true width; the
+		// edge is the screen distance from the axis (u, along the direction perpendicular to the axis and the view:
+		// linear in the position, so exact once interpolated). Shadows keep the true tube.
+		code += R"(
+	// Wire Antialiasing: Enabled
+	wire_fade = 1.0;
+	wire_r_px = 1.0e6;
+	wire_u_px = 0.0;
+	float wire_r = length(VERTEX.xz);
+	if (!IN_SHADOW_PASS && wire_r > 1.0e-7) {
+		vec3 wire_radial = vec3(VERTEX.x, 0.0, VERTEX.z) / wire_r;
+		vec3 wire_c = vec3(0.0, VERTEX.y, 0.0);
+		vec4 wire_vc = MODELVIEW_MATRIX * vec4(wire_c, 1.0);
+		float wire_scale = length(MODELVIEW_MATRIX[0].xyz);
+		bool wire_ortho = PROJECTION_MATRIX[3][3] != 0.0;
+		float wire_px = 2.0 * (wire_ortho ? 1.0 : -wire_vc.z) / (abs(PROJECTION_MATRIX[1][1]) * VIEWPORT_SIZE.y); // World size of a pixel.
+		float wire_rp = wire_r * wire_scale / wire_px;
+		wire_r_px = max(wire_rp, 0.5);
+		wire_fade = wire_rp / wire_r_px;
+		float wire_geo_px = wire_r_px + 0.75;
+		mat4 wire_inv_model = inverse(MODEL_MATRIX);
+		vec3 wire_eye = wire_ortho ? -(wire_inv_model * vec4(INV_VIEW_MATRIX[2].xyz, 0.0)).xyz * 1.0e6 : (wire_inv_model * vec4(CAMERA_POSITION_WORLD, 1.0)).xyz;
+		vec3 wire_perp = normalize(cross(vec3(0.0, 1.0, 0.0), wire_eye - wire_c));
+		wire_u_px = dot(wire_radial, wire_perp) * wire_geo_px;
+		VERTEX = wire_c + wire_radial * (wire_geo_px * wire_px / wire_scale);
+	}
 )";
 	}
 
@@ -2265,16 +2315,40 @@ void fragment() {)";
 		}
 
 	} else if (transparency != TRANSPARENCY_DISABLED || flags[FLAG_USE_SHADOW_TO_OPACITY] || (distance_fade == DISTANCE_FADE_PIXEL_ALPHA) || proximity_fade_enabled) {
-		code += "	ALPHA *= albedo.a * albedo_tex.a;\n";
+		if (alpha_mask_mode != ALPHA_MASK_ALBEDO && transparency != TRANSPARENCY_DISABLED) {
+			// Mariner AA2: a distance field instead of the albedo alpha (0.5 on the contour).
+			if (alpha_mask_mode == ALPHA_MASK_MSDF) {
+				code += "	vec3 alpha_mask_tex = texture(texture_alpha_mask, base_uv).rgb;\n";
+				code += "	ALPHA *= albedo.a * max(min(alpha_mask_tex.r, alpha_mask_tex.g), min(max(alpha_mask_tex.r, alpha_mask_tex.g), alpha_mask_tex.b));\n";
+			} else {
+				code += "	ALPHA *= albedo.a * texture(texture_alpha_mask, base_uv).r;\n";
+			}
+		} else {
+			code += "	ALPHA *= albedo.a * albedo_tex.a;\n";
+		}
 	}
 	if (transparency == TRANSPARENCY_ALPHA_HASH) {
 		code += "	ALPHA_HASH_SCALE = alpha_hash_scale;\n";
 	} else if (transparency == TRANSPARENCY_ALPHA_SCISSOR) {
 		code += "	ALPHA_SCISSOR_THRESHOLD = alpha_scissor_threshold;\n";
 	}
-	if (alpha_antialiasing_mode != ALPHA_ANTIALIASING_OFF && (transparency == TRANSPARENCY_ALPHA_HASH || transparency == TRANSPARENCY_ALPHA_SCISSOR)) {
+	if (alpha_antialiasing_mode == ALPHA_ANTIALIASING_FRINGE) {
+		if (transparency == TRANSPARENCY_ALPHA_SCISSOR) {
+			if (alpha_mask_mode == ALPHA_MASK_ALBEDO) {
+				// Mariner AA: the albedo texture's texels drive the mip selector (far away the edge is the mask's own coverage).
+				code += "	ALPHA_FRINGE_COORDINATE = UV * vec2(albedo_texture_size);\n";
+			} else {
+				// Mariner AA2: a distance field is not coverage - no mip selector (the sharpened edge at every distance).
+				code += "	ALPHA_FRINGE_FAR = vec2(0.0);\n";
+			}
+		}
+	} else if (alpha_antialiasing_mode != ALPHA_ANTIALIASING_OFF && (transparency == TRANSPARENCY_ALPHA_HASH || transparency == TRANSPARENCY_ALPHA_SCISSOR)) {
 		code += "	ALPHA_ANTIALIASING_EDGE = alpha_antialiasing_edge;\n";
 		code += "	ALPHA_TEXTURE_COORDINATE = UV * vec2(albedo_texture_size);\n";
+	}
+
+	if (wire_aa) {
+		code += "	ALPHA *= clamp(wire_r_px - abs(wire_u_px) + 0.5, 0.0, 1.0) * wire_fade; // Mariner AA3: wire antialiasing.\n";
 	}
 
 	if (proximity_fade_enabled) {
@@ -3049,6 +3123,25 @@ BaseMaterial3D::Transparency BaseMaterial3D::get_transparency() const {
 	return transparency;
 }
 
+void BaseMaterial3D::set_alpha_mask_mode(AlphaMaskMode p_mode) {
+	ERR_FAIL_INDEX(p_mode, ALPHA_MASK_MAX);
+	if (alpha_mask_mode == p_mode) {
+		return;
+	}
+	alpha_mask_mode = p_mode;
+	_queue_shader_change();
+	notify_property_list_changed();
+}
+
+BaseMaterial3D::AlphaMaskMode BaseMaterial3D::get_alpha_mask_mode() const {
+	return alpha_mask_mode;
+}
+
+Ref<Image> BaseMaterial3D::bake_alpha_mask(const Ref<Image> &p_source, const Vector2i &p_size, AlphaMaskMode p_mode, float p_range) {
+	ERR_FAIL_COND_V_MSG(p_mode != ALPHA_MASK_SDF && p_mode != ALPHA_MASK_MSDF, Ref<Image>(), "Bake an SDF or an MSDF alpha mask.");
+	return alpha_mask_bake(p_source, p_size, p_mode == ALPHA_MASK_MSDF, p_range);
+}
+
 void BaseMaterial3D::set_alpha_antialiasing(AlphaAntiAliasing p_alpha_aa) {
 	if (alpha_antialiasing_mode == p_alpha_aa) {
 		return;
@@ -3288,7 +3381,7 @@ void BaseMaterial3D::_validate_property(PropertyInfo &p_property) const {
 	// you can only enable anti-aliasing (in materials) on alpha scissor and alpha hash
 	const bool can_select_aa = (transparency == TRANSPARENCY_ALPHA_SCISSOR || transparency == TRANSPARENCY_ALPHA_HASH);
 	// alpha anti aliasiasing is only enabled when you can select aa
-	const bool alpha_aa_enabled = (alpha_antialiasing_mode != ALPHA_ANTIALIASING_OFF) && can_select_aa;
+	const bool alpha_aa_enabled = (alpha_antialiasing_mode != ALPHA_ANTIALIASING_OFF) && (alpha_antialiasing_mode != ALPHA_ANTIALIASING_FRINGE) && can_select_aa;
 
 	// alpha scissor slider isn't needed when alpha antialiasing is enabled
 	if (p_property.name == "alpha_scissor_threshold" && transparency != TRANSPARENCY_ALPHA_SCISSOR) {
@@ -3305,8 +3398,20 @@ void BaseMaterial3D::_validate_property(PropertyInfo &p_property) const {
 	}
 
 	// we can't choose an antialiasing mode if alpha isn't possible
+	if (p_property.name == "wire_antialiasing" && transparency != TRANSPARENCY_ALPHA) {
+		p_property.usage = PROPERTY_USAGE_NO_EDITOR; // Mariner AA3: needs alpha blending.
+	}
+
 	if (p_property.name == "alpha_antialiasing_edge" && !alpha_aa_enabled) {
 		p_property.usage = PROPERTY_USAGE_NONE;
+	}
+
+	// Mariner AA2: the alpha mask only with transparency, its texture only for a distance field.
+	if ((p_property.name == "alpha_mask_mode" || p_property.name == "alpha_mask_texture") && transparency == TRANSPARENCY_DISABLED) {
+		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
+	}
+	if (p_property.name == "alpha_mask_texture" && alpha_mask_mode == ALPHA_MASK_ALBEDO) {
+		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 	}
 
 	if (p_property.name == "blend_mode" && alpha_aa_enabled) {
@@ -3991,6 +4096,18 @@ bool BaseMaterial3D::get_heightmap_deep_parallax_flip_binormal() const {
 	return heightmap_parallax_flip_binormal;
 }
 
+void BaseMaterial3D::set_wire_antialiasing(bool p_enable) {
+	if (wire_antialiasing == p_enable) {
+		return;
+	}
+	wire_antialiasing = p_enable;
+	_queue_shader_change();
+}
+
+bool BaseMaterial3D::is_wire_antialiasing() const {
+	return wire_antialiasing;
+}
+
 void BaseMaterial3D::set_grow_enabled(bool p_enable) {
 	grow_enabled = p_enable;
 	_queue_shader_change();
@@ -4440,7 +4557,7 @@ Shader::Mode BaseMaterial3D::get_shader_mode() const {
 }
 
 void BaseMaterial3D::_bind_methods() {
-	static_assert(sizeof(MaterialKey) == 16, "MaterialKey should be 16 bytes");
+	static_assert(sizeof(MaterialKey) == 24, "MaterialKey should be 24 bytes"); // Mariner AA3: was 16.
 
 	ClassDB::bind_method(D_METHOD("set_albedo", "albedo"), &BaseMaterial3D::set_albedo);
 	ClassDB::bind_method(D_METHOD("get_albedo"), &BaseMaterial3D::get_albedo);
@@ -4665,6 +4782,10 @@ void BaseMaterial3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_displacement_scale"), &BaseMaterial3D::get_displacement_scale);
 	ClassDB::bind_method(D_METHOD("set_displacement_midlevel", "value"), &BaseMaterial3D::set_displacement_midlevel);
 	ClassDB::bind_method(D_METHOD("get_displacement_midlevel"), &BaseMaterial3D::get_displacement_midlevel);
+	ClassDB::bind_method(D_METHOD("set_alpha_mask_mode", "mode"), &BaseMaterial3D::set_alpha_mask_mode);
+	ClassDB::bind_method(D_METHOD("get_alpha_mask_mode"), &BaseMaterial3D::get_alpha_mask_mode);
+	ClassDB::bind_static_method("BaseMaterial3D", D_METHOD("bake_alpha_mask", "source", "size", "mode", "range"), &BaseMaterial3D::bake_alpha_mask, DEFVAL(4.0));
+
 	ClassDB::bind_method(D_METHOD("set_displacement_texture_lod", "value"), &BaseMaterial3D::set_displacement_texture_lod);
 	ClassDB::bind_method(D_METHOD("get_displacement_texture_lod"), &BaseMaterial3D::get_displacement_texture_lod);
 	ClassDB::bind_method(D_METHOD("set_displacement_normal", "enable"), &BaseMaterial3D::set_displacement_normal);
@@ -4699,6 +4820,8 @@ void BaseMaterial3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_alpha_hash_scale", "threshold"), &BaseMaterial3D::set_alpha_hash_scale);
 	ClassDB::bind_method(D_METHOD("get_alpha_hash_scale"), &BaseMaterial3D::get_alpha_hash_scale);
 
+	ClassDB::bind_method(D_METHOD("set_wire_antialiasing", "enable"), &BaseMaterial3D::set_wire_antialiasing);
+	ClassDB::bind_method(D_METHOD("is_wire_antialiasing"), &BaseMaterial3D::is_wire_antialiasing);
 	ClassDB::bind_method(D_METHOD("set_grow_enabled", "enable"), &BaseMaterial3D::set_grow_enabled);
 	ClassDB::bind_method(D_METHOD("is_grow_enabled"), &BaseMaterial3D::is_grow_enabled);
 
@@ -4763,8 +4886,11 @@ void BaseMaterial3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "transparency", PROPERTY_HINT_ENUM, "Disabled,Alpha,Alpha Scissor,Alpha Hash,Depth Pre-Pass"), "set_transparency", "get_transparency");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "alpha_scissor_threshold", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_alpha_scissor_threshold", "get_alpha_scissor_threshold");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "alpha_hash_scale", PROPERTY_HINT_RANGE, "0,2,0.01"), "set_alpha_hash_scale", "get_alpha_hash_scale");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "alpha_antialiasing_mode", PROPERTY_HINT_ENUM, "Disabled,Alpha Edge Blend,Alpha Edge Clip"), "set_alpha_antialiasing", "get_alpha_antialiasing");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "alpha_antialiasing_mode", PROPERTY_HINT_ENUM, "Disabled,Alpha Edge Blend,Alpha Edge Clip,Fringe"), "set_alpha_antialiasing", "get_alpha_antialiasing");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "alpha_mask_mode", PROPERTY_HINT_ENUM, "Albedo Alpha,SDF,MSDF"), "set_alpha_mask_mode", "get_alpha_mask_mode");
+	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "alpha_mask_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_ALPHA_MASK);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "alpha_antialiasing_edge", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_alpha_antialiasing_edge", "get_alpha_antialiasing_edge");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "wire_antialiasing"), "set_wire_antialiasing", "is_wire_antialiasing");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "blend_mode", PROPERTY_HINT_ENUM, "Mix,Add,Subtract,Multiply,Premultiplied Alpha"), "set_blend_mode", "get_blend_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cull_mode", PROPERTY_HINT_ENUM, "Back,Front,Disabled"), "set_cull_mode", "get_cull_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "depth_draw_mode", PROPERTY_HINT_ENUM, "Opaque Only,Always,Never"), "set_depth_draw_mode", "get_depth_draw_mode");
@@ -5043,6 +5169,7 @@ void BaseMaterial3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(TEXTURE_INTERIOR_MASK);
 	BIND_ENUM_CONSTANT(TEXTURE_PLANAR_REFLECTION); // Mariner G6.
 	BIND_ENUM_CONSTANT(TEXTURE_DISPLACEMENT); // Mariner G7.
+	BIND_ENUM_CONSTANT(TEXTURE_ALPHA_MASK); // Mariner AA2.
 	BIND_ENUM_CONSTANT(TEXTURE_RIM);
 	BIND_ENUM_CONSTANT(TEXTURE_CLEARCOAT);
 	BIND_ENUM_CONSTANT(TEXTURE_FLOWMAP);
@@ -5127,6 +5254,11 @@ void BaseMaterial3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(ALPHA_ANTIALIASING_OFF);
 	BIND_ENUM_CONSTANT(ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE);
 	BIND_ENUM_CONSTANT(ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE_AND_TO_ONE);
+	BIND_ENUM_CONSTANT(ALPHA_ANTIALIASING_FRINGE);
+
+	BIND_ENUM_CONSTANT(ALPHA_MASK_ALBEDO);
+	BIND_ENUM_CONSTANT(ALPHA_MASK_SDF);
+	BIND_ENUM_CONSTANT(ALPHA_MASK_MSDF);
 
 	BIND_ENUM_CONSTANT(DEPTH_DRAW_OPAQUE_ONLY);
 	BIND_ENUM_CONSTANT(DEPTH_DRAW_ALWAYS);

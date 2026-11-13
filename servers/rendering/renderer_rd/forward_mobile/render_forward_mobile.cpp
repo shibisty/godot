@@ -1293,6 +1293,7 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
 				rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_ALPHA, p_render_data, radiance_texture, samplers, true);
 
 				RenderListParameters render_list_params(render_list[RENDER_LIST_ALPHA].elements.ptr(), render_list[RENDER_LIST_ALPHA].element_info.ptr(), render_list[RENDER_LIST_ALPHA].elements.size(), reverse_cull, PASS_MODE_COLOR_TRANSPARENT, rp_uniform_set, base_specialization, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count);
+				render_list_params.alpha_list = true; // Mariner AA.
 				render_list_params.framebuffer_format = fb_format;
 				render_list_params.subpass = RD::get_singleton()->draw_list_get_current_pass(); // Should now always be 0.
 
@@ -1362,6 +1363,7 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
 				//_setup_environment(p_render_data, is_reflection_probe, screen_size, screen_size, p_default_bg_color, false);
 
 				RenderListParameters render_list_params(render_list[RENDER_LIST_ALPHA].elements.ptr(), render_list[RENDER_LIST_ALPHA].element_info.ptr(), render_list[RENDER_LIST_ALPHA].elements.size(), reverse_cull, PASS_MODE_COLOR, rp_uniform_set, base_specialization, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count);
+				render_list_params.alpha_list = true; // Mariner AA.
 				render_list_params.framebuffer_format = fb_format;
 				render_list_params.subpass = RD::get_singleton()->draw_list_get_current_pass(); // Should now always be 0.
 
@@ -2320,6 +2322,10 @@ void RenderForwardMobile::_fill_render_list(RenderListType p_render_list, const 
 				}
 				if (force_alpha || (surf->flags & GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA)) {
 					render_list[RENDER_LIST_ALPHA].add_element(surf);
+				} else if (surf->flags & GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA_FRINGE) {
+					// Mariner AA: render_mode alpha_fringe - the opaque core is in the opaque list, the edge is blended in the
+					// alpha list.
+					render_list[RENDER_LIST_ALPHA].add_element(surf);
 				}
 
 				if (uses_lightmap) {
@@ -2511,6 +2517,7 @@ void RenderForwardMobile::_render_list_template(RenderingDevice::DrawListID p_dr
 #ifdef DEBUG_ENABLED
 			}
 #endif
+			pipeline_specialization.alpha_fringe_pass = p_params->alpha_list && shader->uses_alpha_fringe; // Mariner AA.
 			mesh_surface = surf->surface;
 		}
 
@@ -2922,6 +2929,9 @@ void RenderForwardMobile::_geometry_instance_add_surface_with_material(GeometryI
 		flags |= GeometryInstanceSurfaceDataCache::FLAG_PASS_OPAQUE;
 		flags |= GeometryInstanceSurfaceDataCache::FLAG_PASS_DEPTH;
 		flags |= GeometryInstanceSurfaceDataCache::FLAG_PASS_SHADOW;
+		if (p_material->shader_data->uses_alpha_fringe) {
+			flags |= GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA_FRINGE; // Mariner AA.
+		}
 	}
 
 	if (p_material->shader_data->uses_particle_trails) {

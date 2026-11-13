@@ -357,27 +357,28 @@ bool shadow_occludes(uint inst, uint prim, vec2 candidate_bary) {
 	uint i0, i1, i2;
 	get_triangle_indices_ex(g, prim, i0, i1, i2);
 	float alpha = mat.albedo_color.a;
-	if (mat.albedo_texture_idx != 0u) {
+	uint alpha_tex = rt_alpha_texture(mat); // Mariner AA2: or a distance-field mask.
+	if (alpha_tex != 0u) {
 		vec2 uv = fetch_uv(g, i0, i1, i2, bary) * mat.uv1_scale + mat.uv1_offset;
 #ifdef RT_NONUNIFORM_WATERFALL
 		// Mariner E5d: one texture index of the wave at a time (rt_load(), pathtracer_scene_inc.glsl).
-		uint tex_idx = mat.albedo_texture_idx;
+		uint tex_idx = alpha_tex;
 		for (;;) {
 			uint idx = subgroupBroadcastFirst(tex_idx);
 			if (idx == tex_idx) {
 				if ((mat.flags & MAT_FLAG_POINT_FILTER) != 0u) {
-					alpha *= textureLod(sampler2D(rt_textures[idx], material_sampler_nearest), uv, 0.0).a;
+					alpha *= rt_alpha_value(mat, textureLod(sampler2D(rt_textures[idx], material_sampler_nearest), uv, 0.0));
 				} else {
-					alpha *= textureLod(sampler2D(rt_textures[idx], material_sampler), uv, 0.0).a;
+					alpha *= rt_alpha_value(mat, textureLod(sampler2D(rt_textures[idx], material_sampler), uv, 0.0));
 				}
 				break;
 			}
 		}
 #else
 		if ((mat.flags & MAT_FLAG_POINT_FILTER) != 0u) {
-			alpha *= textureLod(sampler2D(rt_textures[nonuniformEXT(mat.albedo_texture_idx)], material_sampler_nearest), uv, 0.0).a;
+			alpha *= rt_alpha_value(mat, textureLod(sampler2D(rt_textures[nonuniformEXT(alpha_tex)], material_sampler_nearest), uv, 0.0));
 		} else {
-			alpha *= textureLod(sampler2D(rt_textures[nonuniformEXT(mat.albedo_texture_idx)], material_sampler), uv, 0.0).a;
+			alpha *= rt_alpha_value(mat, textureLod(sampler2D(rt_textures[nonuniformEXT(alpha_tex)], material_sampler), uv, 0.0));
 		}
 #endif
 	}

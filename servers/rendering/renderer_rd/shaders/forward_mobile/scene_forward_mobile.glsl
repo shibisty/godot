@@ -1259,6 +1259,10 @@ void main() {
 	vec2 alpha_texture_coordinate = vec2(0.0, 0.0);
 #endif // ALPHA_ANTIALIASING_EDGE_USED
 
+	// Mariner AA (render_mode alpha_fringe): ALPHA_FRINGE_COORDINATE, ALPHA_FRINGE_FAR.
+	vec2 alpha_fringe_coordinate = vec2(0.0);
+	vec2 alpha_fringe_far = vec2(0.0, 2.0); // Mariner AA4: the AA bench optimum (leaves 0.083 -> 0.079).
+
 	mat4 inv_view_matrix = transpose(mat4(scene_data.inv_view_matrix[0],
 			scene_data.inv_view_matrix[1],
 			scene_data.inv_view_matrix[2],
@@ -1389,7 +1393,37 @@ void main() {
 
 #ifndef USE_SHADOW_TO_OPACITY
 
-#ifdef ALPHA_SCISSOR_USED
+#if defined(ALPHA_FRINGE_USED) && defined(ALPHA_SCISSOR_USED) && !defined(MODE_RENDER_DEPTH)
+	// Mariner AA (render_mode alpha_fringe), as in Forward+: the fully covered core is drawn opaque, the edge pixels
+	// (0 < coverage < 1) are blended in the alpha list (sc_alpha_fringe_pass()); far away (the mask's mip level within
+	// ALPHA_FRINGE_FAR) the coverage is the mask's own value. Shadows (MODE_RENDER_DEPTH) use the plain threshold below.
+	{
+		float fringe_alpha = float(alpha);
+		float fringe_threshold = float(alpha_scissor_threshold);
+		float fringe_sharp = clamp((fringe_alpha - fringe_threshold) / max(fwidth(fringe_alpha), 1e-4) + 0.5, 0.0, 1.0);
+		vec2 fringe_dx = dFdx(alpha_fringe_coordinate);
+		vec2 fringe_dy = dFdy(alpha_fringe_coordinate);
+		float fringe_lod = 0.5 * log2(max(max(dot(fringe_dx, fringe_dx), dot(fringe_dy, fringe_dy)), 1e-12));
+		float fringe_far = alpha_fringe_far.y > alpha_fringe_far.x ? smoothstep(alpha_fringe_far.x, alpha_fringe_far.y, fringe_lod) : 0.0;
+		float fringe_cov = mix(fringe_sharp, clamp(fringe_alpha + 0.5 - fringe_threshold, 0.0, 1.0), fringe_far);
+		bool fringe_core = fringe_sharp >= 0.999 && fringe_far <= 0.0;
+#ifdef MODE_RENDER_MATERIAL
+		alpha = fringe_alpha < fringe_threshold ? half(0.0) : half(1.0);
+#else
+		if (sc_alpha_fringe_pass()) {
+			if (fringe_core || fringe_cov <= 0.002) {
+				discard;
+			}
+			alpha = half(fringe_cov);
+		} else {
+			if (!fringe_core) {
+				discard;
+			}
+			alpha = half(1.0);
+		}
+#endif
+	}
+#elif defined(ALPHA_SCISSOR_USED)
 #ifdef MODE_RENDER_MATERIAL
 	if (alpha < alpha_scissor_threshold) {
 		alpha = half(0.0);
@@ -1420,7 +1454,7 @@ void main() {
 #endif // ALPHA_HASH_USED
 
 // If we are not edge antialiasing, we need to remove the output alpha channel from scissor and hash
-#if (defined(ALPHA_SCISSOR_USED) || defined(ALPHA_HASH_USED)) && !defined(ALPHA_ANTIALIASING_EDGE_USED) && !defined(MODE_RENDER_MATERIAL)
+#if (defined(ALPHA_SCISSOR_USED) || defined(ALPHA_HASH_USED)) && !defined(ALPHA_ANTIALIASING_EDGE_USED) && !defined(MODE_RENDER_MATERIAL) && !defined(ALPHA_FRINGE_USED)
 	alpha = half(1.0);
 #endif
 

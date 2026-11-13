@@ -222,6 +222,10 @@ ShaderTypes::ShaderTypes() {
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["ALPHA_HASH_SCALE"] = ShaderLanguage::TYPE_FLOAT;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["ALPHA_ANTIALIASING_EDGE"] = ShaderLanguage::TYPE_FLOAT;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["ALPHA_TEXTURE_COORDINATE"] = ShaderLanguage::TYPE_VEC2;
+	// Mariner AA: render_mode alpha_fringe - texel coordinate of the mask (mip selector) and the mip range where the
+	// sharpened edge turns into the mask's own (mip-averaged) coverage.
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["ALPHA_FRINGE_COORDINATE"] = ShaderLanguage::TYPE_VEC2;
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["ALPHA_FRINGE_FAR"] = ShaderLanguage::TYPE_VEC2;
 
 	shader_modes[RSE::SHADER_SPATIAL].functions["light"].built_ins["MODEL_MATRIX"] = constt(ShaderLanguage::TYPE_MAT4);
 	shader_modes[RSE::SHADER_SPATIAL].functions["light"].built_ins["VIEW_MATRIX"] = constt(ShaderLanguage::TYPE_MAT4);
@@ -279,6 +283,7 @@ ShaderTypes::ShaderTypes() {
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("particle_trails") });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("alpha_to_coverage") });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("alpha_to_coverage_and_one") });
+		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("alpha_fringe") }); // Mariner AA: analytic alpha-scissor edge (Forward+, Mobile)
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("debug_shadow_splits") });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("fog_disabled") });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("specular_occlusion_disabled") });

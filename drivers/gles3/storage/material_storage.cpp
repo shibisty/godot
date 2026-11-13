@@ -1286,6 +1286,8 @@ MaterialStorage::MaterialStorage() {
 		actions.renames["ALPHA_HASH_SCALE"] = "alpha_hash_scale";
 		actions.renames["ALPHA_ANTIALIASING_EDGE"] = "alpha_antialiasing_edge";
 		actions.renames["ALPHA_TEXTURE_COORDINATE"] = "alpha_texture_coordinate";
+		actions.renames["ALPHA_FRINGE_COORDINATE"] = "alpha_fringe_coordinate"; // Mariner AA (Forward+ and Mobile).
+		actions.renames["ALPHA_FRINGE_FAR"] = "alpha_fringe_far";
 
 		//builtins
 

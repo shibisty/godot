@@ -119,7 +119,7 @@ TEST_SUITE("[Mariner][Pathtracing]") {
 		CHECK(uint32_t(RT_MAT_FLAG_DIELECTRIC) == 64u);
 		const uint32_t e5a_flags = RT_MAT_FLAG_HAS_NORMAL_MAP | RT_MAT_FLAG_HAS_EMISSION_TEX | RT_MAT_FLAG_POINT_FILTER | RT_MAT_FLAG_USE_VERTEX_COLOR | RT_MAT_FLAG_CUSTOM_SHADER | RT_MAT_FLAG_UNSHADED;
 		CHECK((e5a_flags & uint32_t(RT_MAT_FLAG_DIELECTRIC)) == 0u);
-		CHECK(sizeof(RT_MaterialData) == 96); // Layout unchanged (the medium reuses fields).
+		CHECK(sizeof(RT_MaterialData) == 112); // The medium reuses fields; Mariner AA2 added alpha_mask_texture_idx.
 		CHECK(sizeof(RendererSceneRenderImplementation::RT_LightData) == 80);
 		CHECK(sizeof(RendererSceneRenderImplementation::PT_Params) == 80);
 	}

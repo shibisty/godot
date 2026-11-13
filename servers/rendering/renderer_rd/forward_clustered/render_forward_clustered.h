@@ -567,6 +567,7 @@ private:
 			FLAG_USES_MOTION_VECTOR = 131072,
 			FLAG_USES_STENCIL = 262144,
 			FLAG_PASS_OPAQUE_LATE = 524288, // Mariner: render_mode opaque_late
+			FLAG_PASS_ALPHA_FRINGE = 1048576, // Mariner AA: render_mode alpha_fringe - opaque core plus the edge in the alpha pass
 		};
 
 		union {

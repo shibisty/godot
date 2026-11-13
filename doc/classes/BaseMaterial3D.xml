@@ -10,6 +10,16 @@
 		<link title="Standard Material 3D and ORM Material 3D">$DOCS_URL/tutorials/3d/standard_material_3d.html</link>
 	</tutorials>
 	<methods>
+		<method name="bake_alpha_mask" qualifiers="static">
+			<return type="Image" />
+			<param index="0" name="source" type="Image" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="mode" type="int" enum="BaseMaterial3D.AlphaMaskMode" />
+			<param index="3" name="range" type="float" default="4.0" />
+			<description>
+				Bakes a distance-field alpha mask for [member alpha_mask_texture] from an alpha (coverage) image [param source] (its alpha channel, or the red channel of an image without alpha). The contour at alpha 0.5 is traced, then msdfgen computes a signed distance field of [param size]: one channel ([constant ALPHA_MASK_SDF], [constant Image.FORMAT_L8]) or three ([constant ALPHA_MASK_MSDF], [constant Image.FORMAT_RGB8], sharp corners). The value is [code]0.5 + distance / (2 * range)[/code] with the distance in output texels (inside above 0.5). Bake from a source several times larger than [param size] (a leaf drawn at 2048 into an MSDF of 128); generate mipmaps before making a texture. Returns [code]null[/code] if the source has no contour. Needs the [code]msdfgen[/code] module.
+			</description>
+		</method>
 		<method name="get_feature" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="feature" type="int" enum="BaseMaterial3D.Feature" />
@@ -87,6 +97,12 @@
 		</member>
 		<member name="alpha_hash_scale" type="float" setter="set_alpha_hash_scale" getter="get_alpha_hash_scale">
 			The hashing scale for Alpha Hash. Recommended values between [code]0[/code] and [code]2[/code].
+		</member>
+		<member name="alpha_mask_mode" type="int" setter="set_alpha_mask_mode" getter="get_alpha_mask_mode" enum="BaseMaterial3D.AlphaMaskMode" default="0">
+			What the transparency tests (with [member transparency] not [constant TRANSPARENCY_DISABLED]): the albedo alpha, or a distance field in [member alpha_mask_texture] (see [method bake_alpha_mask]). A distance field keeps the contour sharp under magnification (close-ups, the path tracer of photo mode, which uses the same mask); far away the mipmapped albedo alpha is better (with [constant ALPHA_ANTIALIASING_FRINGE] it is the coverage of thin distant geometry, a distance field is not).
+		</member>
+		<member name="alpha_mask_texture" type="Texture2D" setter="set_texture" getter="get_texture">
+			Distance-field alpha mask for [constant ALPHA_MASK_SDF] (red channel) or [constant ALPHA_MASK_MSDF] (median of red, green and blue): 0.5 on the contour, inside above. Sampled with the albedo UV. [member alpha_scissor_threshold] moves the contour.
 		</member>
 		<member name="alpha_scissor_threshold" type="float" setter="set_alpha_scissor_threshold" getter="get_alpha_scissor_threshold" keywords="alpha_test_threshold">
 			Threshold at which the alpha scissor will discard values. Higher values will result in more pixels being discarded. If the material becomes too opaque at a distance, try increasing [member alpha_scissor_threshold]. If the material disappears at a distance, try decreasing [member alpha_scissor_threshold].
@@ -659,6 +675,9 @@
 		<member name="wetness_puddles" type="float" setter="set_wetness_puddles" getter="get_wetness_puddles" default="0.0">
 			The water level for puddles on the height map ([code]0.0[/code]: none; [code]0.5[/code]: the lower half of the height map is under water when fully wet; rises with the wetness). Puddles are smooth (roughness [code]0.02[/code]), flatten the normal map, and are not metallic. Needs [member heightmap_enabled] (not triplanar).
 		</member>
+		<member name="wire_antialiasing" type="bool" setter="set_wire_antialiasing" getter="is_wire_antialiasing" default="false">
+			Antialiasing of thin tubes - wires, cables, rigging, thin branches - whose axis is the mesh's local Y axis (a [CylinderMesh], or a tube modelled along Y; the radius is each vertex's distance from the axis, so tapered tubes work). Needs [constant TRANSPARENCY_ALPHA]. The tube is widened in the vertex shader to at least a pixel (plus 0.75 pixel for the edge) and faded by its true width, and its edge is computed from the screen distance to the axis (Persson's wire antialiasing): a wire thinner than a pixel stays a continuous line of the right brightness instead of breaking into dashes, without MSAA or temporal history (TAA erases wires below half a pixel). Shadow passes keep the true tube. Uniform scale only. Not compatible with billboards or [member grow].
+		</member>
 		<member name="z_clip_scale" type="float" setter="set_z_clip_scale" getter="get_z_clip_scale" default="1.0">
 			Scales the object being rendered towards the camera to avoid clipping into things like walls. This is intended to be used for objects that are fixed with respect to the camera like player arms, tools, etc. Lighting and shadows will continue to work correctly when this setting is adjusted, but screen-space effects like SSAO and SSR may break with lower scales. Therefore, try to keep this setting as close to [code]1.0[/code] as possible.
 		</member>
@@ -700,6 +719,9 @@
 		<constant name="TEXTURE_DISPLACEMENT" value="24" enum="TextureParam">
 			Texture specifying the height of the displacement. Used by [member displacement_texture].
 		</constant>
+		<constant name="TEXTURE_ALPHA_MASK" value="25" enum="TextureParam">
+			Texture specifying the distance-field alpha mask ([member alpha_mask_mode]).
+		</constant>
 		<constant name="TEXTURE_RIM" value="5" enum="TextureParam">
 			Texture specifying per-pixel rim value.
 		</constant>
@@ -739,7 +761,7 @@
 		<constant name="TEXTURE_ORM" value="17" enum="TextureParam">
 			Texture holding ambient occlusion, roughness, and metallic.
 		</constant>
-		<constant name="TEXTURE_MAX" value="25" enum="TextureParam">
+		<constant name="TEXTURE_MAX" value="26" enum="TextureParam">
 			Represents the size of the [enum TextureParam] enum.
 		</constant>
 		<constant name="TEXTURE_FILTER_NEAREST" value="0" enum="TextureFilter">
@@ -927,6 +949,18 @@
 		</constant>
 		<constant name="ALPHA_ANTIALIASING_ALPHA_TO_COVERAGE_AND_TO_ONE" value="2" enum="AlphaAntiAliasing">
 			Enables AlphaToCoverage and forces all non-zero alpha values to [code]1[/code]. Alpha values in the material are passed to the AntiAliasing sample mask.
+		</constant>
+		<constant name="ALPHA_ANTIALIASING_FRINGE" value="3" enum="AlphaAntiAliasing">
+			Analytic edge of the alpha scissor (Forward+ and Mobile, needs [constant TRANSPARENCY_ALPHA_SCISSOR]; no MSAA or temporal history). The pixel's coverage is the alpha sharpened at [member alpha_scissor_threshold] ([code](alpha - threshold) / fwidth(alpha) + 0.5[/code]); fully covered pixels are drawn opaque, the edge pixels are blended over what is behind in the transparent pass. Far away (the albedo texture minified past mip level 0…2, that is when a texel of the mask gets smaller than a pixel) the mipmapped alpha itself is the coverage, so thin alpha-tested geometry (distant grass, leaves) does not vanish. Shadows use the plain threshold. The Compatibility renderer falls back to the plain alpha scissor. In a [Shader], use [code]render_mode alpha_fringe[/code] with [code]ALPHA_SCISSOR_THRESHOLD[/code], and optionally [code]ALPHA_FRINGE_COORDINATE[/code] (texel coordinate of the mask) and [code]ALPHA_FRINGE_FAR[/code] (mip range of the transition).
+		</constant>
+		<constant name="ALPHA_MASK_ALBEDO" value="0" enum="AlphaMaskMode">
+			The alpha of the albedo texture and [member albedo_color] (default).
+		</constant>
+		<constant name="ALPHA_MASK_SDF" value="1" enum="AlphaMaskMode">
+			A single-channel signed distance field in [member alpha_mask_texture] (red): smooth contours, corners rounded off below a texel.
+		</constant>
+		<constant name="ALPHA_MASK_MSDF" value="2" enum="AlphaMaskMode">
+			A multi-channel signed distance field in [member alpha_mask_texture]: the median of red, green and blue, which keeps sharp corners (leaf teeth and tips).
 		</constant>
 		<constant name="DEPTH_DRAW_OPAQUE_ONLY" value="0" enum="DepthDrawMode">
 			Default depth draw mode. Depth is drawn only for opaque objects during the opaque prepass (if any) and during the opaque pass.

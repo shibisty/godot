@@ -89,7 +89,7 @@ struct alignas(16) RT_InstanceData {
 };
 static_assert(sizeof(RT_InstanceData) == 128, "RT_InstanceData must be 128 bytes for std430.");
 
-// Per TLAS instance material data. Must match the GLSL `RTMaterialData` (std430, 96 bytes).
+// Per TLAS instance material data. Must match the GLSL `RTMaterialData` (std430, 112 bytes).
 struct alignas(16) RT_MaterialData {
 	uint32_t albedo_texture_idx; // Index into the bindless texture array (0 = white).
 	uint32_t normal_texture_idx;
@@ -108,8 +108,12 @@ struct alignas(16) RT_MaterialData {
 	float specular;
 	float alpha_scissor; // 0 if not alpha tested.
 	uint32_t cull_mode; // RSE::CullMode of the shader.
+	// Mariner AA2: BaseMaterial3D.alpha_mask_mode - the alpha test reads this distance field (0.5 on the contour; R, or
+	// the median of RGB with RT_MAT_FLAG_ALPHA_MSDF) instead of the albedo alpha. 0: the albedo alpha.
+	uint32_t alpha_mask_texture_idx;
+	uint32_t pad[3];
 };
-static_assert(sizeof(RT_MaterialData) == 96, "RT_MaterialData must be 96 bytes for std430.");
+static_assert(sizeof(RT_MaterialData) == 112, "RT_MaterialData must be 112 bytes for std430.");
 
 enum {
 	RT_OFFSET_NONE = 0xFFFFFFFFu,
@@ -144,6 +148,7 @@ enum {
 	// world point x `rt_foam_scale` (two scales, the second sample rotated; half2 in the bits of uv1_offset.y); foam is
 	// where the threshold exceeds 1 - coverage (vertex color alpha), denser towards its core.
 	RT_MAT_FLAG_FOAM_PATTERN = 256u,
+	RT_MAT_FLAG_ALPHA_MSDF = 512u, // Mariner AA2: alpha_mask_texture_idx is a multi-channel distance field.
 };
 
 enum {

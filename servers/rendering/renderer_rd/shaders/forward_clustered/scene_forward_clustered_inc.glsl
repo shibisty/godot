@@ -151,6 +151,11 @@ bool sc_cluster_has_area_light() {
 	return ((sc_packed_1() >> 5) & 1U) != 0;
 }
 
+// Mariner AA: render_mode alpha_fringe, drawing the edge (transparent pass).
+bool sc_alpha_fringe_pass() {
+	return ((sc_packed_1() >> 7) & 1U) != 0;
+}
+
 float sc_luminance_multiplier() {
 	// Not used in clustered renderer but we share some code with the mobile renderer that requires this.
 	return 1.0;

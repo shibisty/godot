@@ -1345,6 +1345,10 @@ void fragment_shader(in SceneData scene_data) {
 	vec2 alpha_texture_coordinate = vec2(0.0, 0.0);
 #endif // ALPHA_ANTIALIASING_EDGE_USED
 
+	// Mariner AA (render_mode alpha_fringe): ALPHA_FRINGE_COORDINATE, ALPHA_FRINGE_FAR.
+	vec2 alpha_fringe_coordinate = vec2(0.0);
+	vec2 alpha_fringe_far = vec2(0.0, 2.0); // Mariner AA4: the AA bench optimum (leaves 0.083 -> 0.079).
+
 	mat4 inv_view_matrix = transpose(mat4(scene_data.inv_view_matrix[0],
 			scene_data.inv_view_matrix[1],
 			scene_data.inv_view_matrix[2],
@@ -1385,16 +1389,26 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 
 	// Mariner G1b: SKY_OCCLUSION / OVERHEAD_COVER from the overhead map (1 / 0 without one), at the point and its
-	// geometry normal before the fragment function.
-#if defined(SKY_OCCLUSION_USED) || defined(OVERHEAD_COVER_USED)
+	// geometry normal before the fragment function. The SDFGI pass (MODE_RENDER_SDF) has no overhead map (it is declared
+	// with the scene's other buffers outside that mode): the open sky there, else the variant did not compile and the
+	// material lost the pass (a crash with SDFGI on, Terra 13.11).
+#if (defined(SKY_OCCLUSION_USED) || defined(OVERHEAD_COVER_USED)) && !defined(MODE_RENDER_SDF)
 	vec3 overhead_builtin_position = (inv_view_matrix * vec4(vertex, 1.0)).xyz;
 	vec3 overhead_builtin_normal = normalize(mat3(inv_view_matrix) * normal_highp);
 #endif
 #ifdef SKY_OCCLUSION_USED
+#ifdef MODE_RENDER_SDF
+	float sky_occlusion_builtin = 1.0;
+#else
 	float sky_occlusion_builtin = overhead_map_sky_visibility(overhead_builtin_position, overhead_builtin_normal);
 #endif
+#endif
 #ifdef OVERHEAD_COVER_USED
+#ifdef MODE_RENDER_SDF
+	float overhead_cover_builtin = 0.0;
+#else
 	float overhead_cover_builtin = overhead_map_cover(overhead_builtin_position, overhead_builtin_normal);
+#endif
 #endif
 
 	{
@@ -1430,7 +1444,42 @@ void fragment_shader(in SceneData scene_data) {
 
 #ifndef USE_SHADOW_TO_OPACITY
 
-#ifdef ALPHA_SCISSOR_USED
+#if defined(ALPHA_FRINGE_USED) && defined(ALPHA_SCISSOR_USED)
+	// Mariner AA (render_mode alpha_fringe): an analytic alpha-scissor edge without MSAA or history.
+	// cov  - the pixel's coverage: the mask sharpened at the threshold, (alpha - threshold) / fwidth(alpha) + 0.5, and,
+	//        far away (the mask's mip level within ALPHA_FRINGE_FAR), the mask's own value (the mip average = coverage);
+	// core - fully covered, near: drawn opaque (depth pre-pass and colour), the rest of the pixels are blended in the
+	//        transparent pass (sc_alpha_fringe_pass()) over what is behind; shadows use the plain threshold.
+	{
+		float fringe_sharp = clamp((alpha - alpha_scissor_threshold) / max(fwidth(alpha), 1e-4) + 0.5, 0.0, 1.0);
+		vec2 fringe_dx = dFdx(alpha_fringe_coordinate);
+		vec2 fringe_dy = dFdy(alpha_fringe_coordinate);
+		float fringe_lod = 0.5 * log2(max(max(dot(fringe_dx, fringe_dx), dot(fringe_dy, fringe_dy)), 1e-12));
+		float fringe_far = alpha_fringe_far.y > alpha_fringe_far.x ? smoothstep(alpha_fringe_far.x, alpha_fringe_far.y, fringe_lod) : 0.0;
+		float fringe_cov = mix(fringe_sharp, clamp(alpha + 0.5 - alpha_scissor_threshold, 0.0, 1.0), fringe_far);
+		bool fringe_core = fringe_sharp >= 0.999 && fringe_far <= 0.0;
+#if defined(MODE_RENDER_MATERIAL)
+		alpha = alpha < alpha_scissor_threshold ? 0.0 : 1.0;
+#elif defined(MODE_RENDER_DEPTH)
+		if (bool(scene_data.flags & SCENE_DATA_FLAGS_IN_SHADOW_PASS) ? alpha < alpha_scissor_threshold : !fringe_core) {
+			discard;
+		}
+		alpha = 1.0;
+#else
+		if (sc_alpha_fringe_pass()) {
+			if (fringe_core || fringe_cov <= 0.002) {
+				discard;
+			}
+			alpha = fringe_cov;
+		} else {
+			if (!fringe_core) {
+				discard;
+			}
+			alpha = 1.0;
+		}
+#endif
+	}
+#elif defined(ALPHA_SCISSOR_USED)
 #ifdef MODE_RENDER_MATERIAL
 	if (alpha < alpha_scissor_threshold) {
 		alpha = 0.0;
@@ -1461,7 +1510,7 @@ void fragment_shader(in SceneData scene_data) {
 #endif // ALPHA_HASH_USED
 
 // If we are not edge antialiasing, we need to remove the output alpha channel from scissor and hash
-#if (defined(ALPHA_SCISSOR_USED) || defined(ALPHA_HASH_USED)) && !defined(ALPHA_ANTIALIASING_EDGE_USED) && !defined(MODE_RENDER_MATERIAL)
+#if (defined(ALPHA_SCISSOR_USED) || defined(ALPHA_HASH_USED)) && !defined(ALPHA_ANTIALIASING_EDGE_USED) && !defined(MODE_RENDER_MATERIAL) && !defined(ALPHA_FRINGE_USED)
 	alpha = 1.0;
 #endif
 

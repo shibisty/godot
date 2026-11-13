@@ -2313,6 +2313,10 @@ void main() {
 	vec2 alpha_texture_coordinate = vec2(0.0, 0.0);
 #endif // ALPHA_ANTIALIASING_EDGE_USED
 
+	// Mariner AA: render_mode alpha_fringe is Forward+ and Mobile; here it is the plain alpha scissor.
+	vec2 alpha_fringe_coordinate = vec2(0.0);
+	vec2 alpha_fringe_far = vec2(0.0, 2.0); // Mariner AA4: the AA bench optimum (leaves 0.083 -> 0.079).
+
 #ifdef LIGHT_VERTEX_USED
 	vec3 light_vertex = vertex;
 #endif //LIGHT_VERTEX_USED

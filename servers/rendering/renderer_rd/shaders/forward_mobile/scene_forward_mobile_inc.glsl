@@ -222,6 +222,11 @@ bool sc_directional_light_blend_split(uint i) {
 	return ((sc_packed_1() >> (23 + i)) & 1U) != 0;
 }
 
+// Mariner AA: render_mode alpha_fringe, drawing the edge (alpha list).
+bool sc_alpha_fringe_pass() {
+	return ((sc_packed_1() >> 31) & 1U) != 0;
+}
+
 half sc_luminance_multiplier() {
 	return half(sc_packed_2());
 }

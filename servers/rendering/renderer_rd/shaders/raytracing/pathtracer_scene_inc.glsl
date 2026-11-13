@@ -1,5 +1,5 @@
 // Mariner E5c: scene data of the per-viewport TLAS (patch E5a, RenderRaytracing) for the path tracer.
-// Layouts must match RT_InstanceData / RT_MaterialData in render_raytracing.h (std430, 128 / 96 bytes).
+// Layouts must match RT_InstanceData / RT_MaterialData in render_raytracing.h (std430, 128 / 112 bytes).
 // Vertex fetch functions are ported from NVIDIA's Godot fork (raytracing_hit_inc.glsl), adapted to the E5a layout
 // (MultiMesh instance colors, layer mask) and to inline ray queries.
 //
@@ -65,6 +65,7 @@ const uint MAT_FLAG_DIELECTRIC = 64u;
 // B = gain of the wave maps) and a foam threshold pattern (albedo texture, half2 scales in the bits of uv1_offset.y).
 const uint MAT_FLAG_WAVE_DETAIL = 128u;
 const uint MAT_FLAG_FOAM_PATTERN = 256u;
+const uint MAT_FLAG_ALPHA_MSDF = 512u; // Mariner AA2.
 
 struct GeometryData {
 	// Buffers (index into rt_geometry_buffers, RT_NO_BUFFER = 0 if none) and word offsets into them.
@@ -120,7 +121,27 @@ struct MaterialData {
 	float specular;
 	float alpha_scissor;
 	uint cull_mode;
+	uint alpha_mask_texture_idx; // Mariner AA2: a distance field for the alpha test, 0 = the albedo alpha.
+	uint pad0;
+	uint pad1;
+	uint pad2;
 };
+
+// Mariner AA2: the texture of the alpha test and its value (the albedo alpha, or a distance field: 0.5 on the
+// contour, one channel or the median of three).
+uint rt_alpha_texture(MaterialData mat) {
+	return mat.alpha_mask_texture_idx != 0u ? mat.alpha_mask_texture_idx : mat.albedo_texture_idx;
+}
+
+float rt_alpha_value(MaterialData mat, vec4 texel) {
+	if (mat.alpha_mask_texture_idx == 0u) {
+		return texel.a;
+	}
+	if ((mat.flags & MAT_FLAG_ALPHA_MSDF) != 0u) {
+		return max(min(texel.r, texel.g), min(max(texel.r, texel.g), texel.b));
+	}
+	return texel.r;
+}
 
 #ifndef PT_SCENE_NO_TLAS // Mariner E20e: ReSTIR binds its own TLAS.
 layout(set = PT_SCENE_SET, binding = 0) uniform accelerationStructureEXT tlas;

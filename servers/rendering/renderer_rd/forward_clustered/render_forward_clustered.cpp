@@ -502,6 +502,7 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 
 				if constexpr ((p_color_pass_flags & COLOR_PASS_FLAG_TRANSPARENT) != 0) {
 					pipeline_key.color_pass_flags |= SceneShaderForwardClustered::PIPELINE_COLOR_PASS_FLAG_TRANSPARENT;
+					pipeline_specialization.alpha_fringe_pass = shader->uses_alpha_fringe; // Mariner AA.
 				}
 
 				if constexpr ((p_color_pass_flags & COLOR_PASS_FLAG_MULTIVIEW) != 0) {
@@ -1273,6 +1274,15 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 					render_list[RENDER_LIST_MOTION].add_element(surf);
 				} else {
 					surf->color_pass_inclusion_mask = 0;
+				}
+
+				// Mariner AA: render_mode alpha_fringe - the opaque core is in the lists above, the edge is blended in the
+				// alpha pass (the inclusion mask above is 0 or motion vectors: both include the alpha pass).
+				if (!opaque_late && !force_alpha && (surf->flags & GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA_FRINGE)) {
+					render_list[RENDER_LIST_ALPHA].add_element(surf);
+					if (uses_gi) {
+						surf->sort.uses_forward_gi = 1;
+					}
 				}
 
 				if (uses_lightmap) {
@@ -2889,7 +2899,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		if (transparent_color_pass_flags & COLOR_PASS_FLAG_MOTION_VECTORS) {
 			for (uint32_t i = 0; i < render_list[RENDER_LIST_ALPHA].elements.size(); i++) {
 				const GeometryInstanceSurfaceDataCache *ts = render_list[RENDER_LIST_ALPHA].elements[i];
-				if (ts->shader && ts->shader->uses_transparent_motion_vectors) {
+				// Mariner AA: render_mode alpha_fringe - the edge writes motion vectors, and a surface in the motion list
+				// (inclusion mask: motion vectors) must not be skipped here.
+				if (ts->shader && (ts->shader->uses_transparent_motion_vectors || ts->shader->uses_alpha_fringe)) {
 					transparent_mv = true;
 					break;
 				}
@@ -5550,6 +5562,9 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material(Geomet
 		flags |= GeometryInstanceSurfaceDataCache::FLAG_PASS_SHADOW;
 		if (p_material->shader_data->uses_opaque_late) {
 			flags |= GeometryInstanceSurfaceDataCache::FLAG_PASS_OPAQUE_LATE;
+		}
+		if (p_material->shader_data->uses_alpha_fringe) {
+			flags |= GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA_FRINGE;
 		}
 	}
 
