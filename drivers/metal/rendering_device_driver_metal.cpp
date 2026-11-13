@@ -2325,7 +2325,7 @@ void RenderingDeviceDriverMetal::command_build_blas(CommandBufferID p_cmd_buffer
 	ERR_FAIL_MSG("Ray tracing is not currently supported by the Metal driver.");
 }
 
-void RenderingDeviceDriverMetal::command_build_tlas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer, BufferID p_instance_buffer, uint32_t p_instance_offset, uint32_t p_instance_count) {
+void RenderingDeviceDriverMetal::command_build_tlas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer, BufferID p_instance_buffer, uint32_t p_instance_offset, uint32_t p_instance_count, VectorView<AccelerationStructureID> p_blases) {
 	ERR_FAIL_MSG("Ray tracing is not currently supported by the Metal driver.");
 }
 
@@ -2706,6 +2706,8 @@ bool RenderingDeviceDriverMetal::has_feature(Features p_feature) {
 		case SUPPORTS_VULKAN_MEMORY_MODEL:
 			return true;
 		case SUPPORTS_POINT_SIZE:
+			return true;
+		case SUPPORTS_CLIP_DISTANCE: // Mariner G6: [[clip_distance]].
 			return true;
 		default:
 			return false;

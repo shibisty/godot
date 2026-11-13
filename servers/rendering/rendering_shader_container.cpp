@@ -400,6 +400,11 @@ Error RenderingShaderContainer::reflect_spirv(const String &p_shader_name, Span<
 							}
 							need_block_size = true;
 							may_be_writable = true;
+							// Mariner E5d: an array of storage buffers (bindless geometry of the ray tracing scene).
+							for (uint32_t k = 0; k < binding.array.dims_count; k++) {
+								uniform.array_count *= MAX(binding.array.dims[k], 1u);
+							}
+							ERR_FAIL_COND_V_MSG(uniform.array_count > 1 && uniform.type == RDC::UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC, FAILED, "On shader stage '" + String(RDC::SHADER_STAGE_NAMES[stage]) + "', uniform '" + binding.name + "': arrays of dynamic storage buffers are not supported.");
 						} break;
 						case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC: {
 							ERR_PRINT("Dynamic uniform buffer not supported.");
@@ -687,6 +692,7 @@ void RenderingShaderContainer::set_from_shader_reflection(const ReflectShader &p
 			binding_data.stages = uint32_t(uniform.stages);
 			binding_data.length = uniform.length;
 			binding_data.writable = uint32_t(uniform.writable);
+			binding_data.array_count = uniform.array_count;
 			reflection_binding_set_uniforms_data.push_back(binding_data);
 		}
 
@@ -751,6 +757,7 @@ RenderingDeviceCommons::ShaderReflection RenderingShaderContainer::get_shader_re
 			uniform.unbounded = binding.length == 0 && RDC::ShaderUniform::type_can_be_unbounded(uniform.type);
 			uniform.binding = binding.binding;
 			uniform.stages = binding.stages;
+			uniform.array_count = MAX(binding.array_count, 1u);
 		}
 	}
 
@@ -785,9 +792,10 @@ bool RenderingShaderContainer::from_bytes(const PackedByteArray &p_bytes) {
 	bytes_offset += _from_bytes_header_extra_data(&bytes_ptr[bytes_offset]);
 
 	ERR_FAIL_COND_V_MSG(container_header.magic_number != CONTAINER_MAGIC_NUMBER, false, "Incorrect magic number in shader container.");
-	ERR_FAIL_COND_V_MSG(container_header.version > CONTAINER_VERSION, false, "Unsupported version in shader container.");
+	// Mariner E5d: an older container has another layout (cached ones are recompiled).
+	ERR_FAIL_COND_V_MSG(container_header.version != CONTAINER_VERSION, false, "Unsupported version in shader container.");
 	ERR_FAIL_COND_V_MSG(container_header.format != _format(), false, "Incorrect format in shader container.");
-	ERR_FAIL_COND_V_MSG(container_header.format_version > _format_version(), false, "Unsupported format version in shader container.");
+	ERR_FAIL_COND_V_MSG(container_header.format_version != _format_version(), false, "Unsupported format version in shader container.");
 
 	// Adjust shaders to the size indicated by the container header.
 	shaders.resize(container_header.shader_count);

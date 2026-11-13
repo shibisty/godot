@@ -115,7 +115,7 @@ void RenderPathtracer::_initialize(RendererSceneRenderRD *p_owner) {
 	initialized = true;
 	use_octmap_array = p_owner->is_using_radiance_octmap_array();
 
-	String defines = "\n#define MAX_ROUGHNESS_LOD " + itos(MAX(p_owner->get_roughness_layers() - 1, 1)) + ".0\n";
+	String defines = "\n#define MAX_ROUGHNESS_LOD " + itos(MAX(p_owner->get_roughness_layers() - 1, 1)) + ".0\n" + RenderRaytracing::get_scene_shader_defines();
 	Vector<String> variants;
 	variants.push_back("\n");
 	variants.push_back("\n#define USE_RADIANCE_OCTMAP_ARRAY\n");
@@ -424,7 +424,8 @@ bool RenderPathtracer::render(RendererSceneRenderRD *p_owner, const RenderDataRD
 			RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, pt.accum),
 			RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, rb->get_internal_texture()),
 			RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 12, pt.depth),
-			RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 13, volumetric_fog));
+			RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 13, volumetric_fog),
+			rb->get_raytracing_geometry_buffers_uniform(30)); // Mariner E5d: RT_GEOMETRY_BUFFERS_BINDING.
 	RID set1 = rb->get_raytracing_texture_uniform_set(shader_rd_variant, 1);
 	if (set0.is_null() || set1.is_null()) {
 		RD::get_singleton()->draw_command_end_label();

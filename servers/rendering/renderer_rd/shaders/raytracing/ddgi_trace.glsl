@@ -11,10 +11,10 @@
 // back faces: the probe sees the inside of a closed mesh) for ddgi_update.glsl.
 
 #extension GL_EXT_ray_query : require
-#extension GL_EXT_buffer_reference : require
-#extension GL_EXT_buffer_reference2 : require
-#extension GL_ARB_gpu_shader_int64 : require
 #extension GL_EXT_nonuniform_qualifier : require
+#ifdef RT_NONUNIFORM_WATERFALL
+#extension GL_KHR_shader_subgroup_ballot : require
+#endif
 #extension GL_EXT_control_flow_attributes : enable
 
 #define GLSL 1
@@ -143,10 +143,27 @@ vec3 offset_ray_origin(vec3 p, vec3 n) {
 }
 
 vec4 sample_material_texture(uint tex_idx, vec2 uv, uint mat_flags, float lod) {
+#ifdef RT_NONUNIFORM_WATERFALL
+	// Mariner E5d: one texture index of the wave at a time (rt_load(), pathtracer_scene_inc.glsl).
+	vec4 value = vec4(0.0);
+	for (;;) {
+		uint idx = subgroupBroadcastFirst(tex_idx);
+		if (idx == tex_idx) {
+			if ((mat_flags & MAT_FLAG_POINT_FILTER) != 0u) {
+				value = textureLod(sampler2D(rt_textures[idx], material_sampler_nearest), uv, lod);
+			} else {
+				value = textureLod(sampler2D(rt_textures[idx], material_sampler), uv, lod);
+			}
+			break;
+		}
+	}
+	return value;
+#else
 	if ((mat_flags & MAT_FLAG_POINT_FILTER) != 0u) {
 		return textureLod(sampler2D(rt_textures[nonuniformEXT(tex_idx)], material_sampler_nearest), uv, lod);
 	}
 	return textureLod(sampler2D(rt_textures[nonuniformEXT(tex_idx)], material_sampler), uv, lod);
+#endif
 }
 
 // Per ray state for pt_alpha_test() (DG-F): seed of the stochastic transmission, camera ray (stand-ins skipped).

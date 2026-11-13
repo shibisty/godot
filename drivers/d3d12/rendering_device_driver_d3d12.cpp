@@ -573,7 +573,7 @@ void RenderingDeviceDriverD3D12::_resource_transition_batch(CommandBufferInfo *p
 	bool any_state_is_common = *curr_state == D3D12_RESOURCE_STATE_COMMON || p_new_state == D3D12_RESOURCE_STATE_COMMON;
 	bool redundant_transition = any_state_is_common ? *curr_state == p_new_state : ((*curr_state) & p_new_state) == p_new_state;
 	if (redundant_transition) {
-		bool just_written = *curr_state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+		bool just_written = *curr_state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS || *curr_state == D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
 		bool needs_uav_barrier = just_written && res_states->last_batch_with_uav_barrier != p_command_buffer->res_barriers_batch;
 		if (needs_uav_barrier) {
 			if (p_command_buffer->res_barriers.size() < p_command_buffer->res_barriers_count + 1) {
@@ -776,7 +776,7 @@ void RenderingDeviceDriverD3D12::_resource_transitions_flush(CommandBufferInfo *
 				if (may_do_single_barrier) {
 					// Hurray!, we can do a single barrier (plus maybe a UAV one, too).
 
-					bool just_written = res_states->subresource_states[0] == D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+					bool just_written = res_states->subresource_states[0] == D3D12_RESOURCE_STATE_UNORDERED_ACCESS || res_states->subresource_states[0] == D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
 					bool needs_uav_barrier = just_written && res_states->last_batch_with_uav_barrier != p_command_buffer->res_barriers_batch;
 
 					uint32_t needed_barriers = (needs_uav_barrier ? 1 : 0) + 1;
@@ -827,7 +827,7 @@ void RenderingDeviceDriverD3D12::_resource_transitions_flush(CommandBufferInfo *
 
 					D3D12_RESOURCE_STATES *curr_state = &res_states->subresource_states[subresource];
 
-					bool just_written = *curr_state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+					bool just_written = *curr_state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS || *curr_state == D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
 					bool needs_uav_barrier = just_written && res_states->last_batch_with_uav_barrier != p_command_buffer->res_barriers_batch;
 
 					uint32_t needed_barriers = (needs_uav_barrier ? 1 : 0) + br.planes;
@@ -887,8 +887,12 @@ RDD::BufferID RenderingDeviceDriverD3D12::buffer_create(uint64_t p_size, BitFiel
 	CD3DX12_RESOURCE_DESC1 resource_desc = CD3DX12_RESOURCE_DESC1::Buffer(p_size);
 	if (p_usage.has_flag(RDD::BUFFER_USAGE_STORAGE_BIT)) {
 		resource_desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-	} else {
+	} else if (!p_usage.has_flag(BUFFER_USAGE_SHADER_BINDING_TABLE_BIT) && !p_usage.has_flag(RDD::BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT)) {
 		resource_desc.Flags |= D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
+	}
+
+	if (p_usage.has_flag(RDD::BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT)) {
+		resource_desc.Flags |= D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE;
 	}
 
 	D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -921,6 +925,9 @@ RDD::BufferID RenderingDeviceDriverD3D12::buffer_create(uint64_t p_size, BitFiel
 
 				// We can't use STORAGE for write access, just for read.
 				resource_desc.Flags = resource_desc.Flags & ~D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+			}
+			if (p_usage.has_flag(RDD::BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT)) {
+				initial_state = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
 			}
 		} break;
 	}
@@ -2116,11 +2123,23 @@ static void _rd_access_to_d3d12_and_mask(BitField<RDD::BarrierAccessBits> p_acce
 	}
 
 	const D3D12_BARRIER_SYNC unordered_access_mask = D3D12_BARRIER_SYNC_VERTEX_SHADING | D3D12_BARRIER_SYNC_PIXEL_SHADING | D3D12_BARRIER_SYNC_COMPUTE_SHADING |
-			D3D12_BARRIER_SYNC_VERTEX_SHADING | D3D12_BARRIER_SYNC_DRAW | D3D12_BARRIER_SYNC_ALL_SHADING | D3D12_BARRIER_SYNC_CLEAR_UNORDERED_ACCESS_VIEW;
+			D3D12_BARRIER_SYNC_VERTEX_SHADING | D3D12_BARRIER_SYNC_DRAW | D3D12_BARRIER_SYNC_ALL_SHADING | D3D12_BARRIER_SYNC_CLEAR_UNORDERED_ACCESS_VIEW |
+			D3D12_BARRIER_SYNC_EMIT_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO | D3D12_BARRIER_SYNC_RAYTRACING;
 
 	if (p_access.has_flag(RDD::BARRIER_ACCESS_STORAGE_CLEAR_BIT)) {
 		r_access |= D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
 		r_sync_mask |= unordered_access_mask;
+	}
+
+	if (p_access.has_flag(RDD::BARRIER_ACCESS_ACCELERATION_STRUCTURE_READ_BIT)) {
+		r_access |= D3D12_BARRIER_ACCESS_RAYTRACING_ACCELERATION_STRUCTURE_READ;
+		r_sync_mask |= D3D12_BARRIER_SYNC_COMPUTE_SHADING | D3D12_BARRIER_SYNC_RAYTRACING | D3D12_BARRIER_SYNC_ALL_SHADING |
+				D3D12_BARRIER_SYNC_BUILD_RAYTRACING_ACCELERATION_STRUCTURE | D3D12_BARRIER_SYNC_COPY_RAYTRACING_ACCELERATION_STRUCTURE | D3D12_BARRIER_SYNC_EMIT_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO;
+	}
+
+	if (p_access.has_flag(RDD::BARRIER_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT)) {
+		r_access |= D3D12_BARRIER_ACCESS_RAYTRACING_ACCELERATION_STRUCTURE_WRITE;
+		r_sync_mask |= D3D12_BARRIER_SYNC_COMPUTE_SHADING | D3D12_BARRIER_SYNC_RAYTRACING | D3D12_BARRIER_SYNC_ALL_SHADING | D3D12_BARRIER_SYNC_BUILD_RAYTRACING_ACCELERATION_STRUCTURE | D3D12_BARRIER_SYNC_COPY_RAYTRACING_ACCELERATION_STRUCTURE;
 	}
 
 	// These access bits only have compatibility with certain layouts unlike in Vulkan where they imply specific operations in the same layout.
@@ -2134,7 +2153,8 @@ static void _rd_access_to_d3d12_and_mask(BitField<RDD::BarrierAccessBits> p_acce
 			r_sync_mask |= unordered_access_mask;
 		} else {
 			r_access |= D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
-			r_sync_mask |= D3D12_BARRIER_SYNC_VERTEX_SHADING | D3D12_BARRIER_SYNC_PIXEL_SHADING | D3D12_BARRIER_SYNC_COMPUTE_SHADING | D3D12_BARRIER_SYNC_DRAW | D3D12_BARRIER_SYNC_ALL_SHADING;
+			r_sync_mask |= D3D12_BARRIER_SYNC_VERTEX_SHADING | D3D12_BARRIER_SYNC_PIXEL_SHADING | D3D12_BARRIER_SYNC_COMPUTE_SHADING | D3D12_BARRIER_SYNC_DRAW | D3D12_BARRIER_SYNC_ALL_SHADING |
+					D3D12_BARRIER_SYNC_BUILD_RAYTRACING_ACCELERATION_STRUCTURE | D3D12_BARRIER_SYNC_RAYTRACING;
 		}
 	}
 
@@ -2204,6 +2224,14 @@ static void _rd_stages_to_d3d12(BitField<RDD::PipelineStageBits> p_stages, D3D12
 
 		if (p_stages.has_flag(RDD::PIPELINE_STAGE_ALL_GRAPHICS_BIT)) {
 			r_sync |= D3D12_BARRIER_SYNC_DRAW;
+		}
+
+		if (p_stages.has_flag(RDD::PIPELINE_STAGE_RAY_TRACING_SHADER_BIT)) {
+			r_sync |= D3D12_BARRIER_SYNC_RAYTRACING;
+		}
+
+		if (p_stages.has_flag(RDD::PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT)) {
+			r_sync |= D3D12_BARRIER_SYNC_EMIT_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO | D3D12_BARRIER_SYNC_BUILD_RAYTRACING_ACCELERATION_STRUCTURE | D3D12_BARRIER_SYNC_COPY_RAYTRACING_ACCELERATION_STRUCTURE;
 		}
 	}
 }
@@ -2320,6 +2348,16 @@ void RenderingDeviceDriverD3D12::command_pipeline_barrier(CommandBufferID p_cmd_
 		const BufferInfo *buffer_info = (const BufferInfo *)(buffer_barrier_rd.buffer.id);
 		_rd_stages_and_access_to_d3d12(p_src_stages, RDD::TEXTURE_LAYOUT_MAX, buffer_barrier_rd.src_access, buffer_barrier_d3d12.SyncBefore, buffer_barrier_d3d12.AccessBefore);
 		_rd_stages_and_access_to_d3d12(p_dst_stages, RDD::TEXTURE_LAYOUT_MAX, buffer_barrier_rd.dst_access, buffer_barrier_d3d12.SyncAfter, buffer_barrier_d3d12.AccessAfter);
+		buffer_barrier_d3d12.pResource = buffer_info->resource;
+		buffer_barriers.push_back(buffer_barrier_d3d12);
+	}
+
+	for (uint32_t i = 0; i < p_acceleration_structure_barriers.size(); i++) {
+		const AccelerationStructureBarrier &acceleration_structure_barrier = p_acceleration_structure_barriers[i];
+		const AccelerationStructureInfo *acceleration_structure_info = (const AccelerationStructureInfo *)(acceleration_structure_barrier.acceleration_structure.id);
+		const BufferInfo *buffer_info = (const BufferInfo *)(acceleration_structure_info->buffer.id);
+		_rd_stages_and_access_to_d3d12(p_src_stages, RDD::TEXTURE_LAYOUT_MAX, acceleration_structure_barrier.src_access, buffer_barrier_d3d12.SyncBefore, buffer_barrier_d3d12.AccessBefore);
+		_rd_stages_and_access_to_d3d12(p_dst_stages, RDD::TEXTURE_LAYOUT_MAX, acceleration_structure_barrier.dst_access, buffer_barrier_d3d12.SyncAfter, buffer_barrier_d3d12.AccessAfter);
 		buffer_barrier_d3d12.pResource = buffer_info->resource;
 		buffer_barriers.push_back(buffer_barrier_d3d12);
 	}
@@ -2534,6 +2572,17 @@ Error RenderingDeviceDriverD3D12::command_queue_execute_and_present(CommandQueue
 	bool any_present_failed = false;
 	for (uint32_t i = 0; i < p_swap_chains.size(); i++) {
 		SwapChain *swap_chain = (SwapChain *)(p_swap_chains[i].id);
+		if (swap_chain->extra_active) {
+			// Mariner E24c: the extra image (in the current back buffer) first, then the frame's own (in the
+			// intermediate texture), copied into the back buffer that is current after that.
+			DEV_ASSERT(swap_chain->d3d_swap_chain->GetCurrentBackBufferIndex() == swap_chain->extra_back_buffer);
+			res = swap_chain->d3d_swap_chain->Present(swap_chain->sync_interval, swap_chain->present_flags);
+			if (!SUCCEEDED(res)) {
+				print_verbose(vformat("D3D12: Presenting the extra image failed with error 0x%08ux.", (uint64_t)res));
+			}
+			_swap_chain_extra_restore(swap_chain);
+			_swap_chain_extra_copy(swap_chain, command_queue->d3d_queue.Get());
+		}
 		res = swap_chain->d3d_swap_chain->Present(swap_chain->sync_interval, swap_chain->present_flags);
 		if (!SUCCEEDED(res)) {
 			print_verbose(vformat("D3D12: Presenting swapchain failed with error 0x%08ux.", (uint64_t)res));
@@ -2610,7 +2659,9 @@ void RenderingDeviceDriverD3D12::command_pool_free(CommandPoolID p_cmd_pool) {
 
 		cmd_buf_info->cmd_list.Reset();
 		cmd_buf_info->cmd_list_1.Reset();
+		cmd_buf_info->cmd_list_4.Reset();
 		cmd_buf_info->cmd_list_5.Reset();
+		cmd_buf_info->cmd_list_6.Reset();
 		cmd_buf_info->cmd_list_7.Reset();
 		cmd_buf_info->cmd_allocator.Reset();
 
@@ -2679,7 +2730,9 @@ RDD::CommandBufferID RenderingDeviceDriverD3D12::command_buffer_create(CommandPo
 	cmd_buf_info->cmd_list = cmd_list;
 
 	cmd_list->QueryInterface(cmd_buf_info->cmd_list_1.GetAddressOf());
+	cmd_list->QueryInterface(cmd_buf_info->cmd_list_4.GetAddressOf());
 	cmd_list->QueryInterface(cmd_buf_info->cmd_list_5.GetAddressOf());
+	cmd_list->QueryInterface(cmd_buf_info->cmd_list_6.GetAddressOf());
 	cmd_list->QueryInterface(cmd_buf_info->cmd_list_7.GetAddressOf());
 
 	cmd_buf_info->uav_alloc = uav_alloc;
@@ -2738,6 +2791,7 @@ void RenderingDeviceDriverD3D12::command_buffer_end(CommandBufferID p_cmd_buffer
 	cmd_buf_info->graphics_pso = nullptr;
 	cmd_buf_info->graphics_root_signature_crc = 0;
 	cmd_buf_info->compute_pso = nullptr;
+	cmd_buf_info->raytracing_pso = nullptr;
 	cmd_buf_info->compute_root_signature_crc = 0;
 	cmd_buf_info->pending_dyn_params = true;
 	cmd_buf_info->descriptor_heaps_set = false;
@@ -2767,6 +2821,7 @@ void RenderingDeviceDriverD3D12::_swap_chain_release(SwapChain *p_swap_chain) {
 }
 
 void RenderingDeviceDriverD3D12::_swap_chain_release_buffers(SwapChain *p_swap_chain) {
+	_swap_chain_extra_release(p_swap_chain);
 	for (ID3D12Resource *render_target : p_swap_chain->render_targets) {
 		render_target->Release();
 	}
@@ -3035,7 +3090,8 @@ Error RenderingDeviceDriverD3D12::swap_chain_resize(CommandQueueID p_cmd_queue, 
 RDD::FramebufferID RenderingDeviceDriverD3D12::swap_chain_acquire_framebuffer(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain, bool &r_resize_required) {
 	DEV_ASSERT(p_swap_chain.id != 0);
 
-	const SwapChain *swap_chain = (const SwapChain *)(p_swap_chain.id);
+	SwapChain *swap_chain = (SwapChain *)(p_swap_chain.id);
+	_swap_chain_extra_restore(swap_chain); // Mariner E24c: an extra image that wasn't presented.
 	if (context_driver->surface_get_needs_resize(swap_chain->surface)) {
 		r_resize_required = true;
 		return FramebufferID();
@@ -3044,6 +3100,145 @@ RDD::FramebufferID RenderingDeviceDriverD3D12::swap_chain_acquire_framebuffer(Co
 	const uint32_t buffer_index = swap_chain->d3d_swap_chain->GetCurrentBackBufferIndex();
 	DEV_ASSERT(buffer_index < swap_chain->framebuffers.size());
 	return swap_chain->framebuffers[buffer_index];
+}
+
+RDD::FramebufferID RenderingDeviceDriverD3D12::swap_chain_acquire_extra_framebuffer(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain) {
+	DEV_ASSERT(p_swap_chain.id != 0);
+	SwapChain *swap_chain = (SwapChain *)(p_swap_chain.id);
+	if (swap_chain->d3d_swap_chain == nullptr || swap_chain->extra_active || context_driver->surface_get_needs_resize(swap_chain->surface)) {
+		return FramebufferID(); // Only one extra image per frame.
+	}
+	if (swap_chain->framebuffers.size() < 3) {
+		return FramebufferID(); // The two images of this frame, while another may still be shown.
+	}
+	if (!_swap_chain_extra_prepare(swap_chain)) {
+		return FramebufferID();
+	}
+	// The frame's framebuffer (already given to RenderingDevice) now draws the intermediate texture; the extra image
+	// is drawn into the current back buffer, presented first.
+	const uint32_t current = swap_chain->d3d_swap_chain->GetCurrentBackBufferIndex();
+	FramebufferInfo *frame_fb = (FramebufferInfo *)swap_chain->framebuffers[current].id;
+	FramebufferInfo *extra_fb = (FramebufferInfo *)swap_chain->extra_framebuffer.id;
+	SWAP(*frame_fb, *extra_fb);
+	swap_chain->extra_active = true;
+	swap_chain->extra_back_buffer = current;
+	return swap_chain->extra_framebuffer;
+}
+
+void RenderingDeviceDriverD3D12::_swap_chain_extra_restore(SwapChain *p_swap_chain) {
+	if (!p_swap_chain->extra_active) {
+		return;
+	}
+	FramebufferInfo *a = (FramebufferInfo *)p_swap_chain->framebuffers[p_swap_chain->extra_back_buffer].id;
+	FramebufferInfo *b = (FramebufferInfo *)p_swap_chain->extra_framebuffer.id;
+	SWAP(*a, *b);
+	p_swap_chain->extra_active = false;
+	p_swap_chain->extra_back_buffer = UINT32_MAX;
+}
+
+bool RenderingDeviceDriverD3D12::_swap_chain_extra_prepare(SwapChain *p_swap_chain) {
+	HRESULT res;
+	if (p_swap_chain->extra_fence == nullptr) {
+		res = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(p_swap_chain->extra_fence.GetAddressOf()));
+		ERR_FAIL_COND_V_MSG(!SUCCEEDED(res), false, vformat("D3D12: CreateFence (extra present) failed with error 0x%08ux.", (uint64_t)res));
+	}
+	if (p_swap_chain->extra_allocators.is_empty()) {
+		// One per frame in flight, plus one: an allocator is only reset once the GPU is done with its copy.
+		const uint32_t count = frames.size() + 1;
+		p_swap_chain->extra_allocators.resize(count);
+		p_swap_chain->extra_allocator_values.resize(count);
+		for (uint32_t i = 0; i < count; i++) {
+			res = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(p_swap_chain->extra_allocators[i].GetAddressOf()));
+			ERR_FAIL_COND_V_MSG(!SUCCEEDED(res), false, vformat("D3D12: CreateCommandAllocator (extra present) failed with error 0x%08ux.", (uint64_t)res));
+			p_swap_chain->extra_allocator_values[i] = 0;
+		}
+		res = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, p_swap_chain->extra_allocators[0].Get(), nullptr, IID_PPV_ARGS(p_swap_chain->extra_cmd_list.GetAddressOf()));
+		ERR_FAIL_COND_V_MSG(!SUCCEEDED(res), false, vformat("D3D12: CreateCommandList (extra present) failed with error 0x%08ux.", (uint64_t)res));
+		p_swap_chain->extra_cmd_list->Close();
+	}
+	if (p_swap_chain->extra_resource != nullptr) {
+		return true;
+	}
+
+	// The intermediate texture: a copy of the back buffers' description, so it can be copied into them as is.
+	D3D12_RESOURCE_DESC desc = p_swap_chain->render_targets_info[0].desc;
+	desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+	const D3D12_HEAP_PROPERTIES heap_properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+	res = device->CreateCommittedResource(&heap_properties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_PRESENT, nullptr, IID_PPV_ARGS(&p_swap_chain->extra_resource));
+	ERR_FAIL_COND_V_MSG(!SUCCEEDED(res), false, vformat("D3D12: CreateCommittedResource (extra present) failed with error 0x%08ux.", (uint64_t)res));
+
+	TextureInfo &texture_info = p_swap_chain->extra_texture_info;
+	texture_info = p_swap_chain->render_targets_info[0];
+	texture_info.owner_info.states.subresource_states.clear();
+	texture_info.owner_info.states.subresource_states.push_back(D3D12_RESOURCE_STATE_PRESENT);
+	texture_info.states_ptr = &texture_info.owner_info.states;
+	texture_info.desc = CD3DX12_RESOURCE_DESC(desc);
+	texture_info.resource = p_swap_chain->extra_resource;
+
+	const Size2i size(desc.Width, desc.Height);
+	p_swap_chain->extra_framebuffer = _framebuffer_create(p_swap_chain->render_pass, TextureID(&p_swap_chain->extra_texture_info), size.width, size.height, true);
+	if (!p_swap_chain->extra_framebuffer) {
+		p_swap_chain->extra_resource->Release();
+		p_swap_chain->extra_resource = nullptr;
+		ERR_FAIL_V_MSG(false, "D3D12: Can't create the framebuffer of the extra present.");
+	}
+	return true;
+}
+
+void RenderingDeviceDriverD3D12::_swap_chain_extra_wait_idle(SwapChain *p_swap_chain) {
+	if (p_swap_chain->extra_fence != nullptr && p_swap_chain->extra_fence->GetCompletedValue() < p_swap_chain->extra_fence_value) {
+		p_swap_chain->extra_fence->SetEventOnCompletion(p_swap_chain->extra_fence_value, nullptr); // Blocks.
+	}
+}
+
+void RenderingDeviceDriverD3D12::_swap_chain_extra_release(SwapChain *p_swap_chain) {
+	_swap_chain_extra_restore(p_swap_chain);
+	_swap_chain_extra_wait_idle(p_swap_chain);
+	if (p_swap_chain->extra_framebuffer) {
+		framebuffer_free(p_swap_chain->extra_framebuffer);
+		p_swap_chain->extra_framebuffer = FramebufferID();
+	}
+	if (p_swap_chain->extra_resource != nullptr) {
+		p_swap_chain->extra_resource->Release();
+		p_swap_chain->extra_resource = nullptr;
+	}
+}
+
+void RenderingDeviceDriverD3D12::_swap_chain_extra_copy(SwapChain *p_swap_chain, ID3D12CommandQueue *p_queue) {
+	// After the first Present(): the intermediate texture into the new current back buffer, on the queue presenting
+	// it (DXGI orders the GPU's writes to the current back buffer after the image it held left the screen).
+	const uint32_t back_buffer = p_swap_chain->d3d_swap_chain->GetCurrentBackBufferIndex();
+	ERR_FAIL_UNSIGNED_INDEX(back_buffer, p_swap_chain->render_targets.size());
+
+	const uint32_t index = p_swap_chain->extra_allocator_index;
+	p_swap_chain->extra_allocator_index = (index + 1) % p_swap_chain->extra_allocators.size();
+	ID3D12Fence *fence = p_swap_chain->extra_fence.Get();
+	if (fence->GetCompletedValue() < p_swap_chain->extra_allocator_values[index]) {
+		fence->SetEventOnCompletion(p_swap_chain->extra_allocator_values[index], nullptr); // Blocks.
+	}
+	ID3D12CommandAllocator *allocator = p_swap_chain->extra_allocators[index].Get();
+	allocator->Reset();
+	ID3D12GraphicsCommandList *cmd_list = p_swap_chain->extra_cmd_list.Get();
+	cmd_list->Reset(allocator, nullptr);
+
+	ID3D12Resource *src = p_swap_chain->extra_resource;
+	ID3D12Resource *dst = p_swap_chain->render_targets[back_buffer];
+	D3D12_RESOURCE_BARRIER barriers[2] = {
+		CD3DX12_RESOURCE_BARRIER::Transition(src, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_SOURCE),
+		CD3DX12_RESOURCE_BARRIER::Transition(dst, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST),
+	};
+	cmd_list->ResourceBarrier(2, barriers);
+	cmd_list->CopyResource(dst, src);
+	barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(src, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PRESENT);
+	barriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(dst, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+	cmd_list->ResourceBarrier(2, barriers);
+	cmd_list->Close();
+
+	ID3D12CommandList *lists[1] = { cmd_list };
+	p_queue->ExecuteCommandLists(1, lists);
+	p_swap_chain->extra_fence_value++;
+	p_queue->Signal(fence, p_swap_chain->extra_fence_value);
+	p_swap_chain->extra_allocator_values[index] = p_swap_chain->extra_fence_value;
 }
 
 RDD::RenderPassID RenderingDeviceDriverD3D12::swap_chain_get_render_pass(SwapChainID p_swap_chain) {
@@ -3069,6 +3264,7 @@ bool RenderingDeviceDriverD3D12::swap_chain_get_hdr_output_supported(SwapChainID
 void RenderingDeviceDriverD3D12::swap_chain_free(SwapChainID p_swap_chain) {
 	SwapChain *swap_chain = (SwapChain *)(p_swap_chain.id);
 	_swap_chain_release(swap_chain);
+	_swap_chain_extra_wait_idle(swap_chain);
 	memdelete(swap_chain);
 }
 
@@ -3319,6 +3515,34 @@ void RenderingDeviceDriverD3D12::framebuffer_free(FramebufferID p_framebuffer) {
 /**** SHADER ****/
 /****************/
 
+bool RenderingDeviceDriverD3D12::_shader_apply_specialization_constants(const ShaderInfo *p_shader_info, VectorView<PipelineSpecializationConstant> p_specialization_constants, ShaderStage p_stage, Vector<uint8_t> &r_bytecode) {
+	bool re_sign = false;
+	for (uint32_t i = 0; i < p_specialization_constants.size(); i++) {
+		const PipelineSpecializationConstant &psc = p_specialization_constants[i];
+		if (!(p_shader_info->spirv_specialization_constants_ids_mask & (1 << psc.constant_id))) {
+			// This SC wasn't even in the original SPIR-V shader.
+			continue;
+		}
+		for (const ShaderInfo::SpecializationConstant &sc : p_shader_info->specialization_constants) {
+			if (psc.constant_id == sc.constant_id) {
+				uint64_t offset = sc.stages_bit_offsets[RenderingShaderContainerD3D12::SHADER_STAGES_BIT_OFFSET_INDICES[p_stage]];
+				if (offset != 0 && psc.int_value != sc.int_value) {
+					RenderingDXIL::patch_specialization_constant(psc.type, &psc.int_value, offset, r_bytecode, false);
+					re_sign = true;
+				}
+				break;
+			}
+		}
+	}
+
+	// Re-sign the patched stage.
+	if (re_sign) {
+		RenderingDXIL::sign_bytecode(p_stage, r_bytecode);
+	}
+
+	return true;
+}
+
 bool RenderingDeviceDriverD3D12::_shader_apply_specialization_constants(
 		const ShaderInfo *p_shader_info,
 		VectorView<PipelineSpecializationConstant> p_specialization_constants,
@@ -3419,6 +3643,11 @@ RDD::ShaderID RenderingDeviceDriverD3D12::shader_create_from_container(const Ref
 		} else {
 			shader_info_in.stages_bytecode[shader.shader_stage] = shader.code_compressed_bytes;
 		}
+
+		ShaderInfo::ShaderConfig shader_config;
+		shader_config.payload_size_in_bytes = shader_refl_d3d12.shader_config_data_d3d12[i].payload_size_in_bytes;
+		shader_config.attribute_size_in_bytes = shader_refl_d3d12.shader_config_data_d3d12[i].attribute_size_in_bytes;
+		shader_info_in.stages_shader_config[shader.shader_stage] = shader_config;
 	}
 
 	PFN_D3D12_CREATE_ROOT_SIGNATURE_DESERIALIZER d3d_D3D12CreateRootSignatureDeserializer = (PFN_D3D12_CREATE_ROOT_SIGNATURE_DESERIALIZER)(void *)GetProcAddress(context_driver->lib_d3d12, "D3D12CreateRootSignatureDeserializer");
@@ -3436,7 +3665,7 @@ RDD::ShaderID RenderingDeviceDriverD3D12::shader_create_from_container(const Ref
 
 	// Bookkeep.
 	ShaderInfo *shader_info_ptr = VersatileResource::allocate<ShaderInfo>(resources_allocator);
-	*shader_info_ptr = shader_info_in;
+	*shader_info_ptr = std::move(shader_info_in);
 	return ShaderID(shader_info_ptr);
 }
 
@@ -3567,6 +3796,7 @@ RDD::UniformSetID RenderingDeviceDriverD3D12::uniform_set_create(VectorView<Boun
 				}
 			} break;
 			case UNIFORM_TYPE_TEXTURE: {
+				ERR_FAIL_COND_V_MSG(uniform.variable_count && uniform.ids.size() > RenderingShaderContainerD3D12::UNBOUNDED_DESCRIPTOR_COUNT, UniformSetID(), vformat("Too many textures (%d) for a runtime-sized array, the maximum on D3D12 is %d.", uniform.ids.size(), RenderingShaderContainerD3D12::UNBOUNDED_DESCRIPTOR_COUNT));
 				for (uint32_t j = 0; j < uniform.ids.size(); j++) {
 					TextureInfo *texture_info = (TextureInfo *)uniform.ids[j].id;
 					device->CreateShaderResourceView(texture_info->resource, &texture_info->view_descs.srv, get_cpu_handle(uniform_set_info->resource_descriptor_heap_alloc.cpu_handle, binding.resource_descriptor_offset + j, resource_descriptor_heap.increment_size));
@@ -3574,6 +3804,17 @@ RDD::UniformSetID RenderingDeviceDriverD3D12::uniform_set_create(VectorView<Boun
 					NeededState &ns = resource_states[texture_info];
 					ns.shader_uniform_idx_mask |= ((uint64_t)1 << i);
 					ns.states |= D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
+				}
+				if (uniform.variable_count) {
+					// Mariner E5d: the rest of a runtime-sized array - null descriptors.
+					D3D12_SHADER_RESOURCE_VIEW_DESC null_desc = {};
+					null_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+					null_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+					null_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+					null_desc.Texture2D.MipLevels = 1;
+					for (uint32_t j = uniform.ids.size(); j < RenderingShaderContainerD3D12::UNBOUNDED_DESCRIPTOR_COUNT; j++) {
+						device->CreateShaderResourceView(nullptr, &null_desc, get_cpu_handle(uniform_set_info->resource_descriptor_heap_alloc.cpu_handle, binding.resource_descriptor_offset + j, resource_descriptor_heap.increment_size));
+					}
 				}
 			} break;
 			case UNIFORM_TYPE_IMAGE: {
@@ -3624,50 +3865,53 @@ RDD::UniformSetID RenderingDeviceDriverD3D12::uniform_set_create(VectorView<Boun
 			} break;
 			case UNIFORM_TYPE_STORAGE_BUFFER:
 			case UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC: {
-				BufferInfo *buf_info = (BufferInfo *)uniform.ids[0].id;
+				// Mariner E5d: one buffer, or an array of storage buffers (one descriptor each).
+				for (uint32_t k = 0; k < uniform.ids.size(); k++) {
+					BufferInfo *buf_info = (BufferInfo *)uniform.ids[k].id;
 
-				if (uniform.type == UNIFORM_TYPE_STORAGE_BUFFER) {
-					ERR_FAIL_COND_V_MSG(buf_info->is_dynamic(), UniformSetID(),
-							"Sent a buffer with BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT but binding (" + itos(uniform.binding) + "), set (" + itos(p_set_index) + ") is UNIFORM_TYPE_STORAGE_BUFFER instead of UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC.");
+					if (uniform.type == UNIFORM_TYPE_STORAGE_BUFFER) {
+						ERR_FAIL_COND_V_MSG(buf_info->is_dynamic(), UniformSetID(),
+								"Sent a buffer with BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT but binding (" + itos(uniform.binding) + "), set (" + itos(p_set_index) + ") is UNIFORM_TYPE_STORAGE_BUFFER instead of UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC.");
 
-					// Create UAV or SRV depending on whether the uniform is writable.
-					if (binding.writable) {
-						D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-						uav_desc.Format = DXGI_FORMAT_R32_TYPELESS;
-						uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-						uav_desc.Buffer.FirstElement = 0;
-						uav_desc.Buffer.NumElements = (buf_info->size + 3u) / 4u;
-						uav_desc.Buffer.StructureByteStride = 0;
-						uav_desc.Buffer.CounterOffsetInBytes = 0;
-						uav_desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
-						device->CreateUnorderedAccessView(buf_info->resource, nullptr, &uav_desc, get_cpu_handle(uniform_set_info->resource_descriptor_heap_alloc.cpu_handle, binding.resource_descriptor_offset, resource_descriptor_heap.increment_size));
+						// Create UAV or SRV depending on whether the uniform is writable.
+						if (binding.writable) {
+							D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+							uav_desc.Format = DXGI_FORMAT_R32_TYPELESS;
+							uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+							uav_desc.Buffer.FirstElement = 0;
+							uav_desc.Buffer.NumElements = (buf_info->size + 3u) / 4u;
+							uav_desc.Buffer.StructureByteStride = 0;
+							uav_desc.Buffer.CounterOffsetInBytes = 0;
+							uav_desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+							device->CreateUnorderedAccessView(buf_info->resource, nullptr, &uav_desc, get_cpu_handle(uniform_set_info->resource_descriptor_heap_alloc.cpu_handle, binding.resource_descriptor_offset + k, resource_descriptor_heap.increment_size));
+						} else {
+							D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+							srv_desc.Format = DXGI_FORMAT_R32_TYPELESS;
+							srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+							srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+							srv_desc.Buffer.FirstElement = 0;
+							srv_desc.Buffer.NumElements = (buf_info->size + 3u) / 4u;
+							srv_desc.Buffer.StructureByteStride = 0;
+							srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+							device->CreateShaderResourceView(buf_info->resource, &srv_desc, get_cpu_handle(uniform_set_info->resource_descriptor_heap_alloc.cpu_handle, binding.resource_descriptor_offset + k, resource_descriptor_heap.increment_size));
+						}
+
 					} else {
-						D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-						srv_desc.Format = DXGI_FORMAT_R32_TYPELESS;
-						srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-						srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-						srv_desc.Buffer.FirstElement = 0;
-						srv_desc.Buffer.NumElements = (buf_info->size + 3u) / 4u;
-						srv_desc.Buffer.StructureByteStride = 0;
-						srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
-						device->CreateShaderResourceView(buf_info->resource, &srv_desc, get_cpu_handle(uniform_set_info->resource_descriptor_heap_alloc.cpu_handle, binding.resource_descriptor_offset, resource_descriptor_heap.increment_size));
+						ERR_FAIL_COND_V_MSG(!buf_info->is_dynamic(), UniformSetID(),
+								"Sent a buffer without BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT but binding (" + itos(uniform.binding) + "), set (" + itos(p_set_index) + ") is UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC instead of UNIFORM_TYPE_STORAGE_BUFFER.");
+						ERR_FAIL_COND_V_MSG(num_dynamic_buffers >= MAX_DYNAMIC_BUFFERS, UniformSetID(),
+								"Uniform set exceeded the limit of dynamic/persistent buffers. (" + itos(MAX_DYNAMIC_BUFFERS) + ").");
+
+						UniformSetInfo::DynamicBuffer &dynamic_buffer = dynamic_buffers[num_dynamic_buffers++];
+						dynamic_buffer.info = (const BufferDynamicInfo *)buf_info;
+						dynamic_buffer.binding = i;
 					}
 
-				} else {
-					ERR_FAIL_COND_V_MSG(!buf_info->is_dynamic(), UniformSetID(),
-							"Sent a buffer without BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT but binding (" + itos(uniform.binding) + "), set (" + itos(p_set_index) + ") is UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC instead of UNIFORM_TYPE_STORAGE_BUFFER.");
-					ERR_FAIL_COND_V_MSG(num_dynamic_buffers >= MAX_DYNAMIC_BUFFERS, UniformSetID(),
-							"Uniform set exceeded the limit of dynamic/persistent buffers. (" + itos(MAX_DYNAMIC_BUFFERS) + ").");
-
-					UniformSetInfo::DynamicBuffer &dynamic_buffer = dynamic_buffers[num_dynamic_buffers++];
-					dynamic_buffer.info = (const BufferDynamicInfo *)buf_info;
-					dynamic_buffer.binding = i;
+					NeededState &ns = resource_states[buf_info];
+					ns.shader_uniform_idx_mask |= ((uint64_t)1 << i);
+					ns.is_buffer = true;
+					ns.states |= (binding.writable ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 				}
-
-				NeededState &ns = resource_states[buf_info];
-				ns.shader_uniform_idx_mask |= ((uint64_t)1 << i);
-				ns.is_buffer = true;
-				ns.states |= (binding.writable ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 			} break;
 			case UNIFORM_TYPE_INPUT_ATTACHMENT: {
 				for (uint32_t j = 0; j < uniform.ids.size(); j++) {
@@ -3679,6 +3923,21 @@ RDD::UniformSetID RenderingDeviceDriverD3D12::uniform_set_create(VectorView<Boun
 					ns.shader_uniform_idx_mask |= ((uint64_t)1 << i);
 					ns.states |= D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 				}
+			} break;
+			case UNIFORM_TYPE_ACCELERATION_STRUCTURE: {
+				AccelerationStructureInfo *acceleration_structure_info = (AccelerationStructureInfo *)uniform.ids[0].id;
+
+				D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+				srv_desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+				srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+				srv_desc.RaytracingAccelerationStructure.Location = acceleration_structure_info->build_desc.DestAccelerationStructureData;
+				device->CreateShaderResourceView(nullptr, &srv_desc, get_cpu_handle(uniform_set_info->resource_descriptor_heap_alloc.cpu_handle, binding.resource_descriptor_offset, resource_descriptor_heap.increment_size));
+
+				BufferInfo *acceleration_structure_buffer_info = (BufferInfo *)acceleration_structure_info->buffer.id;
+
+				NeededState &ns = resource_states[acceleration_structure_buffer_info];
+				ns.shader_uniform_idx_mask |= ((uint64_t)1 << i);
+				ns.states |= D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
 			} break;
 			default: {
 				DEV_ASSERT(false);
@@ -4892,6 +5151,7 @@ void RenderingDeviceDriverD3D12::command_bind_render_pipeline(CommandBufferID p_
 
 		cmd_buf_info->graphics_pso = pipeline_info->pso.Get();
 		cmd_buf_info->compute_pso = nullptr;
+		cmd_buf_info->raytracing_pso = nullptr;
 
 		cmd_buf_info->nir_graphics_runtime_data_root_param_idx = shader_info_in->nir_runtime_data_root_param_idx;
 		cmd_buf_info->nir_compute_runtime_data_root_param_idx = UINT32_MAX;
@@ -5033,20 +5293,59 @@ void RenderingDeviceDriverD3D12::command_render_draw_indirect_count(CommandBuffe
 	cmd_buf_info->cmd_list->ExecuteIndirect(indirect_cmd_signatures.draw.Get(), p_max_draw_count, indirect_buf_info->resource, p_offset, count_buf_info->resource, p_count_buffer_offset);
 }
 
-// Mariner E7: mesh shading. Not supported on Direct3D 12: shaders reach D3D12 as SPIR-V translated to DXIL by
-// Mesa (NIR to DXIL, drivers/d3d12/rendering_shader_container_d3d12.cpp), and Mesa's DXIL backend has no mesh /
-// amplification shader kinds (see engine/README.md of the Mariner project). RenderingDevice never calls these because
-// SUPPORTS_MESH_SHADER is false.
+// Mariner E7b: mesh shading. The shaders of mesh pipelines are compiled by DXC (RenderingShaderContainerD3D12), the
+// draws are DispatchMesh() / ExecuteIndirect() with D3D12_DISPATCH_MESH_ARGUMENTS (the same three group counts as
+// VkDrawMeshTasksIndirectCommandEXT).
+static Error create_command_signature(ID3D12Device *device, D3D12_INDIRECT_ARGUMENT_TYPE p_type, uint32_t p_stride, ComPtr<ID3D12CommandSignature> *r_cmd_sig);
+
+ID3D12CommandSignature *RenderingDeviceDriverD3D12::_get_dispatch_mesh_command_signature(uint32_t p_stride) {
+	const uint32_t stride = MAX(p_stride, (uint32_t)sizeof(D3D12_DISPATCH_MESH_ARGUMENTS));
+	MutexLock lock(indirect_cmd_signatures.dispatch_mesh_mutex);
+	HashMap<uint32_t, ComPtr<ID3D12CommandSignature>>::Iterator it = indirect_cmd_signatures.dispatch_mesh.find(stride);
+	if (it != indirect_cmd_signatures.dispatch_mesh.end()) {
+		return it->value.Get();
+	}
+	ComPtr<ID3D12CommandSignature> signature;
+	Error err = create_command_signature(device.Get(), D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH, stride, &signature);
+	ERR_FAIL_COND_V(err != OK, nullptr);
+	indirect_cmd_signatures.dispatch_mesh.insert(stride, signature);
+	return signature.Get();
+}
+
 void RenderingDeviceDriverD3D12::command_render_draw_mesh_tasks(CommandBufferID p_cmd_buffer, uint32_t p_group_count_x, uint32_t p_group_count_y, uint32_t p_group_count_z) {
-	ERR_FAIL_MSG("Mesh shaders are not supported by this rendering driver.");
+	CommandBufferInfo *cmd_buf_info = (CommandBufferInfo *)p_cmd_buffer.id;
+	ERR_FAIL_COND_MSG(!mesh_shader_capabilities.supported || !cmd_buf_info->cmd_list_6, "Mesh shaders are not supported by this device.");
+	cmd_buf_info->cmd_list_6->DispatchMesh(p_group_count_x, p_group_count_y, p_group_count_z);
 }
 
 void RenderingDeviceDriverD3D12::command_render_draw_mesh_tasks_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, uint32_t p_draw_count, uint32_t p_stride) {
-	ERR_FAIL_MSG("Mesh shaders are not supported by this rendering driver.");
+	CommandBufferInfo *cmd_buf_info = (CommandBufferInfo *)p_cmd_buffer.id;
+	ERR_FAIL_COND_MSG(!mesh_shader_capabilities.supported, "Mesh shaders are not supported by this device.");
+	ID3D12CommandSignature *signature = _get_dispatch_mesh_command_signature(p_stride);
+	ERR_FAIL_NULL(signature);
+	BufferInfo *indirect_buf_info = (BufferInfo *)p_indirect_buffer.id;
+	if (!barrier_capabilities.enhanced_barriers_supported) {
+		_resource_transition_batch(cmd_buf_info, indirect_buf_info, 0, 1, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+		_resource_transitions_flush(cmd_buf_info);
+	}
+
+	cmd_buf_info->cmd_list->ExecuteIndirect(signature, p_draw_count, indirect_buf_info->resource, p_offset, nullptr, 0);
 }
 
 void RenderingDeviceDriverD3D12::command_render_draw_mesh_tasks_indirect_count(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, BufferID p_count_buffer, uint64_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride) {
-	ERR_FAIL_MSG("Mesh shaders are not supported by this rendering driver.");
+	CommandBufferInfo *cmd_buf_info = (CommandBufferInfo *)p_cmd_buffer.id;
+	ERR_FAIL_COND_MSG(!mesh_shader_capabilities.supported, "Mesh shaders are not supported by this device.");
+	ID3D12CommandSignature *signature = _get_dispatch_mesh_command_signature(p_stride);
+	ERR_FAIL_NULL(signature);
+	BufferInfo *indirect_buf_info = (BufferInfo *)p_indirect_buffer.id;
+	BufferInfo *count_buf_info = (BufferInfo *)p_count_buffer.id;
+	if (!barrier_capabilities.enhanced_barriers_supported) {
+		_resource_transition_batch(cmd_buf_info, indirect_buf_info, 0, 1, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+		_resource_transition_batch(cmd_buf_info, count_buf_info, 0, 1, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+		_resource_transitions_flush(cmd_buf_info);
+	}
+
+	cmd_buf_info->cmd_list->ExecuteIndirect(signature, p_max_draw_count, indirect_buf_info->resource, p_offset, count_buf_info->resource, p_count_buffer_offset);
 }
 
 void RenderingDeviceDriverD3D12::command_render_bind_vertex_buffers(CommandBufferID p_cmd_buffer, uint32_t p_binding_count, const BufferID *p_buffers, const uint64_t *p_offsets, uint64_t p_dynamic_offsets) {
@@ -5466,7 +5765,39 @@ RDD::PipelineID RenderingDeviceDriverD3D12::render_pipeline_create(
 	device->QueryInterface(device_2.GetAddressOf());
 	ComPtr<ID3D12PipelineState> pso;
 	HRESULT res = E_FAIL;
-	if (device_2) {
+	if (final_stages_bytecode.has(SHADER_STAGE_MESH)) {
+		// Mariner E7b: a mesh pipeline (amplification, mesh and pixel shaders), the same states.
+		ERR_FAIL_COND_V_MSG(!mesh_shader_capabilities.supported || !device_2, PipelineID(), "Mesh shaders are not supported by this device.");
+		CD3DX12_PIPELINE_STATE_STREAM2 mesh_desc = {};
+		mesh_desc.Flags = pipeline_desc.Flags;
+		mesh_desc.NodeMask = pipeline_desc.NodeMask;
+		mesh_desc.pRootSignature = pipeline_desc.pRootSignature;
+		mesh_desc.PrimitiveTopologyType = pipeline_desc.PrimitiveTopologyType;
+		mesh_desc.PS = pipeline_desc.PS;
+		if (final_stages_bytecode.has(SHADER_STAGE_TASK)) {
+			mesh_desc.AS = D3D12_SHADER_BYTECODE{
+				final_stages_bytecode[SHADER_STAGE_TASK].ptr(),
+				(SIZE_T)final_stages_bytecode[SHADER_STAGE_TASK].size()
+			};
+		}
+		mesh_desc.MS = D3D12_SHADER_BYTECODE{
+			final_stages_bytecode[SHADER_STAGE_MESH].ptr(),
+			(SIZE_T)final_stages_bytecode[SHADER_STAGE_MESH].size()
+		};
+		mesh_desc.BlendState = pipeline_desc.BlendState;
+		mesh_desc.DepthStencilState = pipeline_desc.DepthStencilState;
+		mesh_desc.DSVFormat = pipeline_desc.DSVFormat;
+		mesh_desc.RasterizerState = pipeline_desc.RasterizerState;
+		mesh_desc.RTVFormats = pipeline_desc.RTVFormats;
+		mesh_desc.SampleDesc = pipeline_desc.SampleDesc;
+		mesh_desc.SampleMask = pipeline_desc.SampleMask;
+		mesh_desc.ViewInstancingDesc = pipeline_desc.ViewInstancingDesc;
+
+		D3D12_PIPELINE_STATE_STREAM_DESC pssd = {};
+		pssd.pPipelineStateSubobjectStream = &mesh_desc;
+		pssd.SizeInBytes = sizeof(mesh_desc);
+		res = device_2->CreatePipelineState(&pssd, IID_PPV_ARGS(pso.GetAddressOf()));
+	} else if (device_2) {
 		D3D12_PIPELINE_STATE_STREAM_DESC pssd = {};
 		pssd.pPipelineStateSubobjectStream = &pipeline_desc;
 		pssd.SizeInBytes = sizeof(pipeline_desc);
@@ -5500,8 +5831,9 @@ void RenderingDeviceDriverD3D12::command_bind_compute_pipeline(CommandBufferID p
 	if (cmd_buf_info->compute_pso != pipeline_info->pso.Get()) {
 		cmd_buf_info->cmd_list->SetPipelineState(pipeline_info->pso.Get());
 
-		cmd_buf_info->compute_pso = pipeline_info->pso.Get();
 		cmd_buf_info->graphics_pso = nullptr;
+		cmd_buf_info->compute_pso = pipeline_info->pso.Get();
+		cmd_buf_info->raytracing_pso = nullptr;
 
 		cmd_buf_info->nir_compute_runtime_data_root_param_idx = shader_info_in->nir_runtime_data_root_param_idx;
 		cmd_buf_info->nir_graphics_runtime_data_root_param_idx = UINT32_MAX;
@@ -5637,62 +5969,433 @@ RDD::PipelineID RenderingDeviceDriverD3D12::compute_pipeline_create(ShaderID p_s
 /**** RAYTRACING ****/
 /********************/
 
+// RDD::AccelerationStructureFlagBits == D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS.
+static_assert(ENUM_MEMBERS_EQUAL(RDD::ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE));
+static_assert(ENUM_MEMBERS_EQUAL(RDD::ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION));
+static_assert(ENUM_MEMBERS_EQUAL(RDD::ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE));
+static_assert(ENUM_MEMBERS_EQUAL(RDD::ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD));
+static_assert(ENUM_MEMBERS_EQUAL(RDD::ACCELERATION_STRUCTURE_LOW_MEMORY_BIT, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_MINIMIZE_MEMORY));
+
+// RDD::AccelerationStructureGeometryBits == D3D12_RAYTRACING_GEOMETRY_FLAGS.
+static_assert(ENUM_MEMBERS_EQUAL(RDD::ACCELERATION_STRUCTURE_GEOMETRY_OPAQUE_BIT, D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE));
+static_assert(ENUM_MEMBERS_EQUAL(RDD::ACCELERATION_STRUCTURE_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT, D3D12_RAYTRACING_GEOMETRY_FLAG_NO_DUPLICATE_ANYHIT_INVOCATION));
+
 // ---- ACCELERATION STRUCTURES ----
 
+bool RenderingDeviceDriverD3D12::_acceleration_structure_create(AccelerationStructureInfo *r_acceleration_structure_info) {
+	ComPtr<ID3D12Device5> device_5;
+	device->QueryInterface(device_5.GetAddressOf());
+
+	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO prebuild_info = {};
+	device_5->GetRaytracingAccelerationStructurePrebuildInfo(&r_acceleration_structure_info->build_desc.Inputs, &prebuild_info);
+
+	r_acceleration_structure_info->buffer = buffer_create(prebuild_info.ResultDataMaxSizeInBytes, BUFFER_USAGE_STORAGE_BIT | BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT, MEMORY_ALLOCATION_TYPE_GPU, UINT64_MAX);
+	if (!r_acceleration_structure_info->buffer) {
+		return false;
+	}
+
+	r_acceleration_structure_info->scratch_buffer_size = prebuild_info.ScratchDataSizeInBytes;
+
+	const BufferInfo *buffer_info = (const BufferInfo *)r_acceleration_structure_info->buffer.id;
+	r_acceleration_structure_info->build_desc.DestAccelerationStructureData = buffer_info->gpu_virtual_address;
+
+	return true;
+}
+
 RDD::AccelerationStructureID RenderingDeviceDriverD3D12::blas_create(VectorView<AccelerationStructureGeometry> p_geometries, BitField<AccelerationStructureFlagBits> p_flags) {
-	ERR_FAIL_V_MSG(AccelerationStructureID(), "Ray tracing is not currently supported by the D3D12 driver.");
+	AccelerationStructureInfo blas_info;
+
+	blas_info.geometries.resize_initialized(p_geometries.size());
+	for (uint32_t i = 0; i < p_geometries.size(); i++) {
+		const AccelerationStructureGeometry &geometry = p_geometries[i];
+
+		D3D12_RAYTRACING_GEOMETRY_DESC &d3d12_geometry = blas_info.geometries[i];
+		d3d12_geometry.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+		d3d12_geometry.Flags = (D3D12_RAYTRACING_GEOMETRY_FLAGS)(uint64_t)geometry.flags;
+
+		BufferInfo *vertex_buffer = (BufferInfo *)geometry.vertex_buffer.id;
+		d3d12_geometry.Triangles.VertexFormat = RD_TO_D3D12_FORMAT[geometry.vertex_format].general_format;
+		d3d12_geometry.Triangles.VertexCount = geometry.vertex_count;
+		d3d12_geometry.Triangles.VertexBuffer.StartAddress = vertex_buffer->gpu_virtual_address + geometry.vertex_offset;
+		d3d12_geometry.Triangles.VertexBuffer.StrideInBytes = geometry.vertex_stride;
+
+		if (!barrier_capabilities.enhanced_barriers_supported) {
+			blas_info.input_buffer_infos.push_back(vertex_buffer);
+		}
+
+		if (geometry.index_buffer) {
+			BufferInfo *index_buffer = (BufferInfo *)geometry.index_buffer.id;
+			d3d12_geometry.Triangles.IndexFormat = (geometry.index_format == INDEX_BUFFER_FORMAT_UINT16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT);
+			d3d12_geometry.Triangles.IndexCount = geometry.index_count;
+			d3d12_geometry.Triangles.IndexBuffer = index_buffer->gpu_virtual_address + geometry.index_offset;
+
+			if (!barrier_capabilities.enhanced_barriers_supported) {
+				blas_info.input_buffer_infos.push_back(index_buffer);
+			}
+		}
+	}
+
+	blas_info.build_desc.Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+	blas_info.build_desc.Inputs.Flags = (D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS)(uint64_t)p_flags;
+	blas_info.build_desc.Inputs.NumDescs = p_geometries.size();
+	blas_info.build_desc.Inputs.pGeometryDescs = blas_info.geometries.ptr();
+
+	bool ok = _acceleration_structure_create(&blas_info);
+	ERR_FAIL_COND_V(!ok, RDD::AccelerationStructureID());
+
+	// Bookkeep.
+	AccelerationStructureInfo *blas_info_ptr = VersatileResource::allocate<AccelerationStructureInfo>(resources_allocator);
+	*blas_info_ptr = std::move(blas_info);
+	return AccelerationStructureID(blas_info_ptr);
 }
 
 RDD::AccelerationStructureID RenderingDeviceDriverD3D12::tlas_create(uint32_t p_max_instance_count, BitField<AccelerationStructureFlagBits> p_flags) {
-	ERR_FAIL_V_MSG(AccelerationStructureID(), "Ray tracing is not currently supported by the D3D12 driver.");
+	AccelerationStructureInfo tlas_info;
+
+	tlas_info.build_desc.Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+	tlas_info.build_desc.Inputs.Flags = (D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS)(uint64_t)p_flags;
+	tlas_info.build_desc.Inputs.NumDescs = p_max_instance_count;
+
+	bool ok = _acceleration_structure_create(&tlas_info);
+	ERR_FAIL_COND_V(!ok, RDD::AccelerationStructureID());
+
+	// Bookkeep.
+	AccelerationStructureInfo *tlas_info_ptr = VersatileResource::allocate<AccelerationStructureInfo>(resources_allocator);
+	*tlas_info_ptr = std::move(tlas_info);
+	return AccelerationStructureID(tlas_info_ptr);
+}
+
+static _FORCE_INLINE_ void _store_transform_transposed_3x4(const Transform3D &p_mtx, FLOAT r_mtx[3][4]) {
+	r_mtx[0][0] = p_mtx.basis.rows[0][0];
+	r_mtx[0][1] = p_mtx.basis.rows[0][1];
+	r_mtx[0][2] = p_mtx.basis.rows[0][2];
+	r_mtx[0][3] = p_mtx.origin.x;
+	r_mtx[1][0] = p_mtx.basis.rows[1][0];
+	r_mtx[1][1] = p_mtx.basis.rows[1][1];
+	r_mtx[1][2] = p_mtx.basis.rows[1][2];
+	r_mtx[1][3] = p_mtx.origin.y;
+	r_mtx[2][0] = p_mtx.basis.rows[2][0];
+	r_mtx[2][1] = p_mtx.basis.rows[2][1];
+	r_mtx[2][2] = p_mtx.basis.rows[2][2];
+	r_mtx[2][3] = p_mtx.origin.z;
 }
 
 void RenderingDeviceDriverD3D12::acceleration_structure_instance_write(uint8_t *r_driver_instance, const AccelerationStructureInstance &p_instance) {
-	ERR_FAIL_MSG("Ray tracing is not currently supported by the D3D12 driver.");
+	D3D12_RAYTRACING_INSTANCE_DESC *instance_desc = (D3D12_RAYTRACING_INSTANCE_DESC *)r_driver_instance;
+
+	_store_transform_transposed_3x4(p_instance.transform, instance_desc->Transform);
+	instance_desc->InstanceID = p_instance.id;
+	instance_desc->InstanceMask = p_instance.mask;
+	instance_desc->InstanceContributionToHitGroupIndex = p_instance.hit_sbt_offset;
+	instance_desc->Flags = p_instance.flags;
+
+	if (p_instance.blas) {
+		AccelerationStructureInfo *blas_info = (AccelerationStructureInfo *)p_instance.blas.id;
+		instance_desc->AccelerationStructure = blas_info->build_desc.DestAccelerationStructureData;
+	} else {
+		instance_desc->AccelerationStructure = 0;
+	}
 }
 
 void RenderingDeviceDriverD3D12::acceleration_structure_free(AccelerationStructureID p_acceleration_structure) {
-	ERR_FAIL_MSG("Ray tracing is not currently supported by the D3D12 driver.");
+	AccelerationStructureInfo *acceleration_structure_info = (AccelerationStructureInfo *)p_acceleration_structure.id;
+	buffer_free(acceleration_structure_info->buffer);
+
+	VersatileResource::free(resources_allocator, acceleration_structure_info);
 }
 
 uint32_t RenderingDeviceDriverD3D12::acceleration_structure_get_scratch_size_bytes(AccelerationStructureID p_acceleration_structure) {
-	ERR_FAIL_V_MSG(0, "Ray tracing is not currently supported by the D3D12 driver.");
+	AccelerationStructureInfo *acceleration_structure_info = (AccelerationStructureInfo *)p_acceleration_structure.id;
+	return acceleration_structure_info->scratch_buffer_size;
 }
 
 // ----- PIPELINE -----
 
 RDD::RaytracingPipelineID RenderingDeviceDriverD3D12::raytracing_pipeline_create(VectorView<PipelineShader> p_shaders, VectorView<uint32_t> p_raygen_shader_indices, VectorView<uint32_t> p_miss_shader_indices, VectorView<HitGroup> p_hit_groups, uint32_t p_max_trace_recursion_depth, ShaderID p_layout_defining_shader) {
-	ERR_FAIL_V_MSG(RaytracingPipelineID(), "Ray tracing is not currently supported by the D3D12 driver.");
+	// This RAII helper is to free patched shader bytecodes when the function returns.
+	thread_local LocalVector<Vector<uint8_t>> shader_bytecodes;
+	struct ClearShaderBytecodes {
+		~ClearShaderBytecodes() {
+			shader_bytecodes.clear();
+		}
+	} clear_shader_bytecodes;
+
+	thread_local LocalVector<LPCWSTR> export_names;
+	export_names.clear();
+
+	CD3DX12_STATE_OBJECT_DESC state_object_desc(D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE);
+	uint32_t max_payload_size_in_bytes = 0;
+	uint32_t max_attribute_size_in_bytes = 0;
+
+	static_assert(sizeof(char16_t) == sizeof(wchar_t)); // For export names.
+
+	for (uint32_t i = 0; i < p_shaders.size(); i++) {
+		const PipelineShader &shader = p_shaders[i];
+		const ShaderInfo *shader_info_in = (const ShaderInfo *)shader.shader.id;
+
+		const Vector<uint8_t> *shader_bytecode_ptr = shader_info_in->stages_bytecode.getptr(shader.shader_stage);
+		ERR_FAIL_NULL_V(shader_bytecode_ptr, RaytracingPipelineID());
+
+		Vector<uint8_t> shader_bytecode = *shader_bytecode_ptr;
+		bool ok = _shader_apply_specialization_constants(shader_info_in, shader.specialization_constants, shader.shader_stage, shader_bytecode);
+		ERR_FAIL_COND_V(!ok, RaytracingPipelineID());
+
+		CD3DX12_DXIL_LIBRARY_SUBOBJECT *dxil_library_subobject = state_object_desc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+
+		D3D12_SHADER_BYTECODE d3d12_shader_bytecode = { shader_bytecode.ptr(), (SIZE_T)shader_bytecode.size() };
+		dxil_library_subobject->SetDXILLibrary(&d3d12_shader_bytecode);
+		shader_bytecodes.push_back(std::move(shader_bytecode)); // Store the shader bytecode to prevent stale pointers.
+
+		String export_name = vformat("dxil_library_subobject_%d", i);
+		dxil_library_subobject->DefineExport((LPCWSTR)export_name.utf16().ptr(), L"main");
+
+		const ShaderInfo::ShaderConfig *shader_config = shader_info_in->stages_shader_config.getptr(shader.shader_stage);
+		if (shader_config) {
+			max_payload_size_in_bytes = MAX(max_payload_size_in_bytes, shader_config->payload_size_in_bytes);
+			max_attribute_size_in_bytes = MAX(max_attribute_size_in_bytes, shader_config->attribute_size_in_bytes);
+		}
+
+		export_names.push_back(((const D3D12_DXIL_LIBRARY_DESC &)*dxil_library_subobject).pExports[0].Name);
+	}
+
+	thread_local LocalVector<LPCWSTR> shader_identifier_names;
+	shader_identifier_names.clear();
+
+	for (uint32_t i = 0; i < p_raygen_shader_indices.size(); i++) {
+		shader_identifier_names.push_back(export_names[p_raygen_shader_indices[i]]);
+	}
+
+	for (uint32_t i = 0; i < p_miss_shader_indices.size(); i++) {
+		shader_identifier_names.push_back(export_names[p_miss_shader_indices[i]]);
+	}
+
+	for (uint32_t i = 0; i < p_hit_groups.size(); i++) {
+		const HitGroup &hit_group = p_hit_groups[i];
+
+		CD3DX12_HIT_GROUP_SUBOBJECT *hit_group_subobject = state_object_desc.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
+
+		String hit_group_export_name = vformat("hit_group_subobject_%d", i);
+		hit_group_subobject->SetHitGroupExport((LPCWSTR)hit_group_export_name.utf16().ptr());
+		hit_group_subobject->SetHitGroupType(hit_group.intersection_shader_index != UINT32_MAX ? D3D12_HIT_GROUP_TYPE_PROCEDURAL_PRIMITIVE : D3D12_HIT_GROUP_TYPE_TRIANGLES);
+
+		if (hit_group.closest_hit_shader_index != UINT32_MAX) {
+			hit_group_subobject->SetClosestHitShaderImport(export_names[hit_group.closest_hit_shader_index]);
+		}
+
+		if (hit_group.any_hit_shader_index != UINT32_MAX) {
+			hit_group_subobject->SetAnyHitShaderImport(export_names[hit_group.any_hit_shader_index]);
+		}
+
+		if (hit_group.intersection_shader_index != UINT32_MAX) {
+			hit_group_subobject->SetIntersectionShaderImport(export_names[hit_group.intersection_shader_index]);
+		}
+
+		shader_identifier_names.push_back(((const D3D12_HIT_GROUP_DESC &)*hit_group_subobject).HitGroupExport);
+	}
+
+	CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT shader_config_subobject(state_object_desc);
+	shader_config_subobject.Config(max_payload_size_in_bytes, max_attribute_size_in_bytes);
+
+	CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT pipeline_config_subobject(state_object_desc);
+	pipeline_config_subobject.Config(p_max_trace_recursion_depth);
+
+	const ShaderInfo *layout_defining_shader_info = (const ShaderInfo *)p_layout_defining_shader.id;
+	CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT root_signature_subobject(state_object_desc);
+	root_signature_subobject.SetRootSignature(layout_defining_shader_info->root_signature.Get());
+
+	ComPtr<ID3D12Device5> device_5;
+	device->QueryInterface(device_5.GetAddressOf());
+
+	ComPtr<ID3D12StateObject> state_object;
+	HRESULT hr = device_5->CreateStateObject(state_object_desc, IID_PPV_ARGS(state_object.GetAddressOf()));
+	ERR_FAIL_COND_V_MSG(FAILED(hr), RaytracingPipelineID(), "CreateStateObject failed with error " + vformat("0x%08ux", (uint64_t)hr) + ".");
+
+	ComPtr<ID3D12StateObjectProperties> state_object_properties;
+	state_object->QueryInterface(state_object_properties.GetAddressOf());
+
+	TightLocalVector<const void *> shader_identifiers;
+	shader_identifiers.resize(shader_identifier_names.size());
+
+	for (uint32_t i = 0; i < shader_identifier_names.size(); i++) {
+		shader_identifiers[i] = state_object_properties->GetShaderIdentifier(shader_identifier_names[i]);
+	}
+
+	// Bookkeep.
+	RaytracingPipelineInfo *raytracing_pipeline_info = VersatileResource::allocate<RaytracingPipelineInfo>(resources_allocator);
+	raytracing_pipeline_info->pso = std::move(state_object);
+	raytracing_pipeline_info->layout_defining_shader_info = layout_defining_shader_info;
+	raytracing_pipeline_info->shader_identifiers = std::move(shader_identifiers);
+
+	return RaytracingPipelineID(raytracing_pipeline_info);
 }
 
 void RenderingDeviceDriverD3D12::raytracing_pipeline_free(RDD::RaytracingPipelineID p_pipeline) {
-	ERR_FAIL_MSG("Ray tracing is not currently supported by the D3D12 driver.");
+	const RaytracingPipelineInfo *raytracing_pipeline_info = (const RaytracingPipelineInfo *)p_pipeline.id;
+	VersatileResource::free(resources_allocator, raytracing_pipeline_info);
 }
 
 bool RenderingDeviceDriverD3D12::raytracing_pipeline_get_shader_group_handles(RaytracingPipelineID p_pipeline, uint32_t p_group_index_offset, VectorView<uint32_t> p_group_indices, uint8_t *r_data, uint32_t p_data_stride_bytes) {
-	ERR_FAIL_V_MSG(false, "Ray tracing is not currently supported by the D3D12 driver.");
+	const RaytracingPipelineInfo *raytracing_pipeline_info = (const RaytracingPipelineInfo *)p_pipeline.id;
+
+	for (uint32_t i = 0; i < p_group_indices.size(); i++) {
+		uint32_t group_index = p_group_index_offset + p_group_indices[i];
+#ifdef DEBUG_ENABLED
+		ERR_FAIL_COND_V_MSG(group_index >= raytracing_pipeline_info->shader_identifiers.size(), false, "Shader group index is out of bounds.");
+#endif
+		memcpy(r_data, raytracing_pipeline_info->shader_identifiers[group_index], D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+		r_data += p_data_stride_bytes;
+	}
+
+	return true;
 }
 
 // ----- COMMANDS -----
 
 void RenderingDeviceDriverD3D12::command_build_blas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer) {
-	ERR_FAIL_MSG("Ray tracing is not currently supported by the D3D12 driver.");
+	CommandBufferInfo *cmd_buffer_info = (CommandBufferInfo *)p_cmd_buffer.id;
+
+	AccelerationStructureInfo *acceleration_structure_info = (AccelerationStructureInfo *)p_acceleration_structure.id;
+	const BufferInfo *scratch_buffer_info = (const BufferInfo *)p_scratch_buffer.id;
+
+	acceleration_structure_info->build_desc.ScratchAccelerationStructureData = scratch_buffer_info->gpu_virtual_address;
+
+	if (!barrier_capabilities.enhanced_barriers_supported) {
+		for (BufferInfo *input_buffer_info : acceleration_structure_info->input_buffer_infos) {
+			_resource_transition_batch(cmd_buffer_info, input_buffer_info, 0, 1, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		}
+
+		BufferInfo *acceleration_structure_buffer_info = (BufferInfo *)acceleration_structure_info->buffer.id;
+		_resource_transition_batch(cmd_buffer_info, acceleration_structure_buffer_info, 0, 1, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+		_resource_transitions_flush(cmd_buffer_info);
+	}
+
+	cmd_buffer_info->cmd_list_4->BuildRaytracingAccelerationStructure(&acceleration_structure_info->build_desc, 0, nullptr);
 }
 
-void RenderingDeviceDriverD3D12::command_build_tlas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer, BufferID p_instance_buffer, uint32_t p_instance_offset, uint32_t p_instance_count) {
-	ERR_FAIL_MSG("Ray tracing is not currently supported by the D3D12 driver.");
+// Mariner E5a: in-place refit of a BLAS created with ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT (same topology, new
+// vertex positions).
+void RenderingDeviceDriverD3D12::command_update_blas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer) {
+	CommandBufferInfo *cmd_buffer_info = (CommandBufferInfo *)p_cmd_buffer.id;
+
+	AccelerationStructureInfo *acceleration_structure_info = (AccelerationStructureInfo *)p_acceleration_structure.id;
+	const BufferInfo *scratch_buffer_info = (const BufferInfo *)p_scratch_buffer.id;
+	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC &desc = acceleration_structure_info->build_desc;
+	ERR_FAIL_COND_MSG(!(desc.Inputs.Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE), "BLAS refit requires ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT.");
+
+	desc.ScratchAccelerationStructureData = scratch_buffer_info->gpu_virtual_address;
+
+	if (!barrier_capabilities.enhanced_barriers_supported) {
+		for (BufferInfo *input_buffer_info : acceleration_structure_info->input_buffer_infos) {
+			_resource_transition_batch(cmd_buffer_info, input_buffer_info, 0, 1, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		}
+		BufferInfo *acceleration_structure_buffer_info = (BufferInfo *)acceleration_structure_info->buffer.id;
+		_resource_transition_batch(cmd_buffer_info, acceleration_structure_buffer_info, 0, 1, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+		_resource_transitions_flush(cmd_buffer_info);
+	}
+
+	const D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS flags = desc.Inputs.Flags;
+	desc.Inputs.Flags = flags | D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
+	desc.SourceAccelerationStructureData = desc.DestAccelerationStructureData;
+	cmd_buffer_info->cmd_list_4->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
+	desc.Inputs.Flags = flags;
+	desc.SourceAccelerationStructureData = 0;
+}
+
+void RenderingDeviceDriverD3D12::command_build_tlas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer, BufferID p_instance_buffer, uint32_t p_instance_offset, uint32_t p_instance_count, VectorView<AccelerationStructureID> p_blases) {
+	CommandBufferInfo *cmd_buffer_info = (CommandBufferInfo *)p_cmd_buffer.id;
+
+	AccelerationStructureInfo *acceleration_structure_info = (AccelerationStructureInfo *)p_acceleration_structure.id;
+	const BufferInfo *scratch_buffer_info = (const BufferInfo *)p_scratch_buffer.id;
+	const BufferInfo *instance_buffer_info = (const BufferInfo *)p_instance_buffer.id;
+
+	acceleration_structure_info->build_desc.Inputs.NumDescs = p_instance_count;
+	acceleration_structure_info->build_desc.Inputs.InstanceDescs = instance_buffer_info->gpu_virtual_address + p_instance_offset;
+	acceleration_structure_info->build_desc.ScratchAccelerationStructureData = scratch_buffer_info->gpu_virtual_address;
+
+	if (!barrier_capabilities.enhanced_barriers_supported) {
+		for (uint32_t i = 0; i < p_blases.size(); i++) {
+			AccelerationStructureInfo *blas_info = (AccelerationStructureInfo *)p_blases[i].id;
+			BufferInfo *blas_buffer_info = (BufferInfo *)blas_info->buffer.id;
+			_resource_transition_batch(cmd_buffer_info, blas_buffer_info, 0, 1, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+		}
+
+		BufferInfo *acceleration_structure_buffer_info = (BufferInfo *)acceleration_structure_info->buffer.id;
+		_resource_transition_batch(cmd_buffer_info, acceleration_structure_buffer_info, 0, 1, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+		_resource_transitions_flush(cmd_buffer_info);
+	}
+
+	cmd_buffer_info->cmd_list_4->BuildRaytracingAccelerationStructure(&acceleration_structure_info->build_desc, 0, nullptr);
 }
 
 void RenderingDeviceDriverD3D12::command_bind_raytracing_pipeline(CommandBufferID p_cmd_buffer, RaytracingPipelineID p_pipeline) {
-	ERR_FAIL_MSG("Ray tracing is not currently supported by the D3D12 driver.");
+	CommandBufferInfo *cmd_buf_info = (CommandBufferInfo *)p_cmd_buffer.id;
+
+	const RaytracingPipelineInfo *pipeline_info = (const RaytracingPipelineInfo *)p_pipeline.id;
+	const ShaderInfo *shader_info_in = pipeline_info->layout_defining_shader_info;
+
+	if (cmd_buf_info->raytracing_pso != pipeline_info->pso.Get()) {
+		cmd_buf_info->cmd_list_4->SetPipelineState1(pipeline_info->pso.Get());
+
+		cmd_buf_info->graphics_pso = nullptr;
+		cmd_buf_info->compute_pso = nullptr;
+		cmd_buf_info->raytracing_pso = pipeline_info->pso.Get();
+	}
+
+	if (cmd_buf_info->compute_root_signature_crc != shader_info_in->root_signature_crc) {
+		cmd_buf_info->cmd_list->SetComputeRootSignature(shader_info_in->root_signature.Get());
+		cmd_buf_info->compute_root_signature_crc = shader_info_in->root_signature_crc;
+	}
 }
 
 void RenderingDeviceDriverD3D12::command_bind_raytracing_uniform_set(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index) {
-	ERR_FAIL_MSG("Ray tracing is not currently supported by the D3D12 driver.");
+	command_bind_compute_uniform_sets(p_cmd_buffer, VectorView(p_uniform_set), p_shader, p_set_index, 1, 0);
+}
+
+D3D12_GPU_VIRTUAL_ADDRESS_RANGE RenderingDeviceDriverD3D12::_sbt_to_gpu_virtual_address_range(const ShaderBindingTable &p_sbt) {
+	D3D12_GPU_VIRTUAL_ADDRESS_RANGE gpu_virtual_address_range = {};
+	if (p_sbt.buffer) {
+		const BufferInfo *buffer_info = (const BufferInfo *)p_sbt.buffer.id;
+
+		gpu_virtual_address_range.StartAddress = buffer_info->gpu_virtual_address + p_sbt.offset;
+		gpu_virtual_address_range.SizeInBytes = p_sbt.size;
+
+		DEV_ASSERT((gpu_virtual_address_range.StartAddress & (D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1)) == 0 && "Shader binding table address must be aligned to API_TRAIT_SHADER_GROUP_BASE_ALIGNMENT.");
+	}
+	return gpu_virtual_address_range;
+}
+
+D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE RenderingDeviceDriverD3D12::_sbt_to_gpu_virtual_address_range_and_stride(const ShaderBindingTable &p_sbt) {
+	D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE gpu_virtual_address_range_and_stride = {};
+	if (p_sbt.buffer) {
+		const BufferInfo *buffer_info = (const BufferInfo *)p_sbt.buffer.id;
+
+		gpu_virtual_address_range_and_stride.StartAddress = buffer_info->gpu_virtual_address + p_sbt.offset;
+		gpu_virtual_address_range_and_stride.SizeInBytes = p_sbt.size;
+		gpu_virtual_address_range_and_stride.StrideInBytes = p_sbt.stride;
+
+		DEV_ASSERT((gpu_virtual_address_range_and_stride.StartAddress & (D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1)) == 0 && "Shader binding table address must be aligned to API_TRAIT_SHADER_GROUP_BASE_ALIGNMENT.");
+		DEV_ASSERT((gpu_virtual_address_range_and_stride.StrideInBytes & (D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT - 1)) == 0 && "Shader binding table stride must be aligned to API_TRAIT_SHADER_GROUP_HANDLE_ALIGNMENT.");
+	}
+	return gpu_virtual_address_range_and_stride;
 }
 
 void RenderingDeviceDriverD3D12::command_trace_rays(CommandBufferID p_cmd_buffer, const ShaderBindingTable &p_raygen_sbt, const ShaderBindingTable &p_miss_sbt, const ShaderBindingTable &p_hit_sbt, uint32_t p_width, uint32_t p_height, uint32_t p_depth) {
-	ERR_FAIL_MSG("Ray tracing is not currently supported by the D3D12 driver.");
+	CommandBufferInfo *cmd_buffer_info = (CommandBufferInfo *)p_cmd_buffer.id;
+
+	if (!barrier_capabilities.enhanced_barriers_supported) {
+		BufferInfo *hit_sbt_buffer_info = (BufferInfo *)p_hit_sbt.buffer.id;
+		_resource_transition_batch(cmd_buffer_info, hit_sbt_buffer_info, 0, 1, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		_resource_transitions_flush(cmd_buffer_info);
+	}
+
+	D3D12_DISPATCH_RAYS_DESC desc = {};
+	desc.RayGenerationShaderRecord = _sbt_to_gpu_virtual_address_range(p_raygen_sbt);
+	desc.MissShaderTable = _sbt_to_gpu_virtual_address_range_and_stride(p_miss_sbt);
+	desc.HitGroupTable = _sbt_to_gpu_virtual_address_range_and_stride(p_hit_sbt);
+	desc.Width = p_width;
+	desc.Height = p_height;
+	desc.Depth = p_depth;
+	cmd_buffer_info->cmd_list_4->DispatchRays(&desc);
 }
 
 /*****************/
@@ -5854,6 +6557,15 @@ void RenderingDeviceDriverD3D12::set_object_name(ObjectType p_type, ID p_driver_
 			const PipelineInfo *pipeline_info = (const PipelineInfo *)p_driver_id.id;
 			_set_object_name(pipeline_info->pso.Get(), p_name);
 		} break;
+		case OBJECT_TYPE_ACCELERATION_STRUCTURE: {
+			const AccelerationStructureInfo *acceleration_structure_info = (const AccelerationStructureInfo *)p_driver_id.id;
+			const BufferInfo *buffer_info = (const BufferInfo *)acceleration_structure_info->buffer.id;
+			_set_object_name(buffer_info->resource, p_name);
+		} break;
+		case OBJECT_TYPE_RAYTRACING_PIPELINE: {
+			const RaytracingPipelineInfo *pipeline_info = (const RaytracingPipelineInfo *)p_driver_id.id;
+			_set_object_name(pipeline_info->pso.Get(), p_name);
+		} break;
 		default: {
 			DEV_ASSERT(false);
 		}
@@ -5925,7 +6637,43 @@ uint64_t RenderingDeviceDriverD3D12::get_lazily_memory_used() {
 uint64_t RenderingDeviceDriverD3D12::limit_get(Limit p_limit) {
 	uint64_t safe_unbounded = ((uint64_t)1 << 30);
 	if (p_limit >= LIMIT_MAX_TASK_WORKGROUP_COUNT_X && p_limit <= LIMIT_MAX_MESH_PREFERRED_MESH_WORKGROUP_INVOCATIONS) {
-		return 0; // Mariner E7: no mesh shaders on this driver.
+		// Mariner E7b: the fixed limits of D3D12 mesh shaders (tier 1).
+		if (!mesh_shader_capabilities.supported) {
+			return 0;
+		}
+		switch (p_limit) {
+			case LIMIT_MAX_TASK_WORKGROUP_COUNT_X:
+			case LIMIT_MAX_TASK_WORKGROUP_COUNT_Y:
+			case LIMIT_MAX_TASK_WORKGROUP_COUNT_Z:
+			case LIMIT_MAX_MESH_WORKGROUP_COUNT_X:
+			case LIMIT_MAX_MESH_WORKGROUP_COUNT_Y:
+			case LIMIT_MAX_MESH_WORKGROUP_COUNT_Z:
+				return 65535;
+			case LIMIT_MAX_TASK_WORKGROUP_TOTAL_COUNT:
+			case LIMIT_MAX_MESH_WORKGROUP_TOTAL_COUNT:
+				return 1 << 22;
+			case LIMIT_MAX_TASK_WORKGROUP_INVOCATIONS:
+			case LIMIT_MAX_TASK_WORKGROUP_SIZE_X:
+			case LIMIT_MAX_TASK_WORKGROUP_SIZE_Y:
+			case LIMIT_MAX_TASK_WORKGROUP_SIZE_Z:
+			case LIMIT_MAX_MESH_WORKGROUP_INVOCATIONS:
+			case LIMIT_MAX_MESH_WORKGROUP_SIZE_X:
+			case LIMIT_MAX_MESH_WORKGROUP_SIZE_Y:
+			case LIMIT_MAX_MESH_WORKGROUP_SIZE_Z:
+				return 128;
+			case LIMIT_MAX_TASK_PAYLOAD_SIZE:
+				return 16384;
+			case LIMIT_MAX_MESH_OUTPUT_VERTICES:
+			case LIMIT_MAX_MESH_OUTPUT_PRIMITIVES:
+				return 256;
+			case LIMIT_MAX_MESH_SHARED_MEMORY_SIZE:
+				return 28672;
+			case LIMIT_MAX_MESH_PREFERRED_TASK_WORKGROUP_INVOCATIONS:
+			case LIMIT_MAX_MESH_PREFERRED_MESH_WORKGROUP_INVOCATIONS:
+				return MAX(subgroup_capabilities.size, 32u);
+			default:
+				return 0;
+		}
 	}
 	switch (p_limit) {
 		case LIMIT_MAX_BOUND_UNIFORM_SETS:
@@ -6002,6 +6750,14 @@ uint64_t RenderingDeviceDriverD3D12::api_trait_get(ApiTrait p_trait) {
 			return !barrier_capabilities.enhanced_barriers_supported;
 		case API_TRAIT_TEXTURE_OUTPUTS_REQUIRE_CLEARS:
 			return true;
+		case API_TRAIT_ACCELERATION_STRUCTURE_INSTANCE_SIZE:
+			return sizeof(D3D12_RAYTRACING_INSTANCE_DESC);
+		case API_TRAIT_SHADER_GROUP_HANDLE_SIZE:
+			return D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+		case API_TRAIT_SHADER_GROUP_BASE_ALIGNMENT:
+			return D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
+		case API_TRAIT_SHADER_GROUP_HANDLE_ALIGNMENT:
+			return D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT;
 		default:
 			return RenderingDeviceDriver::api_trait_get(p_trait);
 	}
@@ -6021,6 +6777,15 @@ bool RenderingDeviceDriverD3D12::has_feature(Features p_feature) {
 			return false;
 		case SUPPORTS_POINT_SIZE:
 			return false;
+		case SUPPORTS_CLIP_DISTANCE: // Mariner G6: SV_ClipDistance.
+			return true;
+		case SUPPORTS_RAY_QUERY:
+			return raytracing_capabilities.ray_query_supported;
+		case SUPPORTS_RAYTRACING_PIPELINE:
+			return raytracing_capabilities.raytracing_pipeline_supported;
+		case SUPPORTS_MESH_SHADER: // Mariner E7b.
+		case SUPPORTS_MESH_SHADER_INDIRECT_COUNT:
+			return mesh_shader_capabilities.supported;
 		case SUPPORTS_HDR_OUTPUT:
 			return true;
 		default:
@@ -6342,6 +7107,27 @@ Error RenderingDeviceDriverD3D12::_check_capabilities() {
 		shader_capabilities.native_16bit_ops = options4.Native16BitShaderOpsSupported;
 	}
 
+	D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
+	res = device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5));
+	if (SUCCEEDED(res)) {
+		raytracing_capabilities.ray_query_supported = options5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_1;
+		raytracing_capabilities.raytracing_pipeline_supported = options5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_0;
+	}
+
+	// Mariner E7b: mesh shaders (tier 1, shader model 6.5); their HLSL is compiled by DXC.
+	D3D12_FEATURE_DATA_D3D12_OPTIONS7 options7 = {};
+	res = device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &options7, sizeof(options7));
+	if (SUCCEEDED(res) && options7.MeshShaderTier >= D3D12_MESH_SHADER_TIER_1 && shader_capabilities.shader_model >= D3D_SHADER_MODEL_6_5) {
+#if NIR_ENABLED
+		mesh_shader_capabilities.supported = RenderingShaderContainerD3D12::is_dxc_available();
+		if (!mesh_shader_capabilities.supported) {
+			print_verbose("D3D12: the device supports mesh shaders, but dxcompiler.dll (DirectX Shader Compiler) wasn't found; mesh shaders are disabled.");
+		}
+#else
+		mesh_shader_capabilities.supported = true; // Shaders are baked.
+#endif
+	}
+
 	D3D12_FEATURE_DATA_D3D12_OPTIONS6 options6 = {};
 	res = device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6, &options6, sizeof(options6));
 	if (SUCCEEDED(res)) {
@@ -6486,6 +7272,11 @@ static Error create_command_signature(ID3D12Device *device, D3D12_INDIRECT_ARGUM
 
 Error RenderingDeviceDriverD3D12::_initialize_frames(uint32_t p_frame_count) {
 	uint32_t num_resource_descriptors = GLOBAL_GET("rendering/rendering_device/d3d12/max_resource_descriptors");
+	if (bool(GLOBAL_DEF_RST("rendering/raytracing/scene_acceleration_structures", false))) {
+		// Mariner E5d: the raytracing scene's sets hold thousands of descriptors each (geometry buffers, bindless
+		// textures, per viewport and shader): the shader-visible heap gets the size every resource binding tier allows.
+		num_resource_descriptors = MAX(num_resource_descriptors, 1000000u);
+	}
 	uint32_t num_sampler_descriptors = GLOBAL_GET("rendering/rendering_device/d3d12/max_sampler_descriptors");
 
 	Error err = resource_descriptor_heap.initialize(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, num_resource_descriptors, true);

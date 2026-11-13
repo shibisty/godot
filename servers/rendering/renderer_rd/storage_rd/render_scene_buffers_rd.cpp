@@ -34,6 +34,7 @@
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "servers/rendering/renderer_compositor.h"
+#include "servers/rendering/renderer_rd/effects/hiz_pyramid.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/rendering_device_binds.h"
 #include "servers/rendering/rendering_server.h" // IWYU pragma: keep // Needed to bind RSE enums.
@@ -85,12 +86,15 @@ void RenderSceneBuffersRD::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_use_debanding"), &RenderSceneBuffersRD::get_use_debanding);
 
 	// Raytracing scene (Viewport.raytracing_scene_enabled).
+	ClassDB::bind_method(D_METHOD("get_hiz", "update"), &RenderSceneBuffersRD::get_hiz, DEFVAL(false)); // Mariner E13b.
+	ClassDB::bind_method(D_METHOD("get_hiz_mipmap_count"), &RenderSceneBuffersRD::get_hiz_mipmap_count);
 	ClassDB::bind_method(D_METHOD("has_raytracing_scene"), &RenderSceneBuffersRD::has_raytracing_scene);
 	ClassDB::bind_method(D_METHOD("get_raytracing_tlas"), &RenderSceneBuffersRD::get_raytracing_tlas);
 	ClassDB::bind_method(D_METHOD("get_raytracing_instance_buffer"), &RenderSceneBuffersRD::get_raytracing_instance_buffer);
 	ClassDB::bind_method(D_METHOD("get_raytracing_material_buffer"), &RenderSceneBuffersRD::get_raytracing_material_buffer);
 	ClassDB::bind_method(D_METHOD("get_raytracing_instance_count"), &RenderSceneBuffersRD::get_raytracing_instance_count);
 	ClassDB::bind_method(D_METHOD("get_raytracing_textures"), &RenderSceneBuffersRD::get_raytracing_textures);
+	ClassDB::bind_method(D_METHOD("get_raytracing_geometry_buffers"), &RenderSceneBuffersRD::get_raytracing_geometry_buffers); // Mariner E5d.
 	ClassDB::bind_method(D_METHOD("get_raytracing_texture_uniform_set", "shader", "set"), &RenderSceneBuffersRD::get_raytracing_texture_uniform_set);
 
 	// Late opaque pass (render_mode opaque_late).
@@ -296,8 +300,27 @@ TypedArray<RID> RenderSceneBuffersRD::get_raytracing_textures() const {
 	return ret;
 }
 
+TypedArray<RID> RenderSceneBuffersRD::get_raytracing_geometry_buffers() const {
+	TypedArray<RID> ret;
+	ret.resize(raytracing_scene.geometry_buffers.size());
+	for (int i = 0; i < raytracing_scene.geometry_buffers.size(); i++) {
+		ret[i] = raytracing_scene.geometry_buffers[i];
+	}
+	return ret;
+}
+
+RD::Uniform RenderSceneBuffersRD::get_raytracing_geometry_buffers_uniform(uint32_t p_binding) const {
+	RD::Uniform u;
+	u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+	u.binding = p_binding;
+	for (const RID &rid : raytracing_scene.geometry_buffers) {
+		u.append_id(rid);
+	}
+	return u;
+}
+
 RID RenderSceneBuffersRD::get_raytracing_texture_uniform_set(RID p_shader, uint32_t p_set) {
-	ERR_FAIL_COND_V_MSG(!has_raytracing_scene(), RID(), "No raytracing scene this frame (enable Viewport.raytracing_scene_enabled and the rendering/raytracing/scene_acceleration_structures project setting; requires Vulkan with ray query support).");
+	ERR_FAIL_COND_V_MSG(!has_raytracing_scene(), RID(), "No raytracing scene this frame (enable Viewport.raytracing_scene_enabled and the rendering/raytracing/scene_acceleration_structures project setting; requires Vulkan or Direct3D 12 with ray query support).");
 	ERR_FAIL_COND_V(raytracing_scene.textures.is_empty(), RID());
 	RD *rd = RD::get_singleton();
 	RaytracingScene &rts = raytracing_scene;
@@ -382,6 +405,42 @@ void RenderSceneBuffersRD::update_samplers() {
 	samplers = material_storage->samplers_rd_allocate(computed_mipmap_bias, anisotropic_filtering_level);
 }
 
+// Mariner E13b: the depth pyramid.
+
+uint32_t RenderSceneBuffersRD::get_hiz_mipmap_count() const {
+	uint32_t count = 1;
+	for (Size2i s = internal_size; s.width > 1 || s.height > 1; s = Size2i(MAX(s.width / 2, 1), MAX(s.height / 2, 1))) {
+		count++;
+	}
+	return count;
+}
+
+RID RenderSceneBuffersRD::get_hiz(bool p_update) {
+	RendererRD::HiZPyramid *pyramid = RendererRD::HiZPyramid::get_singleton();
+	ERR_FAIL_NULL_V_MSG(pyramid, RID(), "The depth pyramid needs a renderer with compute shaders (Forward+ or Mobile).");
+	ERR_FAIL_COND_V(!has_depth_texture(), RID()); // (Its own texture is storage, also where the render buffers are not.)
+	const StringName name = SNAME("hiz");
+	const uint32_t mipmaps = get_hiz_mipmap_count();
+	if (!has_texture(RB_SCOPE_BUFFERS, name)) {
+		create_texture(RB_SCOPE_BUFFERS, name, RD::DATA_FORMAT_R32G32_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT, RD::TEXTURE_SAMPLES_1, internal_size, view_count, mipmaps);
+		hiz_frame = UINT64_MAX;
+	}
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	if (p_update || hiz_frame != frame) {
+		hiz_frame = frame;
+		for (uint32_t v = 0; v < view_count; v++) {
+			Vector<RID> levels;
+			Vector<Size2i> sizes;
+			for (uint32_t m = 0; m < mipmaps; m++) {
+				levels.push_back(get_texture_slice(RB_SCOPE_BUFFERS, name, v, m));
+				sizes.push_back(get_texture_slice_size(RB_SCOPE_BUFFERS, name, m));
+			}
+			pyramid->process(get_depth_texture(v), levels, sizes);
+		}
+	}
+	return get_texture(RB_SCOPE_BUFFERS, name);
+}
+
 void RenderSceneBuffersRD::cleanup() {
 	// Free our data buffers (but don't destroy them)
 	for (KeyValue<StringName, Ref<RenderBufferCustomDataRD>> &E : data_buffers) {
@@ -393,6 +452,7 @@ void RenderSceneBuffersRD::cleanup() {
 		free_named_texture(E.value);
 	}
 	named_textures.clear();
+	hiz_frame = UINT64_MAX; // Mariner E13b.
 
 	free_raytracing_scene();
 	free_pathtracing();

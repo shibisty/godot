@@ -263,6 +263,29 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 		}
 		ubo.slope[3] = cg.saturation;
 		ubo.offset[3] = cg.gamut_mapping ? 1.0 : 0.0;
+		// Mariner F3b.
+		const float tint_luminance = MAX(cg.night_vision_tint.r * 0.2126f + cg.night_vision_tint.g * 0.7152f + cg.night_vision_tint.b * 0.0722f, 1e-4f);
+		ubo.night_vision[0] = cg.night_vision_tint.r / tint_luminance;
+		ubo.night_vision[1] = cg.night_vision_tint.g / tint_luminance;
+		ubo.night_vision[2] = cg.night_vision_tint.b / tint_luminance;
+		ubo.night_vision[3] = cg.night_vision;
+		ubo.midtones[3] = Math::log2(MAX(cg.night_vision_start, 1e-8f));
+		ubo.power[3] = Math::log2(MAX(MIN(cg.night_vision_end, cg.night_vision_start * 0.999f), 1e-9f));
+		// Mariner F3c.
+		const Vector3 rows[3] = { cg.mixer_red, cg.mixer_green, cg.mixer_blue };
+		float *row_dst[3] = { ubo.mixer_red, ubo.mixer_green, ubo.mixer_blue };
+		for (int i = 0; i < 3; i++) {
+			row_dst[i][0] = rows[i].x;
+			row_dst[i][1] = rows[i].y;
+			row_dst[i][2] = rows[i].z;
+			ubo.curves_gamma[i] = cg.curves_shadow_gamma[i];
+			ubo.curves_mid[i] = cg.curves_mid_point[i];
+			ubo.curves_scale[i] = cg.curves_highlight_scale[i];
+		}
+		ubo.mixer_red[3] = cg.contrast;
+		ubo.mixer_green[3] = cg.vibrance;
+		const bool curves = !cg.curves_shadow_gamma.is_equal_approx(Vector3(1, 1, 1)) || !cg.curves_highlight_scale.is_equal_approx(Vector3(1, 1, 1));
+		ubo.mixer_blue[3] = curves ? 1.0 : 0.0;
 		RD::get_singleton()->buffer_update(color_grading_buffer, 0, sizeof(ColorGradingUBO), &ubo);
 	}
 

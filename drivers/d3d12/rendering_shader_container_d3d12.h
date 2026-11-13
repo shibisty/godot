@@ -40,7 +40,7 @@
 
 #include "drivers/d3d12/d3d12_godot_nir_bridge.h"
 
-#define D3D12_BITCODE_OFFSETS_NUM_STAGES 3
+#define D3D12_BITCODE_OFFSETS_NUM_STAGES 8
 
 #if NIR_ENABLED
 struct nir_shader;
@@ -60,6 +60,13 @@ enum ResourceClass {
 };
 
 struct RenderingDXIL {
+	static void patch_specialization_constant(
+			RenderingDeviceCommons::PipelineSpecializationConstantType p_type,
+			const void *p_value,
+			const uint64_t p_bit_offset,
+			Vector<uint8_t> &r_bytecode,
+			bool p_is_first_patch);
+
 	static uint32_t patch_specialization_constant(
 			RenderingDeviceCommons::PipelineSpecializationConstantType p_type,
 			const void *p_value,
@@ -77,13 +84,23 @@ public:
 	static constexpr uint32_t REQUIRED_SHADER_MODEL = 0x62; // D3D_SHADER_MODEL_6_2
 	static constexpr uint32_t ROOT_CONSTANT_REGISTER = GODOT_NIR_DESCRIPTOR_SET_MULTIPLIER * (RenderingDeviceCommons::MAX_UNIFORM_SETS + 1);
 	static constexpr uint32_t RUNTIME_DATA_REGISTER = GODOT_NIR_DESCRIPTOR_SET_MULTIPLIER * (RenderingDeviceCommons::MAX_UNIFORM_SETS + 2);
-	static constexpr uint32_t FORMAT_VERSION = 1;
+	// Mariner E5d: runtime-sized descriptor arrays (`texture2D textures[]`) get this many descriptors (the unused
+	// ones are null), as many as on Vulkan (RenderingDeviceDriverVulkan::MAX_UNBOUNDED_DESCRIPTOR_COUNT).
+	static constexpr uint32_t UNBOUNDED_DESCRIPTOR_COUNT = 16384;
+	static constexpr uint32_t FORMAT_VERSION = 3; // Mariner: ray tracing shader configs (PR #118654), storage buffer arrays; E7b: mesh pipelines.
 	static constexpr uint32_t SHADER_STAGES_BIT_OFFSET_INDICES[RenderingDeviceCommons::SHADER_STAGE_MAX] = {
 		0, // SHADER_STAGE_VERTEX
 		1, // SHADER_STAGE_FRAGMENT
 		UINT32_MAX, // SHADER_STAGE_TESSELATION_CONTROL
 		UINT32_MAX, // SHADER_STAGE_TESSELATION_EVALUATION
 		2, // SHADER_STAGE_COMPUTE
+		3, // SHADER_STAGE_RAYGEN,
+		4, // SHADER_STAGE_ANY_HIT
+		5, // SHADER_STAGE_CLOSEST_HIT
+		6, // SHADER_STAGE_MISS
+		7, // SHADER_STAGE_INTERSECTION
+		0, // SHADER_STAGE_TASK (Mariner E7b: compiled by DXC, no specialization constant patching; the vertex slot is unused in mesh pipelines).
+		0, // SHADER_STAGE_MESH
 	};
 
 	struct ReflectionBindingSetDataD3D12 {
@@ -106,6 +123,11 @@ public:
 		uint64_t stages_bit_offsets[D3D12_BITCODE_OFFSETS_NUM_STAGES] = {};
 	};
 
+	struct ShaderConfigDataD3D12 {
+		uint32_t payload_size_in_bytes = 0;
+		uint32_t attribute_size_in_bytes = 0;
+	};
+
 protected:
 	struct ReflectionDataD3D12 {
 		uint32_t spirv_specialization_constants_ids_mask = 0;
@@ -125,11 +147,13 @@ protected:
 	Vector<ReflectionSpecializationDataD3D12> reflection_specialization_data_d3d12;
 	Vector<uint8_t> root_signature_bytes;
 	uint32_t root_signature_crc = 0;
+	Vector<ShaderConfigDataD3D12> shader_config_data_d3d12;
 
 #if NIR_ENABLED
-	bool _convert_spirv_to_nir(Span<ReflectShaderStage> p_spirv, const nir_shader_compiler_options *p_compiler_options, HashMap<int, nir_shader *> &r_stages_nir_shaders, Vector<RenderingDeviceCommons::ShaderStage> &r_stages, BitField<RenderingDeviceCommons::ShaderStage> &r_stages_processed);
+	bool _convert_spirv_to_nir(Span<ReflectShaderStage> p_spirv, const nir_shader_compiler_options *p_compiler_options, HashMap<int, nir_shader *> &r_stages_nir_shaders, Vector<RenderingDeviceCommons::ShaderStage> &r_stages, BitField<RenderingDeviceCommons::ShaderStage> &r_stages_processed, Vector<ShaderConfigDataD3D12> &r_shader_configs);
 	bool _convert_nir_to_dxil(const HashMap<int, nir_shader *> &p_stages_nir_shaders, BitField<RenderingDeviceCommons::ShaderStage> p_stages_processed, HashMap<RenderingDeviceCommons::ShaderStage, Vector<uint8_t>> &r_dxil_blobs);
-	bool _convert_spirv_to_dxil(Span<ReflectShaderStage> p_spirv, HashMap<RenderingDeviceCommons::ShaderStage, Vector<uint8_t>> &r_dxil_blobs, Vector<RenderingDeviceCommons::ShaderStage> &r_stages, BitField<RenderingDeviceCommons::ShaderStage> &r_stages_processed);
+	bool _convert_spirv_to_dxil(Span<ReflectShaderStage> p_spirv, HashMap<RenderingDeviceCommons::ShaderStage, Vector<uint8_t>> &r_dxil_blobs, Vector<RenderingDeviceCommons::ShaderStage> &r_stages, BitField<RenderingDeviceCommons::ShaderStage> &r_stages_processed, Vector<ShaderConfigDataD3D12> &r_shader_configs);
+	bool _convert_spirv_to_dxil_dxc(Span<ReflectShaderStage> p_spirv, HashMap<RenderingDeviceCommons::ShaderStage, Vector<uint8_t>> &r_dxil_blobs, Vector<RenderingDeviceCommons::ShaderStage> &r_stages, BitField<RenderingDeviceCommons::ShaderStage> &r_stages_processed, Vector<ShaderConfigDataD3D12> &r_shader_configs);
 	bool _generate_root_signature(BitField<RenderingDeviceCommons::ShaderStage> p_stages_processed);
 
 	// GodotNirCallbacks.
@@ -164,7 +188,11 @@ public:
 		Vector<ReflectionSpecializationDataD3D12> reflection_specialization_data_d3d12;
 		Vector<uint8_t> root_signature_bytes;
 		uint32_t root_signature_crc = 0;
+		Vector<ShaderConfigDataD3D12> shader_config_data_d3d12;
 	};
+
+	// Mariner E7b: dxcompiler.dll could be loaded (mesh pipelines need it).
+	static bool is_dxc_available();
 
 	RenderingShaderContainerD3D12();
 	RenderingShaderContainerD3D12(void *p_lib_d3d12);

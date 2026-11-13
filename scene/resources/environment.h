@@ -278,6 +278,19 @@ private:
 	Vector3 color_grading_power = Vector3(1, 1, 1);
 	float color_grading_saturation = 1.0;
 	bool color_grading_gamut_mapping = true;
+	float color_grading_night_vision = 0.0;
+	Color color_grading_night_vision_tint = Color(0.70, 0.85, 1.35);
+	float color_grading_night_vision_start = 0.05;
+	float color_grading_night_vision_end = 0.0005;
+	// Mariner F3c.
+	Vector3 color_grading_mixer_red = Vector3(1, 0, 0);
+	Vector3 color_grading_mixer_green = Vector3(0, 1, 0);
+	Vector3 color_grading_mixer_blue = Vector3(0, 0, 1);
+	float color_grading_contrast = 1.0;
+	float color_grading_vibrance = 1.0;
+	Vector3 color_grading_curves_shadow_gamma = Vector3(1, 1, 1);
+	Vector3 color_grading_curves_mid_point = Vector3(0.18, 0.18, 0.18);
+	Vector3 color_grading_curves_highlight_scale = Vector3(1, 1, 1);
 	void _update_color_grading();
 
 	// Path tracing (Mariner E5c)
@@ -308,6 +321,20 @@ private:
 	float ddgi_sea_level = 0.0;
 	Color ddgi_sea_color = Color(0.02, 0.08, 0.1);
 	void _update_ddgi();
+
+	// Overhead map (Mariner G1a).
+	bool overhead_map_enabled = false;
+	float overhead_map_size = 512.0;
+	float overhead_map_height = 256.0;
+	int overhead_map_resolution = 1024;
+	uint32_t overhead_map_cull_mask = 0xFFFFF;
+	float overhead_map_sky_occlusion = 1.0;
+	float overhead_map_sky_occlusion_radius = 16.0;
+	float overhead_map_bias = 0.3;
+	void _update_overhead_map();
+
+	float wetness = 0.0; // Mariner G4.
+	float snow = 0.0; // Mariner G4b.
 
 protected:
 	static void _bind_methods();
@@ -577,6 +604,31 @@ public:
 	float get_color_grading_saturation() const;
 	void set_color_grading_gamut_mapping(bool p_value);
 	bool is_color_grading_gamut_mapping() const;
+	void set_color_grading_night_vision(float p_value);
+	float get_color_grading_night_vision() const;
+	void set_color_grading_night_vision_tint(const Color &p_value);
+	Color get_color_grading_night_vision_tint() const;
+	void set_color_grading_night_vision_start(float p_value);
+	float get_color_grading_night_vision_start() const;
+	void set_color_grading_night_vision_end(float p_value);
+	float get_color_grading_night_vision_end() const;
+	// Mariner F3c.
+	void set_color_grading_mixer_red(const Vector3 &p_value);
+	Vector3 get_color_grading_mixer_red() const;
+	void set_color_grading_mixer_green(const Vector3 &p_value);
+	Vector3 get_color_grading_mixer_green() const;
+	void set_color_grading_mixer_blue(const Vector3 &p_value);
+	Vector3 get_color_grading_mixer_blue() const;
+	void set_color_grading_contrast(float p_value);
+	float get_color_grading_contrast() const;
+	void set_color_grading_vibrance(float p_value);
+	float get_color_grading_vibrance() const;
+	void set_color_grading_curves_shadow_gamma(const Vector3 &p_value);
+	Vector3 get_color_grading_curves_shadow_gamma() const;
+	void set_color_grading_curves_mid_point(const Vector3 &p_value);
+	Vector3 get_color_grading_curves_mid_point() const;
+	void set_color_grading_curves_highlight_scale(const Vector3 &p_value);
+	Vector3 get_color_grading_curves_highlight_scale() const;
 
 	// Path tracing (Mariner E5c)
 	void set_pathtracing_enabled(bool p_enabled);
@@ -627,6 +679,30 @@ public:
 	float get_ddgi_sea_level() const;
 	void set_ddgi_sea_color(const Color &p_color);
 	Color get_ddgi_sea_color() const;
+
+	// Wetness of the world (Mariner G4).
+	void set_wetness(float p_wetness);
+	float get_wetness() const;
+	void set_snow(float p_snow); // Mariner G4b.
+	float get_snow() const;
+
+	// Overhead map (Mariner G1a).
+	void set_overhead_map_enabled(bool p_enabled);
+	bool is_overhead_map_enabled() const;
+	void set_overhead_map_size(float p_size);
+	float get_overhead_map_size() const;
+	void set_overhead_map_height(float p_height);
+	float get_overhead_map_height() const;
+	void set_overhead_map_resolution(int p_resolution);
+	int get_overhead_map_resolution() const;
+	void set_overhead_map_cull_mask(uint32_t p_mask);
+	uint32_t get_overhead_map_cull_mask() const;
+	void set_overhead_map_sky_occlusion(float p_amount);
+	float get_overhead_map_sky_occlusion() const;
+	void set_overhead_map_sky_occlusion_radius(float p_radius);
+	float get_overhead_map_sky_occlusion_radius() const;
+	void set_overhead_map_bias(float p_bias);
+	float get_overhead_map_bias() const;
 
 	Environment();
 	~Environment();

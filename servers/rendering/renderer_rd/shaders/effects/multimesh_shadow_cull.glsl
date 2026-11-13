@@ -104,6 +104,15 @@ params;
 
 #define OCCLUSION_MAX_SAMPLES 512
 
+// The planes are tested one by one with constant indices: on D3D12 push constants are root constants, which can't be
+// indexed dynamically (DXIL).
+bool outside_planes(vec3 p_center, float p_radius) {
+	return dot(params.planes[0].xyz, p_center) + params.planes[0].w < -p_radius ||
+			dot(params.planes[1].xyz, p_center) + params.planes[1].w < -p_radius ||
+			dot(params.planes[2].xyz, p_center) + params.planes[2].w < -p_radius ||
+			dot(params.planes[3].xyz, p_center) + params.planes[3].w < -p_radius;
+}
+
 bool is_occluded(SectionData p_section, mat4 p_instance) {
 	mat4 view = transpose(mat4(p_section.view_rows[0], p_section.view_rows[1], p_section.view_rows[2], vec4(0.0, 0.0, 0.0, 1.0)));
 	mat4 view_from_instance = view * p_instance;
@@ -244,10 +253,8 @@ void main() {
 		vec3 center = vec3(dot(r0, c), dot(r1, c), dot(r2, c));
 		float scale = max(length(vec3(r0.x, r1.x, r2.x)), max(length(vec3(r0.y, r1.y, r2.y)), length(vec3(r0.z, r1.z, r2.z))));
 		float radius = params.sphere.w * scale;
-		for (uint p = 0; p < 4; p++) {
-			if (dot(params.planes[p].xyz, center) + params.planes[p].w < -radius) {
-				return;
-			}
+		if (outside_planes(center, radius)) {
+			return;
 		}
 
 		if ((flags & SECTION_OCCLUSION) != 0) {
@@ -300,10 +307,8 @@ void main() {
 		vec3 center = vec3(dot(r0, c), dot(r1, c), dot(r2, c));
 		float scale = max(length(vec3(r0.x, r1.x, r2.x)), max(length(vec3(r0.y, r1.y, r2.y)), length(vec3(r0.z, r1.z, r2.z))));
 		float radius = params.sphere.w * scale;
-		for (uint p = 0; p < 4; p++) {
-			if (dot(params.planes[p].xyz, center) + params.planes[p].w < -radius) {
-				return;
-			}
+		if (outside_planes(center, radius)) {
+			return;
 		}
 	}
 

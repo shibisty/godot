@@ -41,6 +41,7 @@
 #include "servers/rendering/renderer_rd/effects/hiz_occlusion_depth.h"
 #include "servers/rendering/renderer_rd/effects/motion_vectors_store.h"
 #include "servers/rendering/renderer_rd/effects/multimesh_shadow_cull.h"
+#include "servers/rendering/renderer_rd/effects/overhead_map.h"
 #include "servers/rendering/renderer_rd/effects/particles_screen_collision.h"
 #include "servers/rendering/renderer_rd/effects/ss_effects.h"
 #include "servers/rendering/renderer_rd/effects/taa.h"
@@ -313,6 +314,7 @@ private:
 		INSTANCE_DATA_FLAG_MULTIMESH_HAS_COLOR = 1 << 14,
 		INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA = 1 << 15,
 		INSTANCE_DATA_FLAGS_PARTICLE_TRAIL_SHIFT = 16,
+		INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA2 = 1 << 16, // Mariner E14c: a multimesh, not particles (their trail bits).
 		INSTANCE_DATA_FLAGS_PARTICLE_TRAIL_MASK = 0xFF,
 		INSTANCE_DATA_FLAGS_FADE_SHIFT = 24,
 		INSTANCE_DATA_FLAGS_FADE_MASK = 0xFFUL << INSTANCE_DATA_FLAGS_FADE_SHIFT
@@ -471,6 +473,17 @@ private:
 
 			// Mariner E10: copy this depth texture (the directional shadow cache) into `rect` before drawing.
 			RID copy_depth_from;
+
+			// Mariner E10c: before drawing, shift a cached cascade - copy `scroll_rect` of `scroll_texture` to the
+			// scratch texture, then its `scroll_src` back to `scroll_dst` of this pass's framebuffer, the depth moved by
+			// `scroll_depth_offset`.
+			bool scroll = false;
+			RID scroll_texture;
+			RID scroll_scratch;
+			Rect2i scroll_rect;
+			Rect2i scroll_src;
+			Rect2i scroll_dst;
+			float scroll_depth_offset = 0.0;
 
 			// Mariner E14b: indirect multimeshes culled for this pass: geometry instance (pointer) -> section of its multimesh.
 			HashMap<uint64_t, uint32_t> shadow_cull_sections;
@@ -814,6 +827,7 @@ private:
 	RendererRD::ContactShadows *contact_shadows = nullptr; // Mariner E11.
 	RendererRD::HiZOcclusionDepth *hiz_occlusion_depth = nullptr; // Mariner E13.
 	RendererRD::ParticlesScreenCollision *particles_screen_collision = nullptr; // Mariner E22.
+	RendererRD::OverheadMap *overhead_map = nullptr; // Mariner G1a.
 	RendererRD::MultiMeshShadowCull *multimesh_shadow_cull = nullptr; // Mariner E14b.
 	uint32_t _indirect_lod_buckets(RID p_multimesh, float p_threshold, LocalVector<float> &r_limits, RendererRD::MeshStorage::MultiMeshShadowCull &r_lods, uint32_t *r_lod_counts) const; // Mariner E25c.
 	RID contact_shadow_mask; // Mariner E11: the mask of the frame being drawn (for the opaque pass), else null.
@@ -856,9 +870,12 @@ private:
 		bool enabled = false;
 		RID texture;
 		RID framebuffer;
+		RID scratch; // Mariner E10c: the source of a scrolled cascade.
 		Size2i size;
 		RD::DataFormat format = RD::DATA_FORMAT_MAX;
 		uint64_t generation = 0;
+		bool scrolling = true; // Mariner E10c: rendering/lights_and_shadows/directional_shadow/cache_scrolling.
+		PagedArrayPool<RenderGeometryInstance *> strip_page_pool; // Mariner E10c: strips' casters.
 
 		struct Entry {
 			bool valid = false;
@@ -880,15 +897,19 @@ private:
 		uint64_t stats_frame = 0;
 		int hits = 0;
 		int refreshes = 0;
+		int scrolls = 0; // Mariner E10c.
+		int scroll_strip_instances = 0;
 		int uncached = 0;
 		int static_instances = 0;
 		int dynamic_instances = 0;
 		uint64_t total_hits = 0; // Since the cache was enabled.
 		uint64_t total_refreshes = 0;
+		uint64_t total_scrolls = 0;
 		Dictionary last_stats;
 	} directional_shadow_cache;
 
 	bool _directional_shadow_cache_prepare(); // Allocates the cache texture for the current atlas; false if unusable.
+	bool _directional_shadow_cache_scroll(DirectionalShadowCache::Entry &r_entry, const RenderShadowData *p_cache_data, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, bool p_reverse_cull_face, bool p_use_pancake, float p_lod_distance_multiplier, float p_screen_mesh_lod_threshold, const Rect2i &p_rect, bool p_flip_y, RenderingServerTypes::RenderInfo *p_render_info, const Size2i &p_viewport_size, const Transform3D &p_main_cam_transform); // Mariner E10c.
 	void _directional_shadow_cache_free();
 	void _directional_shadow_cache_stats_frame();
 	void _render_shadow_begin();

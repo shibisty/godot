@@ -416,6 +416,18 @@ void Light3DGizmoPlugin::redraw(EditorNode3DGizmo *p_gizmo) {
 		const Ref<Material> icon = get_material("light_area_icon", p_gizmo);
 		p_gizmo->add_unscaled_billboard(icon, 0.05, color);
 	}
+	// Mariner G3: the clip box of a positional light (selected).
+	if (!Object::cast_to<DirectionalLight3D>(light) && light->is_clip_volume_enabled() && p_gizmo->is_selected()) {
+		const AABB box(light->get_clip_volume_offset() - light->get_clip_volume_size() * 0.5, light->get_clip_volume_size());
+		Vector<Vector3> box_lines;
+		for (int i = 0; i < 12; i++) {
+			Vector3 a, b;
+			box.get_edge(i, a, b);
+			box_lines.push_back(a);
+			box_lines.push_back(b);
+		}
+		p_gizmo->add_lines(box_lines, get_material("lines_secondary", p_gizmo), false, color);
+	}
 }
 
 float Light3DGizmoPlugin::_find_closest_angle_to_half_pi_arc(const Vector3 &p_from, const Vector3 &p_to, float p_arc_radius, const Transform3D &p_arc_xform) {

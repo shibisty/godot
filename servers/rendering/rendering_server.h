@@ -258,9 +258,10 @@ public:
 protected:
 #ifndef DISABLE_DEPRECATED
 	void _multimesh_allocate_data_bind_compat_99455(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors, bool p_use_custom_data);
+	void _multimesh_allocate_data_bind_compat_mariner_e14c(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors, bool p_use_custom_data, bool p_use_indirect);
 #endif
 public:
-	virtual void multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors = false, bool p_use_custom_data = false, bool p_use_indirect = false) = 0;
+	virtual void multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors = false, bool p_use_custom_data = false, bool p_use_indirect = false, bool p_use_custom_data2 = false) = 0;
 	virtual int multimesh_get_instance_count(RID p_multimesh) const = 0;
 
 	virtual void multimesh_set_mesh(RID p_multimesh, RID p_mesh) = 0;
@@ -279,6 +280,10 @@ public:
 	virtual Transform2D multimesh_instance_get_transform_2d(RID p_multimesh, int p_index) const = 0;
 	virtual Color multimesh_instance_get_color(RID p_multimesh, int p_index) const = 0;
 	virtual Color multimesh_instance_get_custom_data(RID p_multimesh, int p_index) const = 0;
+	// Mariner E14c: a second vec4 of custom data per instance (INSTANCE_CUSTOM2; 3D transforms, with custom data).
+	virtual void multimesh_instance_set_custom_data2(RID p_multimesh, int p_index, const Color &p_color) = 0;
+	virtual Color multimesh_instance_get_custom_data2(RID p_multimesh, int p_index) const = 0;
+	virtual bool multimesh_uses_custom_data2(RID p_multimesh) const = 0;
 
 	virtual void multimesh_set_buffer(RID p_multimesh, const Vector<float> &p_buffer) = 0;
 	virtual RID multimesh_get_command_buffer_rd_rid(RID p_multimesh) const = 0;
@@ -327,6 +332,7 @@ public:
 	virtual void light_set_reverse_cull_face_mode(RID p_light, bool p_enabled) = 0;
 	virtual void light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_mask) = 0;
 	virtual void light_set_restir(RID p_light, bool p_enable) = 0; // Mariner E20.
+	virtual void light_set_clip_volume(RID p_light, bool p_enable, const Vector3 &p_offset, const Vector3 &p_size) = 0; // Mariner G3.
 
 	virtual void light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) = 0;
 	virtual void light_set_max_sdfgi_cascade(RID p_light, uint32_t p_cascade) = 0;
@@ -470,6 +476,7 @@ public:
 	virtual void particles_set_fractional_delta(RID p_particles, bool p_enable) = 0;
 	virtual void particles_set_collision_base_size(RID p_particles, float p_size) = 0;
 	virtual void particles_set_screen_space_collision(RID p_particles, bool p_enable) = 0; // Mariner E22.
+	virtual void particles_set_overhead_map_collision(RID p_particles, bool p_enable) = 0; // Mariner G1c.
 	virtual void particles_set_seed(RID p_particles, uint32_t p_seed) = 0;
 
 	virtual void particles_set_transform_align(RID p_particles, RSE::ParticlesTransformAlign p_transform_align) = 0;
@@ -547,6 +554,11 @@ public:
 	virtual void camera_set_camera_attributes(RID p_camera, RID p_camera_attributes) = 0;
 	virtual void camera_set_compositor(RID p_camera, RID p_compositor) = 0;
 	virtual void camera_set_use_vertical_aspect(RID p_camera, bool p_enable) = 0;
+	// Mariner G6: a world-space clip plane (what is behind it is not drawn; hardware clip distances, Forward+ and
+	// Mobile) and the raw HDR output (no tone mapping, exposure, glow, adjustments or camera effects) - for the cameras
+	// of planar reflections.
+	virtual void camera_set_clip_plane(RID p_camera, bool p_enable, const Plane &p_plane) = 0;
+	virtual void camera_set_raw_output(RID p_camera, bool p_enable) = 0;
 
 	/* VIEWPORT API */
 
@@ -701,9 +713,15 @@ public:
 	virtual void environment_set_ddgi_update(RID p_env, int p_probes_per_frame, bool p_relocation) = 0;
 	virtual void environment_set_ddgi_channels(RID p_env, float p_sky_energy, float p_lights_energy) = 0;
 	virtual void environment_set_ddgi_sea(RID p_env, bool p_enable, float p_level, const Color &p_color) = 0;
+	virtual void environment_set_overhead_map(RID p_env, bool p_enable, float p_size, float p_height, int p_resolution, uint32_t p_cull_mask, float p_sky_occlusion, float p_sky_occlusion_radius, float p_bias) = 0; // Mariner G1a.
+	virtual void environment_set_wetness(RID p_env, float p_wetness) = 0; // Mariner G4.
+	virtual void environment_set_snow(RID p_env, float p_snow) = 0; // Mariner G4b.
 	// Mariner E18: ground truth ambient occlusion with bent normals in place of the stock SSAO.
 	virtual void environment_set_ssao_gtao(RID p_env, bool p_enable, bool p_bent_normals, float p_thickness = 0.5) = 0;
 	virtual void environment_set_color_grading(RID p_env, bool p_enable, float p_temperature, float p_tint, const Color &p_shadows, const Color &p_midtones, const Color &p_highlights, const Vector4 &p_tonal_ranges, const Vector3 &p_slope, const Vector3 &p_offset, const Vector3 &p_power, float p_saturation, bool p_gamut_mapping) = 0; // Mariner F3.
+	virtual void environment_set_color_grading_night_vision(RID p_env, float p_amount, const Color &p_tint, float p_start, float p_end) = 0; // Mariner F3b.
+	virtual void environment_set_color_grading_channel_mixer(RID p_env, const Vector3 &p_red, const Vector3 &p_green, const Vector3 &p_blue) = 0; // Mariner F3c.
+	virtual void environment_set_color_grading_curves(RID p_env, float p_contrast, float p_vibrance, const Vector3 &p_shadow_gamma, const Vector3 &p_mid_point, const Vector3 &p_highlight_scale) = 0; // Mariner F3c.
 	virtual void environment_set_restir(RID p_env, bool p_enable, int p_candidates, int p_spatial_samples, bool p_temporal, bool p_denoise) = 0; // Mariner E20.
 
 	virtual void environment_set_ssr(RID p_env, bool p_enable, int p_max_steps, float p_fade_in, float p_fade_out, float p_depth_tolerance) = 0;
@@ -757,6 +775,7 @@ public:
 	virtual void camera_attributes_set_image_effects(RID p_camera_attributes, float p_chromatic_aberration, float p_lens_distortion, float p_film_grain, float p_film_grain_size, float p_sharpening) = 0; // Mariner E23.
 	virtual void camera_attributes_set_exposure(RID p_camera_attributes, float p_multiplier, float p_exposure_normalization) = 0;
 	virtual void camera_attributes_set_auto_exposure(RID p_camera_attributes, bool p_enable, float p_min_sensitivity, float p_max_sensitivity, float p_speed, float p_scale) = 0;
+	virtual void camera_attributes_set_auto_exposure_histogram(RID p_camera_attributes, bool p_histogram, float p_low_percentile, float p_high_percentile, float p_center_weight, float p_speed_dark) = 0; // Mariner G2.
 
 	/* SCENARIO API */
 

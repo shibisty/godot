@@ -71,6 +71,10 @@ private:
 		uint32_t cull_mask = 0xFFFFFFFF;
 		uint32_t shadow_caster_mask = 0xFFFFFFFF;
 		bool restir = false; // Mariner E20.
+		// Mariner G3: the box the light is clipped to, in the light's space (center, size).
+		bool clip_volume = false;
+		Vector3 clip_volume_offset;
+		Vector3 clip_volume_size = Vector3(4, 3, 4);
 		bool distance_fade = false;
 		real_t distance_fade_begin = 40.0;
 		real_t distance_fade_shadow = 50.0;
@@ -164,7 +168,7 @@ private:
 		float shadow_opacity;
 
 		float restir; // Mariner E20: 1.0 if the opaque pass gets this light from ReSTIR DI (it skips it), else 0.0.
-		float pad;
+		float clip; // Mariner G3: 1.0 if clipped to the box below.
 		float atlas_rect[4]; // in omni, used for atlas uv, in spot, used for projector uv
 		float shadow_matrix[16];
 		float shadow_bias;
@@ -176,7 +180,11 @@ private:
 		float volumetric_fog_energy;
 		uint32_t bake_mode;
 		float projector_rect[4];
+		float clip_x[4]; // Mariner G3: the clip box in view space (see light_data_inc.glsl).
+		float clip_y[4];
+		float clip_z[4];
 	};
+	static_assert(sizeof(LightData) == 272, "LightData must match light_data_inc.glsl (std430).");
 
 	struct LightInstanceDepthSort {
 		float depth;
@@ -487,6 +495,10 @@ private:
 public:
 	static LightStorage *get_singleton();
 
+	// Mariner G0a: the soft shadow radius of a directional light per unit of distance to the occluder: tan of half the
+	// angular diameter (degrees).
+	static float directional_penumbra_tan(float p_angular_diameter);
+
 	LightStorage();
 	virtual ~LightStorage();
 
@@ -531,6 +543,10 @@ public:
 	virtual void light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_mask) override;
 	virtual uint32_t light_get_shadow_caster_mask(RID p_light) const override;
 	virtual void light_set_restir(RID p_light, bool p_enable) override;
+	virtual void light_set_clip_volume(RID p_light, bool p_enable, const Vector3 &p_offset, const Vector3 &p_size) override; // Mariner G3.
+	bool light_has_clip_volume(RID p_light) const;
+	// The rows of the clip box in view space (dot(row.xyz, vertex) + row.w is -1 .. 1 inside).
+	static void clip_volume_rows(const Transform3D &p_world_to_view, const Transform3D &p_light_transform, const Vector3 &p_offset, const Vector3 &p_size, float r_rows[3][4]);
 	virtual bool light_is_restir(RID p_light) const override;
 	virtual void light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) override;
 	virtual void light_set_max_sdfgi_cascade(RID p_light, uint32_t p_cascade) override;

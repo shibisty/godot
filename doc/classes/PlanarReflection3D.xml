@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PlanarReflection3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		A planar reflection: mirrors, glass, a wet deck, calm water - without raytracing (Mariner G6).
+	</brief_description>
+	<description>
+		The node's XZ plane (normal +Y) is a mirror. Every frame a camera mirrored in it (following the viewport's current camera: field of view, near and far, cull mask) renders the scene into a texture - the scene's light as it is, in linear HDR, without tone mapping or camera effects ([method RenderingServer.camera_set_raw_output]), with nothing behind the mirror ([method RenderingServer.camera_set_clip_plane]). The [BaseMaterial3D] of the node's [GeometryInstance3D] children with [member BaseMaterial3D.planar_reflection_enabled] read it in screen space; the children themselves are kept out of the reflection by [member surface_layer]. Nothing is rendered while the camera is behind the mirror or the node is hidden.
+		[b]Note:[/b] every visible planar reflection renders the scene once more (at [member resolution_scale]): keep few of them, small and close (a bridge's windows, a puddle, a mirror), and use [member cull_mask] and [member max_distance] to render less. The reflection camera has no clip plane on GPUs without [constant RenderingDevice.SUPPORTS_CLIP_DISTANCE] or on GLES 3 (mobile, web).
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_reflection_texture" qualifiers="const">
+			<return type="Texture2D" />
+			<description>
+				The reflection's image (the internal viewport's texture), or [code]null[/code] outside the scene tree.
+			</description>
+		</method>
+		<method name="is_in_view" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="camera" type="Camera3D" />
+			<description>
+				Returns [code]true[/code] if the mirror's rectangle ([member size], in the node's XZ plane) is at least partly in [param camera]'s frustum. A mirror out of view renders no reflection (Mariner G6b).
+			</description>
+		</method>
+		<method name="is_reflection_active" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the reflection was rendered this frame (the node visible, a current camera in front of the mirror).
+			</description>
+		</method>
+		<method name="mirror_transform" qualifiers="static">
+			<return type="Transform3D" />
+			<param index="0" name="camera" type="Transform3D" />
+			<param index="1" name="plane" type="Plane" />
+			<description>
+				Returns [param camera] mirrored in [param plane], with its X axis turned so that the basis stays right-handed (its image is mirrored along X: the materials read it at [code](1 - u, v)[/code]).
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="clip_offset" type="float" setter="set_clip_offset" getter="get_clip_offset" default="0.0">
+			Moves the clip plane along the normal: a little negative keeps the bottom of what stands on the mirror; positive hides what is just above it.
+		</member>
+		<member name="cull_mask" type="int" setter="set_cull_mask" getter="get_cull_mask" default="1048575">
+			The layers the reflection camera renders (with the main camera's cull mask, without [member surface_layer]).
+		</member>
+		<member name="max_distance" type="float" setter="set_max_distance" getter="get_max_distance" default="0.0">
+			The reflection camera's far distance; [code]0[/code]: the main camera's.
+		</member>
+		<member name="process_priority" type="int" setter="set_process_priority" getter="get_process_priority" overrides="Node" default="1000" />
+		<member name="resolution_scale" type="float" setter="set_resolution_scale" getter="get_resolution_scale" default="0.5">
+			The reflection's resolution relative to the viewport's.
+		</member>
+		<member name="size" type="Vector2" setter="set_size" getter="get_size" default="Vector2(10, 10)">
+			The mirror's extent in the node's XZ plane, centered on the node: shown by the editor's gizmo (with handles), and the reflection is not rendered while it is out of the camera's view ([method is_in_view]). In the editor the reflection is previewed with the editor's camera, without changing the scene.
+		</member>
+		<member name="surface_layer" type="int" setter="set_surface_layer" getter="get_surface_layer" default="20">
+			The render layer the node puts its children (the mirror's surfaces) on and the reflection camera leaves out, so that they do not reflect themselves. Keep it on the main camera's cull mask.
+		</member>
+	</members>
+</class>

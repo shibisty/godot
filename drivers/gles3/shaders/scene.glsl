@@ -229,6 +229,9 @@ struct SceneData {
 	float luminance_multiplier;
 	uint camera_visible_layers;
 	bool pancake_shadows;
+
+	vec4 clip_plane; // Mariner G6: clip space; (0, 0, 0, 1) - none.
+	vec4 weather; // Mariner G4 / G4b: x the wetness (Environment.wetness), y the snow (Environment.snow); zw reserved.
 };
 
 // The containing data block is for historic reasons.
@@ -996,6 +999,10 @@ void main() {
 			clip_position);
 
 	gl_Position = clip_position;
+#ifdef USE_GLES_OVER_GL
+	// Mariner G6: the camera's clip plane (planar reflections; GL_CLIP_DISTANCE0 is on only for such cameras).
+	gl_ClipDistance[0] = dot(clip_position, scene_data_block.data.clip_plane);
+#endif
 }
 
 /* clang-format off */
@@ -1214,6 +1221,9 @@ struct SceneData {
 	float luminance_multiplier;
 	uint camera_visible_layers;
 	bool pancake_shadows;
+
+	vec4 clip_plane; // Mariner G6: clip space; (0, 0, 0, 1) - none.
+	vec4 weather; // Mariner G4 / G4b: x the wetness (Environment.wetness), y the snow (Environment.snow); zw reserved.
 };
 
 layout(std140) uniform SceneDataBlock { // ubo:2
@@ -2201,9 +2211,18 @@ void main() {
 	highp mat4 model_matrix = world_transform;
 	vec3 albedo = vec3(1.0);
 	vec3 backlight = vec3(0.0);
+	// Mariner G1b: SKY_OCCLUSION / OVERHEAD_COVER exist for compatibility (no overhead map in this renderer).
+	float sky_occlusion_builtin = 1.0;
+	float overhead_cover_builtin = 0.0;
 	// Mariner E16: MAIN_LIGHT_DIRECTION / MAIN_LIGHT_SHADOW exist for compatibility (not applied by this renderer).
 	vec3 main_light_direction = vec3(0.0, 0.0, 1.0);
 	float main_light_shadow = 1.0;
+	// Mariner M6, F5: SHEEN* and IRIDESCENCE* exist for compatibility (not applied by this renderer).
+	vec3 sheen_color = vec3(0.0);
+	float sheen_roughness = 0.5;
+	float iridescence = 0.0;
+	float iridescence_ior = 1.3;
+	float iridescence_thickness = 400.0;
 	vec4 transmittance_color = vec4(0.0, 0.0, 0.0, 1.0);
 	float transmittance_depth = 0.0;
 	float transmittance_boost = 0.0;
@@ -2223,6 +2242,9 @@ void main() {
 	vec4 fog = vec4(0.0);
 #if defined(CUSTOM_RADIANCE_USED)
 	vec4 custom_radiance = vec4(0.0);
+#endif
+#if defined(CUSTOM_REFLECTION_USED)
+	vec4 custom_reflection = vec4(0.0); // Mariner G6.
 #endif
 #if defined(CUSTOM_IRRADIANCE_USED)
 	vec4 custom_irradiance = vec4(0.0);
@@ -2583,6 +2605,12 @@ void main() {
 	ambient_light *= albedo.rgb;
 
 #endif // !AMBIENT_LIGHT_DISABLED
+
+#if defined(CUSTOM_REFLECTION_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+	// Mariner G6: the material's own reflection (a planar reflection) over the probes' and the sky's. This renderer
+	// writes its 3D output in sRGB (like the radiance it reads), so a planar reflection's image is decoded.
+	specular_light = mix(specular_light, srgb_to_linear(custom_reflection.rgb), clamp(custom_reflection.a, 0.0, 1.0));
+#endif
 
 	// convert ao to direct light ao
 	ao = mix(1.0, ao, ao_light_affect);

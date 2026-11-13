@@ -492,7 +492,7 @@ void main() {
 					float d = distance(omni_lights.data[light_index].position, view_pos);
 					float shadow_attenuation = 1.0;
 
-					if (omni_lights.data[light_index].volumetric_fog_energy > 0.001 && d * omni_lights.data[light_index].inv_radius < 1.0) {
+					if (omni_lights.data[light_index].volumetric_fog_energy > 0.001 && d * omni_lights.data[light_index].inv_radius < 1.0 && light_clip_inside(omni_lights.data[light_index].clip_x, omni_lights.data[light_index].clip_y, omni_lights.data[light_index].clip_z, omni_lights.data[light_index].clip, view_pos)) { // Mariner G3.
 						float attenuation = get_omni_attenuation(d, omni_lights.data[light_index].inv_radius, omni_lights.data[light_index].attenuation);
 
 						vec3 light = omni_lights.data[light_index].color;
@@ -560,7 +560,7 @@ void main() {
 					float d = length(light_rel_vec);
 					float shadow_attenuation = 1.0;
 
-					if (spot_lights.data[light_index].volumetric_fog_energy > 0.001 && d * spot_lights.data[light_index].inv_radius < 1.0) {
+					if (spot_lights.data[light_index].volumetric_fog_energy > 0.001 && d * spot_lights.data[light_index].inv_radius < 1.0 && light_clip_inside(spot_lights.data[light_index].clip_x, spot_lights.data[light_index].clip_y, spot_lights.data[light_index].clip_z, spot_lights.data[light_index].clip, view_pos)) { // Mariner G3.
 						float attenuation = get_omni_attenuation(d, spot_lights.data[light_index].inv_radius, spot_lights.data[light_index].attenuation);
 
 						vec3 spot_dir = spot_lights.data[light_index].direction;
@@ -622,7 +622,7 @@ void main() {
 					vec3 area_direction = area_lights.data[light_index].direction;
 					float EPSILON = 1e-4f;
 
-					if (area_lights.data[light_index].volumetric_fog_energy > 0.001 && dot(area_width, area_width) > EPSILON && dot(area_height, area_height) > EPSILON) {
+					if (area_lights.data[light_index].volumetric_fog_energy > 0.001 && dot(area_width, area_width) > EPSILON && dot(area_height, area_height) > EPSILON && light_clip_inside(area_lights.data[light_index].clip_x, area_lights.data[light_index].clip_y, area_lights.data[light_index].clip_z, area_lights.data[light_index].clip, view_pos)) { // Mariner G3.
 						float a_len = length(area_width);
 						float b_len = length(area_height);
 						vec3 area_width_norm = normalize(area_width);

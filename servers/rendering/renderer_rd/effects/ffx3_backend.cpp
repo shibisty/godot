@@ -257,6 +257,19 @@ FfxSurfaceFormat FFX3Context::to_ffx_format(RD::DataFormat p_format) {
 	return FFX_SURFACE_FORMAT_UNKNOWN;
 }
 
+// Copies a resource name into a fixed FidelityFX buffer, always terminated (instead of wcsncpy, which MSVC deprecates
+// and which does not terminate a truncated name).
+template <size_t N>
+static void _ffx3_copy_name(wchar_t (&r_dst)[N], const wchar_t *p_src) {
+	size_t i = 0;
+	if (p_src) {
+		for (; i < N - 1 && p_src[i] != 0; i++) {
+			r_dst[i] = p_src[i];
+		}
+	}
+	r_dst[i] = 0;
+}
+
 FfxResource FFX3Context::wrap_texture(RID *p_rid, const wchar_t *p_name) {
 	FfxResource res = {};
 	if (p_rid == nullptr || p_rid->is_null()) {
@@ -283,7 +296,7 @@ FfxResource FFX3Context::wrap_texture(RID *p_rid, const wchar_t *p_name) {
 	res.description.flags = FFX_RESOURCE_FLAGS_NONE;
 	res.description.usage = (tf.usage_bits & RD::TEXTURE_USAGE_STORAGE_BIT) ? FFX_RESOURCE_USAGE_UAV : FFX_RESOURCE_USAGE_READ_ONLY;
 	res.state = FFX_RESOURCE_STATE_COMPUTE_READ;
-	wcsncpy(res.name, p_name, FFX_RESOURCE_NAME_SIZE - 1);
+	_ffx3_copy_name(res.name, p_name);
 	return res;
 }
 
@@ -524,7 +537,7 @@ static FfxErrorCode ffx3_create_pipeline(FfxInterface *p_interface, FfxEffect p_
 		r_count = p_from.size();
 		for (uint32_t i = 0; i < p_from.size(); i++) {
 			r_to[i].slotIndex = p_from[i].slot;
-			wcsncpy(r_to[i].name, p_from[i].name, FFX_RESOURCE_NAME_SIZE - 1);
+			_ffx3_copy_name(r_to[i].name, p_from[i].name);
 		}
 	};
 	copy(pass.srvs, r_pipeline->srvTextureBindings, r_pipeline->srvTextureCount);
@@ -532,7 +545,7 @@ static FfxErrorCode ffx3_create_pipeline(FfxInterface *p_interface, FfxEffect p_
 	copy(pass.srv_buffers, r_pipeline->srvBufferBindings, r_pipeline->srvBufferCount);
 	copy(pass.uav_buffers, r_pipeline->uavBufferBindings, r_pipeline->uavBufferCount);
 	copy(pass.cbs, r_pipeline->constantBufferBindings, r_pipeline->constCount);
-	wcsncpy(r_pipeline->name, p_desc->name, FFX_RESOURCE_NAME_SIZE - 1);
+	_ffx3_copy_name(r_pipeline->name, p_desc->name);
 	return FFX_OK;
 }
 

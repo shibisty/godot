@@ -7,7 +7,7 @@ It is based on **Godot 4.7.2-stable** and adds rendering and `RenderingDevice` e
 - shadows: a shadow cache, a per-object shadow map, contact shadows, colored translucent shadows;
 - GPU-driven static geometry: culling, occlusion and LOD on the GPU;
 - post-processing: GTAO, motion blur, lens flare, color grading;
-- materials: multiple-scattering diffuse and micro-shadowing;
+- materials: multiple-scattering diffuse, micro-shadowing, sheen, thin-film iridescence, physical refraction, metal F0 presets;
 - `RenderingDevice`: async compute, mesh shaders, compute on a second GPU;
 - texture mip streaming;
 - fixes to stock bugs.
@@ -24,7 +24,7 @@ Exceptions, where a stock project looks or behaves differently:
 - **M1–M3 are on by default** (`rendering/shading/overrides/multiscatter_diffuse`, `micro_shadowing`,
   `multi_bounce_ao`): materials with the default Burley diffuse and materials with an AO map are lit a little
   differently, in Forward+ and Mobile. Turn the three settings off for stock shading.
-- **Fixes of stock bugs** (E9, E14a, E16, E25c, `0040`) change behaviour where stock Godot was wrong: leaks, reads
+- **Fixes of stock bugs** (E9, E14a, E16, E25c, `0040`, `0050`, `0053`) change behaviour where stock Godot was wrong: leaks, reads
   past the end of buffers, lost uniform sets, missing depth passes.
 
 ### Detecting the fork
@@ -74,22 +74,51 @@ runs on stock Godot.
 | **E17** | **Texture mip streaming**: large textures load the mips the screen needs, within a VRAM budget | `rendering/textures/streaming/*`, `CompressedTexture2D.get_streaming_mip()` | RD renderers |
 | **E18** | **GTAO with bent normals** (ported from Spartan Engine, MIT): sky and probes sampled along the bent normal, cone-based specular occlusion, multi-bounce | `Environment.ssao_gtao`, `ssao_bent_normals`, `RS.environment_set_ssao_gtao` | Forward+ |
 | **E19** | **Dynamic resolution**: holds a GPU frame time by changing the 3D scale | `Viewport.dynamic_resolution_*`, `rendering/scaling_3d/dynamic_resolution/*` | all |
-| **E20** | **ReSTIR DI**: many lights with ray-traced shadows and a denoiser. **E20b–d**: ray-traced shadows of the sun and the moon, including the water of E4, optionally only beyond the shadow maps | `Light3D.light_restir`, `Environment.restir_*`, `DirectionalLight3D.restir_shadow_mode` | Vulkan + ray query |
+| **E20** | **ReSTIR DI**: many lights with ray-traced shadows and a denoiser. **E20b–d**: ray-traced shadows of the sun and the moon, including the water of E4, optionally only beyond the shadow maps. **E20e**: shadow rays run the alpha test (leaf cards, nets) and let `raytracing_opacity` through | `Light3D.light_restir`, `Environment.restir_*`, `DirectionalLight3D.restir_shadow_mode` | Vulkan + ray query |
 | **E21** | **Colored translucent shadows** of the sun (glass, sails) | `GeometryInstance3D.shadow_translucent`, `rendering/lights_and_shadows/directional_shadow/translucent_shadow_size` | Forward+ |
 | **E22** | **Screen-space collision of GPU particles** | `GPUParticles3D.collision_screen_space` | Forward+ |
 | **E23** | **Gran Turismo 7 tone mapper** (from Spartan Engine, MIT), film grain, chromatic aberration, lens distortion, AMD CAS sharpening | `Environment.TONE_MAPPER_GT7`, `CameraAttributes.image_*` | GT7: all three renderers; the rest: Forward+ |
 | **E24** | **AMD FSR 3.1** upscaler and **FSR 3 frame generation** (FidelityFX SDK 1.1.4, MIT) | `Viewport.SCALING_3D_MODE_FSR3` (= 7), `Viewport.frame_generation` | upscaler: Forward+; frame generation: Vulkan with V-Sync |
 | **E25** | **GPU-driven static geometry**: eligible meshes are grouped into batches. Per instance, on the GPU: frustum culling, occlusion against the Hi-Z of E13 or occluders, mesh LOD, visibility range. Stock fix: an indirect MultiMesh with LOD read past the LOD index buffer | `GeometryInstance3D.gpu_static`, `RS.scenario_get_gpu_static_info()`, `RS.multimesh_set_indirect_view_culling` | Forward+ |
 | **F1** | **GTAO with a visibility bitmask** (Therrien et al. 2023): an assumed thickness of what is on screen, so thin objects don't cast dark halos | `Environment.ssao_gtao_thickness` | Forward+ |
+| **F2** | **Gathered depth of field**: half resolution, CoC tiles with near dilation, rings in the aperture shape, background layer without bleeding over sharper nearer things (no halos), foreground layer blurring over what is behind it, bokeh discs from highlights | `rendering/camera/depth_of_field/depth_of_field_mode` (Gather by default) | Forward+, one view |
 | **F3** | **Color grading** in linear light: white balance (Kelvin, tint), shadows / midtones / highlights, ASC CDL in ACEScct, saturation; hue-preserving gamut mapping after the tone mapper | `Environment.color_grading_*`, `RS.environment_set_color_grading` | Forward+ |
+| **F3b** | **Night vision** (Purkinje shift) in the color grading: below a scene luminance colors fade toward a tinted scotopic luminance | `Environment.color_grading_night_vision*`, `RS.environment_set_color_grading_night_vision` | Forward+ |
+| **F3c** | **Color grading tools**: channel mixer, contrast around the middle grey (ACEScct), vibrance, per channel curves (shadow gamma, mid point, highlight scale) | `Environment.color_grading_mixer_*`, `_contrast`, `_vibrance`, `_curves_*`; `RS.environment_set_color_grading_channel_mixer` / `_curves` | Forward+ |
+| **G1a** | **Overhead map and sky occlusion**: the depth of the scene from above around each camera (whole-texel steps), and the sky / color ambient light and sky reflection darkened from it under roofs, decks and bridges, between walls, in streets and valleys (as CryEngine's height map AO). Overhangs and walls told apart; not where SDFGI, VoxelGI, lightmaps or DDGI apply | `Environment.overhead_map_*`, `RS.environment_set_overhead_map` | Forward+ |
+| **G1b** | **Sky occlusion and cover in shaders**: fragment built-ins `SKY_OCCLUSION` (the sky visibility from the overhead map) and `OVERHEAD_COVER` (1 under a roof, a deck or a bridge: no rain, no snow), VisualShader inputs; 1 / 0 without a map | shading language, VisualShader | Forward+ (Mobile, Compatibility: defaults) |
+| **G1c** | **Particles collide with the overhead map** outside the view: rain and snow land on roofs, decks and the ground without collision nodes; particles under a cover are not moved onto it | `GPUParticles3D.collision_overhead_map`, `RS.particles_set_overhead_map_collision` | Forward+ |
+| **G2** | **Histogram auto exposure**: the log luminance in 64 bins, the mean between two percentiles (the darker half and the brightest 2 % - sun, lamps, windows - left out by default), center weighted, separate adaptation speed toward darker scenes; the same 1x1 luminance the tone mapper reads | `CameraAttributes.auto_exposure_mode`, `_low_percentile`, `_high_percentile`, `_center_weight`, `_speed_dark`; `RS.camera_attributes_set_auto_exposure_histogram` | Forward+ (Mobile: average) |
+| **G3** | **Light clip volumes**: a box in the light's space outside which an omni, spot or area light does not shine (a cabin lamp does not light the deck through the hull); surface lighting and volumetric fog; editor box; clipped lights stay rasterized | `Light3D.clip_volume_enabled`, `_offset`, `_size`; `RS.light_set_clip_volume` | Forward+, Mobile |
+| **G4** | **Wet materials**: the world's wetness (`WETNESS` in shaders) set by the game's weather; porous surfaces darken, a water film smooths them (less on steep faces), puddles on flat ground below a level of the height map; dry under cover (`OVERHEAD_COVER`) | `Environment.wetness`, `BaseMaterial3D.wetness_*`, `RS.environment_set_wetness` | Forward+, Mobile (no cover) |
+| **G5a** | **Fake interiors behind windows** (interior mapping): a box room behind every window of a UV grid seen with the right perspective, from an atlas of room images (random room per window and per instance), glass on top, lit windows at night | `BaseMaterial3D.interior_*` | all |
+| **G5b** | **Box impostors**: a model far away drawn as its bounding box - color, normals and relief per face in a square atlas, the deep parallax tracing the view ray into it (true ray, binary search, silhouette from the relief, depth for intersections and shadow maps); a baker and an editor tool | `BoxImpostorBaker`, `BaseMaterial3D.heightmap_impostor`, Project > Tools > Bake Box Impostor | all (bake: Forward+) |
+| **G5c** | **Box impostors by the visual hull**: the view ray traced through the box against all the faces' reliefs at once - inner corners and walls seen edge-on by one face right (L-shaped buildings, niches) | `BaseMaterial3D.heightmap_impostor_faces`, `BoxImpostorBaker.hull` | all |
+| **G6** | **Planar reflections**: a camera mirrored in a plane renders the scene (raw HDR, clipped at the plane by hardware clip distances), the plane's surfaces read it in screen space - mirrors, glass, wet decks, calm water without raytracing | `PlanarReflection3D`, `BaseMaterial3D.planar_reflection_*`, `REFLECTION`, `RS.camera_set_clip_plane` / `camera_set_raw_output`, `RD::SUPPORTS_CLIP_DISTANCE` | all |
+| **G7** | **Tessellation and displacement**: the mesh tessellated once to a target edge length (no T-junctions, Phong smoothing optional), the vertex shader displaces it by a height map with the relief's normal per pixel, the LODs made on the displaced shape coarsen it with the distance - true displacement without hardware tessellation shaders | `BaseMaterial3D.displacement_*`, `MeshTessellator`, MeshInstance3D > Mesh > Tessellate Mesh... | all |
+| **G4b** | **Snow**: the world's snow lies on what faces up (with the normal map's detail), up to the steepest slope it rests on, the low places of the height map first, none under cover; wetness and snow in the Compatibility renderer too | `Environment.snow`, `SNOW`, `BaseMaterial3D.snow_*`, `RS.environment_set_snow` | all |
+| **G7b** | **The fork's shader features in VisualShader**: true displacement and the relief's normal as nodes, the planar reflection's output, the world's wetness and snow as inputs | `VisualShaderNodeDisplace`, `VisualShaderNodeHeightNormal`, output Reflection, inputs wetness / snow | all |
+| **G5d** | **Curtains and blinds** in the fake interiors' windows: drawn or lowered to a random extent per window, lit from the room | `BaseMaterial3D.interior_curtains` / `_blinds` / `_curtain_color` | all |
+| **G6b** | **PlanarReflection3D in the editor**: a gizmo with the size's handles, the reflection previewed with the editor's camera (the scene untouched); no reflection rendered while the mirror is out of view | `PlanarReflection3D.is_in_view` | all |
+| **G7c** | **The displacement's mipmap** chosen for a tessellated mesh (about a texel per edge), set by Tessellate Mesh... | `MeshTessellator.get_displacement_texture_lod` | all |
+| **E13b** | **The frame's depth pyramid** for effects and GPU culling: every mipmap of the depth's range (farthest, nearest), built on demand | `RenderSceneBuffersRD.get_hiz` | Forward+, Mobile |
+| **E14c** | **A second vec4 of custom data** per MultiMesh instance (`INSTANCE_CUSTOM2`) | `MultiMesh.use_custom_data2`, `RS.multimesh_instance_set_custom_data2` | Forward+, Mobile |
+| **G5e** | **Octahedral impostors with depth** for far cranes, masts, ships: one quad, 3 parallax-traced frames blended, lit normals, true depth and shadows; editor bake | `OctahedralImpostorBaker` | Forward+, Mobile, Compatibility |
+| **E10c** | **Scrolling shadow cascades**: a cascade that moved with the camera shifts its cached depth and draws only the uncovered strips; the same image as redrawing | `rendering/lights_and_shadows/directional_shadow/cache_scrolling` | Forward+ |
 | **M1–M3** | **Materials** after "Material Advances in Call of Duty: WWII" (Chan 2018): multiple-scattering diffuse, micro-shadowing of direct light by the material's AO, multi-bounce AO for every occlusion | `rendering/shading/overrides/multiscatter_diffuse`, `micro_shadowing`, `multi_bounce_ao` (on by default) | Forward+, Mobile |
-| **fixes** | E6 async-compute barrier stage masks (`0013`); Compatibility 3D shaders failed to compile (`0035`); a material whose `Texture2DRD` lost its RD texture stopped drawing (`0040`) | — | — |
+| **M6** | **Sheen** (cloth): Charlie lobe (Estevez and Kulla 2017) with energy taken from the base layer | `BaseMaterial3D.sheen_*`; fragment built-ins `SHEEN`, `SHEEN_ROUGHNESS` | Forward+, Mobile |
+| **F5** | **Thin-film iridescence** (Belcour and Barla 2017): oil on water, heat tint | `BaseMaterial3D.iridescence_*`; `IRIDESCENCE`, `IRIDESCENCE_IOR`, `IRIDESCENCE_THICKNESS` | Forward+, Mobile |
+| **F6** | **Physical refraction**: index of refraction, slab thickness, Beer-Lambert absorption, Fresnel of the interface | `BaseMaterial3D.refraction_physical`, `refraction_ior`, `refraction_thickness`, `refraction_absorption_color/_distance` | Forward+, Mobile |
+| **M4, M8** | Reoriented normal mapping for the detail normal; measured F0 of 13 metals | `BaseMaterial3D.detail_normal_rnm`, `BaseMaterial3D.get_metal_albedo(Metal)` | all |
+| **M5** | Height and cavity occlusion from a normal map, for materials without an AO map | `Image.normal_map_to_height()`, `Image.normal_map_to_cavity()` | — (CPU) |
+| **F4** | The roughness limiter (specular anti-aliasing) measures normal variance in output pixels under a temporal upscaler | `rendering/anti_aliasing/screen_space_roughness_limiter/*` | Forward+, Mobile |
+| **fixes** | E6 async-compute barrier stage masks (`0013`); Compatibility 3D shaders failed to compile (`0035`); a material whose `Texture2DRD` lost its RD texture stopped drawing (`0040`); Mobile depth and unshaded passes failed to compile with `micro_shadowing` on (`0048`); FFX 3 backend names copied with `wcsncpy` without a terminator, sheen and iridescence outputs in VisualShader and the text shader editor (`0049`); a deadlock at startup between shader variant and pipeline compilation, stock (`0050`); directional soft shadows (PCSS): a halo around thin objects, no contact hardening, twice the light's size, self-shadowing of tilted receivers in the kernel; an uninitialized `EditorDock` layout, all stock (`0053`) | — | — |
 | **core** | Fork identity: the `mariner` feature tag in every build, default build name `mariner` | `OS.has_feature("mariner")` | all |
 | **tests** | doctest coverage of all of the above, `tests/mariner/test_mariner_*.cpp`, tag `[Mariner]` | `scons tests=yes` | — |
 
 A detailed description of each item (design, limitations, GDScript examples, manual test checklists) is in
 `engine/README.md` of the game repository (in Russian). End-to-end scenes for lavapipe or a real GPU are in
-`engine/tests/eNN/` and `engine/tests/f/` there.
+`engine/tests/eNN/`, `engine/tests/f/` and `engine/tests/m/` there.
 
 ### API in short
 
@@ -256,7 +285,7 @@ patch series in `engine/patches/`:
 | `shaders/effects/cas.glsl` (E23) | AMD FidelityFX CAS, as used by Spartan Engine | MIT |
 | `thirdparty/amd-fsr3/` (E24) | AMD FidelityFX SDK 1.1.4: FSR 3.1 and frame generation, with 2 small patches | MIT |
 
-Everything else (E9–E25, F1, F3, M1–M3) is our own code, written after published papers. Ideas from other engines
+Everything else (E9–E25, F1–F6, M1–M8) is our own code, written after published papers. Ideas from other engines
 (CryEngine, X-Ray, Filament, Spartan after `cb258a150`) are used without copying code. `COPYRIGHT.txt` lists every
 third-party file.
 
@@ -275,6 +304,8 @@ third-party file.
 * GPU static batches (E25) are not culled on the GPU for dual-paraboloid point light shadows and XR; they are drawn
   whole there. Fading visibility ranges and `visibility_parent` keep an instance on the regular path.
 * FSR 3 frame generation is Vulkan-only and needs V-Sync.
+* The new fragment built-ins `SHEEN*` and `IRIDESCENCE*` are accepted by Compatibility but have no effect there. No
+  VisualShader nodes for them yet.
 * Color grading (F3), lens effects, motion blur, contact shadows, DDGI, ReSTIR and GPU static batches are Forward+
   only.
 * GPU-dependent parts are tested by building, doctest, end-to-end scenes on lavapipe, and in the game on a PC with an

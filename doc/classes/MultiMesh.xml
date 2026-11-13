@@ -37,6 +37,13 @@
 				Returns the custom data that has been set for a specific instance.
 			</description>
 		</method>
+		<method name="get_instance_custom_data2" qualifiers="const">
+			<return type="Color" />
+			<param index="0" name="instance" type="int" />
+			<description>
+				Returns the second custom data of the instance (Mariner E14c). See [member use_custom_data2].
+			</description>
+		</method>
 		<method name="get_instance_transform" qualifiers="const">
 			<return type="Transform3D" />
 			<param index="0" name="instance" type="int" />
@@ -97,6 +104,14 @@
 				This custom instance data has to be manually accessed in your custom shader using [code]INSTANCE_CUSTOM[/code].
 			</description>
 		</method>
+		<method name="set_instance_custom_data2">
+			<return type="void" />
+			<param index="0" name="instance" type="int" />
+			<param index="1" name="custom_data" type="Color" />
+			<description>
+				Sets the second custom data of the instance (Mariner E14c), read in the vertex shader as [code]INSTANCE_CUSTOM2[/code]. See [member use_custom_data2].
+			</description>
+		</method>
 		<method name="set_instance_transform">
 			<return type="void" />
 			<param index="0" name="instance" type="int" />
@@ -153,6 +168,10 @@
 		</member>
 		<member name="use_custom_data" type="bool" setter="set_use_custom_data" getter="is_using_custom_data" default="false">
 			If [code]true[/code], the [MultiMesh] will use custom data (see [method set_instance_custom_data]). Can only be set when [member instance_count] is [code]0[/code] or less. This means that you need to call this method before setting the instance count, or temporarily reset it to [code]0[/code].
+		</member>
+		<member name="use_custom_data2" type="bool" setter="set_use_custom_data2" getter="is_using_custom_data2" default="false">
+			If [code]true[/code], each instance has a second [Color] of custom data after the first (Mariner E14c): eight floats per instance in all, the second four read in the vertex shader as [code]INSTANCE_CUSTOM2[/code]. Needs [member use_custom_data] and [constant TRANSFORM_3D]; in [member buffer] the instance takes 4 more floats after its custom data. Like [member use_custom_data], it can only be changed while [member instance_count] is [code]0[/code].
+			[b]Note:[/b] Forward+ and Mobile only: the Compatibility renderer keeps the buffer's layout but has no vertex attribute left for it, [code]INSTANCE_CUSTOM2[/code] reads [code]vec4(0.0)[/code] there.
 		</member>
 		<member name="visible_instance_count" type="int" setter="set_visible_instance_count" getter="get_visible_instance_count" default="-1">
 			Limits the number of instances drawn, -1 draws all instances. Changing this does not change the sizes of the buffers.

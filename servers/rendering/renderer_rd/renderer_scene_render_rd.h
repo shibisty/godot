@@ -37,6 +37,8 @@
 #include "servers/rendering/renderer_rd/effects/debug_effects.h"
 #include "servers/rendering/renderer_rd/effects/fsr.h"
 #include "servers/rendering/renderer_rd/effects/fsr3_upscaler.h"
+#include "servers/rendering/renderer_rd/effects/gather_dof.h"
+#include "servers/rendering/renderer_rd/effects/hiz_pyramid.h" // Mariner E13b.
 #include "servers/rendering/renderer_rd/effects/lens_flare.h"
 #include "servers/rendering/renderer_rd/effects/luminance.h"
 #include "servers/rendering/renderer_rd/effects/motion_blur.h"
@@ -65,10 +67,12 @@ class RendererSceneRenderRD : public RendererSceneRender, public RenderingShader
 protected:
 	RendererRD::ForwardIDStorage *forward_id_storage = nullptr;
 	RendererRD::BokehDOF *bokeh_dof = nullptr;
+	RendererRD::GatherDOF *gather_dof = nullptr; // Mariner F2.
 	RendererRD::MotionBlur *motion_blur = nullptr; // Mariner E15a.
 	RendererRD::LensFlare *lens_flare = nullptr; // Mariner E15b.
 	RendererRD::CAS *cas = nullptr; // Mariner E23.
 	RendererRD::CopyEffects *copy_effects = nullptr;
+	RendererRD::HiZPyramid *hiz_pyramid = nullptr; // Mariner E13b.
 	RendererRD::DebugEffects *debug_effects = nullptr;
 	RendererRD::Luminance *luminance = nullptr;
 	RendererRD::SMAA *smaa = nullptr;

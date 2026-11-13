@@ -258,9 +258,32 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 		ubo.IBL_exposure_normalization = 1.0;
 	}
 
+	// Mariner G4: the wetness of the world (WETNESS in shaders); G4b: the snow on it (SNOW).
+	ubo.weather[0] = render_scene_render->is_environment(p_env) ? render_scene_render->environment_get_wetness(p_env) : 0.0f;
+	ubo.weather[1] = render_scene_render->is_environment(p_env) ? render_scene_render->environment_get_snow(p_env) : 0.0f;
+	ubo.weather[2] = 0.0f;
+	ubo.weather[3] = 0.0f;
+
+	// Mariner G6: the camera's clip plane in view space (gl_ClipDistance in the scene shaders).
+	if (use_clip_plane) {
+		const Plane view_plane = cam_transform.affine_inverse().xform(clip_plane);
+		ubo.clip_plane[0] = view_plane.normal.x;
+		ubo.clip_plane[1] = view_plane.normal.y;
+		ubo.clip_plane[2] = view_plane.normal.z;
+		ubo.clip_plane[3] = -view_plane.d;
+	} else {
+		ubo.clip_plane[0] = 0.0f;
+		ubo.clip_plane[1] = 0.0f;
+		ubo.clip_plane[2] = 0.0f;
+		ubo.clip_plane[3] = 1.0f;
+	}
+
 	bool roughness_limiter_enabled = p_opaque_render_buffers && render_scene_render->screen_space_roughness_limiter_is_active();
 	ubo.flags |= roughness_limiter_enabled ? SCENE_DATA_FLAGS_USE_ROUGHNESS_LIMITER : 0;
-	ubo.roughness_limiter_amount = render_scene_render->screen_space_roughness_limiter_get_amount();
+	// Mariner F4: under a temporal upscaler the image is resolved at the output resolution, so the normal variance
+	// over a pixel is measured in output pixels (Filament's derivativesScale, Tokuyoshi and Kaplanyan 2019): the
+	// derivatives of an internal pixel are scaled by internal / output size.
+	ubo.roughness_limiter_amount = render_scene_render->screen_space_roughness_limiter_get_amount() * roughness_limiter_resolution_scale * roughness_limiter_resolution_scale;
 	ubo.roughness_limiter_limit = render_scene_render->screen_space_roughness_limiter_get_limit();
 
 	if (calculate_motion_vectors) {

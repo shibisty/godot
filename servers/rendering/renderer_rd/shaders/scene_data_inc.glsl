@@ -82,4 +82,7 @@ struct SceneData {
 	float IBL_exposure_normalization;
 	uint camera_visible_layers;
 	float pass_alpha_multiplier;
+
+	vec4 weather; // Mariner G4: x the wetness of the world (Environment.wetness); G4b: y the snow (Environment.snow); zw reserved.
+	vec4 clip_plane; // Mariner G6: view space; (0, 0, 0, 1) - none.
 };

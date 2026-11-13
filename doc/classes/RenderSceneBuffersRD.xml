@@ -96,6 +96,19 @@
 				Returns the FSR sharpness value used while rendering the 3D content (if [method get_scaling_3d_mode] is an FSR mode).
 			</description>
 		</method>
+		<method name="get_hiz">
+			<return type="RID" />
+			<param index="0" name="update" type="bool" default="false" />
+			<description>
+				Returns the depth pyramid (Hi-Z) of the frame (Mariner E13b): an [code]RG32F[/code] texture of the internal size with all its mipmaps (and a layer per view), [code]r[/code] the farthest raw depth each texel covers (the smallest, the depth is reverse Z: [code]0.0[/code] is the far plane, the sky), [code]g[/code] the nearest. Odd-sized levels give their last row and column to the last texel of the next, so every level covers the whole depth. For occlusion culling and effects on the GPU (compute shaders of a [CompositorEffect], Terra's culling). Built from the depth buffer at the first call of the frame - call it from an effect after the opaque pass ([constant CompositorEffect.EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT] also works with the Mobile renderer) - or again with [param update] [code]true[/code] after more depth was drawn. Forward+ and Mobile.
+			</description>
+		</method>
+		<method name="get_hiz_mipmap_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of mipmaps of [method get_hiz]'s texture (down to 1 x 1).
+			</description>
+		</method>
 		<method name="get_internal_size" qualifiers="const">
 			<return type="Vector2i" />
 			<description>
@@ -122,10 +135,16 @@
 				Returns the slice [param layer] of the copy of the depth buffer made right before the late opaque pass ([code]R32_SFLOAT[/code], same values as [method get_depth_layer]), i.e. the depth of the scene without late opaque surfaces. Late opaque materials read the same texture through [code]hint_depth_texture[/code]. Compared with [method get_depth_layer] (which includes them), it gives the thickness of a late surface such as water over what lies behind it. Returns an invalid RID when no late opaque surface was drawn this frame (see [method has_opaque_late_textures]).
 			</description>
 		</method>
+		<method name="get_raytracing_geometry_buffers" qualifiers="const" experimental="Part of the raytracing scene of a custom engine build.">
+			<return type="RID[]" />
+			<description>
+				Returns the storage buffers the raytracing scene's instance records ([method get_raytracing_instance_buffer]) point at: mesh vertex, attribute and index buffers and MultiMesh instance data, indexed by the [code]*_buffer[/code] fields. Element 0 is a small dummy buffer (no buffer); the array is padded with it to 4096 elements. Bind it as an array of storage buffers, [code]layout(std430) readonly buffer B { uint v[]; } buffers[4096];[/code], index it with [code]nonuniformEXT()[/code] and read 4-byte words at the record's [code]*_offset[/code] fields (Mariner E5d: arrays of buffers instead of buffer device addresses, so that the same shaders run on Direct3D 12). Empty until the first raytracing scene is built; check [method has_raytracing_scene] first.
+			</description>
+		</method>
 		<method name="get_raytracing_instance_buffer" qualifiers="const" experimental="Part of the raytracing scene of a custom engine build.">
 			<return type="RID" />
 			<description>
-				Returns the storage buffer with one 128-byte record per instance of the raytracing scene TLAS ([method get_raytracing_tlas]), indexed by the instance custom index ([code]rayQueryGetIntersectionInstanceCustomIndexEXT[/code]). Layout (std430): [code]uvec2 vertex_address, attribute_address, index_address, multimesh_address; uint vertex_count, position_stride, normal_byte_offset, normal_stride, tangent_byte_offset, tangent_stride, attribute_stride, uv_byte_offset, uv_scale_packed, index_format, primitive_count, flags; float aabb_size_x, aabb_size_y, aabb_size_z; uint color_byte_offset; float aabb_pos_x, aabb_pos_y, aabb_pos_z; uint layer_mask, mm_vertices_per_instance, mm_stride, mm_color_offset, mm_custom_offset;[/code]. Addresses are buffer device addresses of the mesh vertex, attribute and index buffers (read with [code]GL_EXT_buffer_reference[/code]); [code]0xFFFFFFFF[/code] offsets mean the attribute is missing. [code]index_format[/code]: 0 = uint16, 1 = uint32, 2 = not indexed. [code]flags[/code]: 1 = compressed positions (unorm16, the TLAS transform includes the AABB), 4 = skinned / blend shapes, 8 = merged MultiMesh (instance = vertex index / [code]mm_vertices_per_instance[/code]), 16 = one MultiMesh instance. [code]multimesh_address[/code] points at the MultiMesh instance data (12 transform floats, then color and custom data at [code]mm_color_offset[/code] / [code]mm_custom_offset[/code] floats). Returns an invalid RID when there is no raytracing scene this frame.
+				Returns the storage buffer with one 128-byte record per instance of the raytracing scene TLAS ([method get_raytracing_tlas]), indexed by the instance custom index ([code]rayQueryGetIntersectionInstanceCustomIndexEXT[/code]). Layout (std430): [code]uint vertex_buffer, vertex_offset, attribute_buffer, attribute_offset, index_buffer, index_offset, multimesh_buffer, multimesh_offset; uint vertex_count, position_stride, normal_byte_offset, normal_stride, tangent_byte_offset, tangent_stride, attribute_stride, uv_byte_offset, uv_scale_packed, index_format, primitive_count, flags; float aabb_size_x, aabb_size_y, aabb_size_z; uint color_byte_offset; float aabb_pos_x, aabb_pos_y, aabb_pos_z; uint layer_mask, mm_vertices_per_instance, mm_stride, mm_color_offset, mm_custom_offset;[/code]. The buffers are indices into [method get_raytracing_geometry_buffers] (0 = none), the offsets are in 4-byte words (Mariner E5d: no buffer device addresses, which D3D12 shaders cannot read); [code]0xFFFFFFFF[/code] byte offsets mean the attribute is missing. [code]index_format[/code]: 0 = uint16, 1 = uint32, 2 = not indexed. [code]flags[/code]: 1 = compressed positions (unorm16, the TLAS transform includes the AABB), 4 = skinned / blend shapes, 8 = merged MultiMesh (instance = vertex index / [code]mm_vertices_per_instance[/code]), 16 = one MultiMesh instance. [code]multimesh_buffer[/code] / [code]multimesh_offset[/code] point at the MultiMesh instance data (12 transform floats, then color and custom data at [code]mm_color_offset[/code] / [code]mm_custom_offset[/code] floats). Returns an invalid RID when there is no raytracing scene this frame.
 			</description>
 		</method>
 		<method name="get_raytracing_instance_count" qualifiers="const" experimental="Part of the raytracing scene of a custom engine build.">
@@ -283,7 +302,7 @@
 		<method name="has_raytracing_scene" qualifiers="const" experimental="Part of the raytracing scene of a custom engine build.">
 			<return type="bool" />
 			<description>
-				Returns [code]true[/code] if the raytracing scene (TLAS and instance data) was built for this frame. Requires [member Viewport.raytracing_scene_enabled], [member ProjectSettings.rendering/raytracing/scene_acceleration_structures], the Forward+ renderer and a Vulkan device with ray query support ([constant RenderingDevice.SUPPORTS_RAY_QUERY]).
+				Returns [code]true[/code] if the raytracing scene (TLAS and instance data) was built for this frame. Requires [member Viewport.raytracing_scene_enabled], [member ProjectSettings.rendering/raytracing/scene_acceleration_structures], the Forward+ renderer and a Vulkan or Direct3D 12 device with ray query support ([constant RenderingDevice.SUPPORTS_RAY_QUERY]).
 			</description>
 		</method>
 		<method name="has_texture" qualifiers="const">

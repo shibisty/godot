@@ -474,6 +474,7 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 		pipeline_specialization.multimesh_format_2d = bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_FORMAT_2D);
 		pipeline_specialization.multimesh_has_color = bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_HAS_COLOR);
 		pipeline_specialization.multimesh_has_custom_data = bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA);
+		pipeline_specialization.multimesh_has_custom_data2 = !(surf->owner->base_flags & INSTANCE_DATA_FLAG_PARTICLES) && bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA2); // Mariner E14c.
 
 		if constexpr (p_pass_mode == PASS_MODE_COLOR) {
 			pipeline_specialization.use_light_soft_shadows = element_info.uses_softshadow;
@@ -782,6 +783,14 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 
 	float luminance_multiplier = rd.is_valid() ? rd->get_luminance_multiplier() : 1.0;
 
+	{
+		// Mariner F4.
+		float limiter_scale = 1.0f;
+		if (rd.is_valid() && RSE::scaling_3d_mode_type(rd->get_scaling_3d_mode()) == RSE::VIEWPORT_SCALING_3D_TYPE_TEMPORAL && rd->get_target_size().x > 0) {
+			limiter_scale = MIN(1.0f, float(rd->get_internal_size().x) / float(rd->get_target_size().x));
+		}
+		p_render_data->scene_data->roughness_limiter_resolution_scale = limiter_scale;
+	}
 	p_render_data->scene_data->update_ubo(scene_state.uniform_buffers[uniform_buffer_index], get_debug_draw_mode(), env, reflection_probe_instance, p_render_data->camera_attributes, p_pancake_shadows, p_screen_size, p_viewport_size, p_default_bg_color, luminance_multiplier, p_opaque_render_buffers, p_apply_alpha_multiplier);
 
 	// now do implementation UBO
@@ -2095,7 +2104,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_pathtracing = false;
 	if (rb_data.is_valid() && !is_reflection_probe && is_environment(p_render_data->environment) && environment_get_pathtracing_enabled(p_render_data->environment)) {
 		if (!RenderPathtracer::is_supported()) {
-			WARN_PRINT_ONCE("Path tracing needs Forward+ on Vulkan with ray query support and the rendering/raytracing/scene_acceleration_structures project setting; rendering rasterized.");
+			WARN_PRINT_ONCE("Path tracing needs Forward+ on Vulkan or Direct3D 12 with ray query support and the rendering/raytracing/scene_acceleration_structures project setting; rendering rasterized.");
 		} else if (!p_render_data->rt_instances) {
 			WARN_PRINT_ONCE("Path tracing needs Viewport.raytracing_scene_enabled on the viewport; rendering rasterized.");
 		} else if (!RenderPathtracer::can_render(p_render_data)) {
@@ -2112,7 +2121,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	// the Light3D.light_restir lights for the opaque pass, which takes their light from ReSTIR.
 	if (rb.is_valid() && !is_reflection_probe && !using_pathtracing && is_environment(p_render_data->environment) && RendererEnvironmentStorage::get_singleton()->environment_get_restir_enabled(p_render_data->environment) && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED) {
 		if (!RenderRestirDI::is_supported()) {
-			WARN_PRINT_ONCE("ReSTIR needs Forward+ on Vulkan with ray query support and the rendering/raytracing/scene_acceleration_structures project setting; Light3D.light_restir lights are rasterized.");
+			WARN_PRINT_ONCE("ReSTIR needs Forward+ on Vulkan or Direct3D 12 with ray query support and the rendering/raytracing/scene_acceleration_structures project setting; Light3D.light_restir lights are rasterized.");
 		} else if (!p_render_data->rt_instances) {
 			WARN_PRINT_ONCE("ReSTIR needs Viewport.raytracing_scene_enabled on the viewport; Light3D.light_restir lights are rasterized.");
 		} else if (rb->get_view_count() != 1 || rb->get_msaa_3d() != RSE::VIEWPORT_MSAA_DISABLED) {
@@ -2481,13 +2490,33 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		RD::get_singleton()->draw_command_end_label();
 	}
 
+	// Mariner G1a: the overhead map of the camera (Environment.overhead_map_*): depth from above, then the height
+	// mipmaps, before the color passes sample it.
+	if (rb.is_valid() && !is_reflection_probe) {
+		if (p_render_data->overhead_map && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED) {
+			const RendererSceneRender::OverheadMapData &om = *p_render_data->overhead_map;
+			Ref<RendererRD::OverheadMap::Buffers> om_buffers = overhead_map->get_buffers(rb.ptr(), om.settings.resolution);
+			Transform3D om_xform;
+			Projection om_proj;
+			RendererRD::OverheadMap::get_camera(om.box_min, om.box_max, om_xform, om_proj);
+			RENDER_TIMESTAMP("Overhead Map");
+			_render_particle_collider_heightfield(om_buffers->framebuffer, om_xform, om_proj, om.instances);
+			overhead_map->update(om_buffers, om);
+			// Mariner G1c: for the particles of the next frame (GPUParticles3D.collision_overhead_map).
+			const Size2i om_view = rb->get_internal_size();
+			RendererRD::ParticlesStorage::get_singleton()->overhead_collision_set(RSG::rasterizer->get_frame_number(), uint64_t(om_view.width) * uint64_t(om_view.height), om_buffers->height, om.box_min, om.box_max);
+		} else {
+			overhead_map->deactivate(rb.ptr());
+		}
+	}
+
 	// Mariner E12: DDGI probes (Environment.ddgi_enabled) on the raytracing scene, sampled by the color passes.
 	if (rb.is_valid() && !is_reflection_probe) {
 		const bool want_ddgi = !using_pathtracing && is_environment(p_render_data->environment) && environment_get_ddgi_enabled(p_render_data->environment) && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED;
 		bool ddgi_updated = false;
 		if (want_ddgi) {
 			if (!RenderDDGI::is_supported()) {
-				WARN_PRINT_ONCE("DDGI needs Forward+ on Vulkan with ray query support and the rendering/raytracing/scene_acceleration_structures project setting; using the environment's ambient light.");
+				WARN_PRINT_ONCE("DDGI needs Forward+ on Vulkan or Direct3D 12 with ray query support and the rendering/raytracing/scene_acceleration_structures project setting; using the environment's ambient light.");
 			} else if (!p_render_data->rt_instances) {
 				WARN_PRINT_ONCE("DDGI needs Viewport.raytracing_scene_enabled on the viewport; using the environment's ambient light.");
 			} else {
@@ -3365,8 +3394,17 @@ void RenderForwardClustered::_render_shadow_pass(RID p_light, RID p_shadow_atlas
 		// them changed), dynamic casters are drawn on top every frame.
 		_directional_shadow_cache_stats_frame();
 		DirectionalShadowCache::Entry &entry = directional_shadow_cache.entries[p_light].cascades[p_pass];
-		const bool hit = entry.valid && entry.generation == directional_shadow_cache.generation && entry.static_hash == p_cache_data->static_hash && entry.rect == atlas_rect && entry.projection == light_projection && entry.transform == light_transform && entry.zfar == zfar && entry.reverse_cull_face == reverse_cull_face && entry.use_pancake == use_pancake;
-		if (!hit) {
+		const bool same_setup = entry.valid && entry.generation == directional_shadow_cache.generation && entry.rect == atlas_rect && entry.projection == light_projection && entry.transform.basis == light_transform.basis && entry.zfar == zfar && entry.reverse_cull_face == reverse_cull_face && entry.use_pancake == use_pancake;
+		const bool hit = same_setup && entry.static_hash == p_cache_data->static_hash && entry.transform.origin == light_transform.origin;
+		// Mariner E10c: the cascade moved, the static casters where it overlaps the last one are the same - shift the
+		// cached depth and draw only the uncovered strips.
+		const bool scrolled = !hit && same_setup && directional_shadow_cache.scrolling && p_cache_data->scroll && entry.transform == p_cache_data->scroll_from_transform && _directional_shadow_cache_scroll(entry, p_cache_data, light_projection, light_transform, zfar, reverse_cull_face, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, atlas_rect, flip_y, p_render_info, p_viewport_size, p_main_cam_transform);
+		if (scrolled) {
+			entry.static_hash = p_cache_data->static_hash;
+			entry.transform = light_transform;
+			directional_shadow_cache.scrolls++;
+			directional_shadow_cache.total_scrolls++;
+		} else if (!hit) {
 			_render_shadow_append(directional_shadow_cache.framebuffer, p_cache_data->static_instances, light_projection, light_transform, zfar, 0, 0, reverse_cull_face, false, false, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, atlas_rect, flip_y, true, false, false, p_render_info, p_viewport_size, p_main_cam_transform);
 			entry.valid = true;
 			entry.generation = directional_shadow_cache.generation;
@@ -3399,6 +3437,113 @@ void RenderForwardClustered::_render_shadow_pass(RID p_light, RID p_shadow_atlas
 	}
 }
 
+// Mariner E10c: cascade scrolling. The cascade moved by whole texels across the light (and anywhere along it): the
+// cached depth where the old and new cascades overlap is copied over (shifted; its depth moved by the change of the
+// near plane), the uncovered strips are cleared and the static casters reaching into them drawn there (with the part
+// of the projection that covers the strip), and the casters that newly reach the overlap from beyond the old depth
+// range drawn over it.
+bool RenderForwardClustered::_directional_shadow_cache_scroll(DirectionalShadowCache::Entry &r_entry, const RenderShadowData *p_cache_data, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, bool p_reverse_cull_face, bool p_use_pancake, float p_lod_distance_multiplier, float p_screen_mesh_lod_threshold, const Rect2i &p_rect, bool p_flip_y, RenderingServerTypes::RenderInfo *p_render_info, const Size2i &p_viewport_size, const Transform3D &p_main_cam_transform) {
+	const Basis &basis = p_transform.basis;
+	const Vector3 bx = basis.get_column(Vector3::AXIS_X);
+	const Vector3 by = basis.get_column(Vector3::AXIS_Y);
+	const Vector3 bz = basis.get_column(Vector3::AXIS_Z);
+	const real_t hx = 1.0 / p_projection.columns[0][0];
+	const real_t hy = 1.0 / p_projection.columns[1][1];
+	// The depth range of the cascade's projection (p_zfar is the light's range, not the cascade's).
+	const real_t depth_range = 2.0 / Math::abs(p_projection.columns[2][2]);
+	const real_t texel_x = 2.0 * hx / p_rect.size.width;
+	const real_t texel_y = 2.0 * hy / p_rect.size.height;
+	const Vector3 delta = p_transform.origin - r_entry.transform.origin;
+	const real_t fx = bx.dot(delta) / texel_x;
+	const real_t fy = by.dot(delta) / texel_y;
+	const int dx = int(Math::round(fx));
+	const int dy = int(Math::round(fy));
+	if (Math::abs(fx - dx) > 0.01 || Math::abs(fy - dy) > 0.01 || Math::abs(dx) >= p_rect.size.width || Math::abs(dy) >= p_rect.size.height) {
+		return false;
+	}
+	// Where a texel of the old cascade lands in the new one: the image's X and Y (rows) follow the light's X and Y.
+	const Vector2i shift(-dx, -dy);
+	const Rect2i dst = p_rect.intersection(Rect2i(p_rect.position + shift, p_rect.size));
+	const Rect2i src(dst.position - shift, dst.size);
+	// Depth is reversed (1 at the near plane, 0 at zfar): the near plane rising by dz moves every caster deeper.
+	const float depth_offset = -float(bz.dot(delta) / depth_range);
+
+	// Texel rect -> the light-space rectangle relative to the cascade's origin.
+	auto rect_projection = [&](const Rect2i &p_r, real_t &r_x0, real_t &r_x1, real_t &r_y0, real_t &r_y1) {
+		const Vector2i rel = p_r.position - p_rect.position;
+		r_x0 = -hx + rel.x * texel_x;
+		r_x1 = -hx + (rel.x + p_r.size.width) * texel_x;
+		r_y0 = -hy + rel.y * texel_y;
+		r_y1 = -hy + (rel.y + p_r.size.height) * texel_y;
+	};
+	LocalVector<Rect2i> strips;
+	if (dst.size.height < p_rect.size.height) {
+		const int h = p_rect.size.height - dst.size.height;
+		strips.push_back(Rect2i(p_rect.position.x, shift.y > 0 ? p_rect.position.y : p_rect.position.y + p_rect.size.height - h, p_rect.size.width, h));
+	}
+	if (dst.size.width < p_rect.size.width) {
+		const int w = p_rect.size.width - dst.size.width;
+		strips.push_back(Rect2i(shift.x > 0 ? p_rect.position.x : p_rect.position.x + p_rect.size.width - w, dst.position.y, w, dst.size.height));
+	}
+
+	const Vector3 o(bx.dot(p_transform.origin), by.dot(p_transform.origin), bz.dot(p_transform.origin));
+	bool first = true;
+	auto mark_first = [&]() {
+		if (!first) {
+			return;
+		}
+		SceneState::ShadowPass &pass = scene_state.shadow_passes[scene_state.shadow_passes.size() - 1];
+		pass.scroll = true;
+		pass.scroll_texture = directional_shadow_cache.texture;
+		pass.scroll_scratch = directional_shadow_cache.scratch;
+		pass.scroll_rect = p_rect;
+		pass.scroll_src = src;
+		pass.scroll_dst = dst;
+		pass.scroll_depth_offset = depth_offset;
+		first = false;
+	};
+	PagedArray<RenderGeometryInstance *> strip_instances;
+	strip_instances.set_page_pool(&directional_shadow_cache.strip_page_pool);
+	for (const Rect2i &strip : strips) {
+		real_t x0, x1, y0, y1;
+		rect_projection(strip, x0, x1, y0, y1);
+		strip_instances.clear();
+		for (uint32_t i = 0; i < p_cache_data->static_instances.size(); i++) {
+			const RenderGeometryInstanceBase *gi = static_cast<const RenderGeometryInstanceBase *>(p_cache_data->static_instances[i]);
+			real_t mn_x = 1e30, mx_x = -1e30, mn_y = 1e30, mx_y = -1e30;
+			for (int k = 0; k < 8; k++) {
+				const Vector3 v = gi->transformed_aabb.get_endpoint(k);
+				const real_t lx = bx.dot(v) - o.x;
+				const real_t ly = by.dot(v) - o.y;
+				mn_x = MIN(mn_x, lx);
+				mx_x = MAX(mx_x, lx);
+				mn_y = MIN(mn_y, ly);
+				mx_y = MAX(mx_y, ly);
+			}
+			if (mn_x < x1 && mx_x > x0 && mn_y < y1 && mx_y > y0) {
+				strip_instances.push_back(p_cache_data->static_instances[i]);
+			}
+		}
+		directional_shadow_cache.scroll_strip_instances += strip_instances.size();
+		Projection strip_projection;
+		strip_projection.set_orthogonal(x0, x1, y0, y1, 0, depth_range);
+		_render_shadow_append(directional_shadow_cache.framebuffer, strip_instances, strip_projection, p_transform, p_zfar, 0, 0, p_reverse_cull_face, false, false, p_use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, strip, p_flip_y, true, false, false, p_render_info, p_viewport_size, p_main_cam_transform);
+		mark_first();
+	}
+	strip_instances.clear();
+	strip_instances.reset();
+	if (first || p_cache_data->scroll_extra_instances.size() > 0) {
+		// Over the whole cascade, after the copy (depth tested against it); also carries the copy if no strip did.
+		_render_shadow_append(directional_shadow_cache.framebuffer, p_cache_data->scroll_extra_instances, p_projection, p_transform, p_zfar, 0, 0, p_reverse_cull_face, false, false, p_use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, p_rect, p_flip_y, false, false, false, p_render_info, p_viewport_size, p_main_cam_transform);
+		if (first) {
+			mark_first();
+		} else {
+			// The copy must precede the strips: it is on the first strip's pass, which comes before this one.
+		}
+	}
+	return true;
+}
+
 bool RenderForwardClustered::_directional_shadow_cache_prepare() {
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 	const RID atlas = light_storage->directional_shadow_get_texture();
@@ -3416,8 +3561,12 @@ bool RenderForwardClustered::_directional_shadow_cache_prepare() {
 	tf.format = atlas_format.format;
 	tf.width = size.width;
 	tf.height = size.height;
-	tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
 	directional_shadow_cache.texture = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT; // Mariner E10c (a depth texture, as the copy needs).
+	directional_shadow_cache.scratch = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	ERR_FAIL_COND_V(directional_shadow_cache.scratch.is_null(), false);
+	RD::get_singleton()->set_resource_name(directional_shadow_cache.scratch, "Directional shadow cache scroll");
 	ERR_FAIL_COND_V(directional_shadow_cache.texture.is_null(), false);
 	RD::get_singleton()->set_resource_name(directional_shadow_cache.texture, "Directional shadow cache");
 	Vector<RID> fb_tex;
@@ -3438,6 +3587,10 @@ void RenderForwardClustered::_directional_shadow_cache_free() {
 		RD::get_singleton()->free_rid(directional_shadow_cache.texture);
 	}
 	directional_shadow_cache.texture = RID();
+	if (directional_shadow_cache.scratch.is_valid()) {
+		RD::get_singleton()->free_rid(directional_shadow_cache.scratch);
+	}
+	directional_shadow_cache.scratch = RID();
 	directional_shadow_cache.size = Size2i();
 	directional_shadow_cache.format = RD::DATA_FORMAT_MAX;
 	directional_shadow_cache.entries.clear();
@@ -3451,17 +3604,23 @@ void RenderForwardClustered::_directional_shadow_cache_stats_frame() {
 	}
 	Dictionary stats;
 	stats["enabled"] = directional_shadow_cache.enabled;
-	stats["cascades"] = directional_shadow_cache.hits + directional_shadow_cache.refreshes + directional_shadow_cache.uncached;
+	stats["cascades"] = directional_shadow_cache.hits + directional_shadow_cache.refreshes + directional_shadow_cache.scrolls + directional_shadow_cache.uncached;
 	stats["hits"] = directional_shadow_cache.hits;
 	stats["refreshes"] = directional_shadow_cache.refreshes;
+	stats["scrolls"] = directional_shadow_cache.scrolls; // Mariner E10c.
+	stats["scroll_strip_instances"] = directional_shadow_cache.scroll_strip_instances;
+	stats["total_scrolls"] = int64_t(directional_shadow_cache.total_scrolls);
 	stats["uncached"] = directional_shadow_cache.uncached;
 	stats["static_instances"] = directional_shadow_cache.static_instances;
 	stats["dynamic_instances"] = directional_shadow_cache.dynamic_instances;
 	stats["memory"] = int64_t(directional_shadow_cache.size.width) * directional_shadow_cache.size.height * (directional_shadow_cache.format == RD::DATA_FORMAT_D16_UNORM ? 2 : 4); // Bytes.
 	directional_shadow_cache.last_stats = stats;
 	directional_shadow_cache.stats_frame = frame;
+	directional_shadow_cache.scrolling = GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/directional_shadow/cache_scrolling"); // Mariner E10c.
 	directional_shadow_cache.hits = 0;
 	directional_shadow_cache.refreshes = 0;
+	directional_shadow_cache.scrolls = 0;
+	directional_shadow_cache.scroll_strip_instances = 0;
 	directional_shadow_cache.uncached = 0;
 	directional_shadow_cache.static_instances = 0;
 	directional_shadow_cache.dynamic_instances = 0;
@@ -3492,6 +3651,7 @@ void RenderForwardClustered::directional_shadow_cache_set_enabled(bool p_enabled
 		directional_shadow_cache.last_stats = Dictionary();
 		directional_shadow_cache.total_hits = 0;
 		directional_shadow_cache.total_refreshes = 0;
+		directional_shadow_cache.total_scrolls = 0;
 	}
 }
 
@@ -3556,7 +3716,7 @@ static void _set_section_lods(RendererRD::MultiMeshShadowCull::SectionData &r_da
 	}
 	memcpy(r_data.lod_counts, p_lod_counts, sizeof(uint32_t) * Cull::MAX_LOD_BUCKETS * Cull::MAX_LOD_SURFACES);
 	r_data.info[0] = p_limits.size() + 1;
-	r_data.info[1] |= Cull::SECTION_LOD | (p_orthogonal ? Cull::SECTION_LOD_ORTHOGONAL : 0);
+	r_data.info[1] |= uint32_t(Cull::SECTION_LOD) | (p_orthogonal ? uint32_t(Cull::SECTION_LOD_ORTHOGONAL) : 0u);
 }
 
 // Mariner E25a: indirect multimeshes with view culling (MultiMesh / RenderingServer.multimesh_set_indirect_view_culling,
@@ -3868,6 +4028,11 @@ void RenderForwardClustered::_render_shadow_end() {
 	RD::get_singleton()->draw_command_begin_label("Shadow Render");
 
 	for (SceneState::ShadowPass &shadow_pass : scene_state.shadow_passes) {
+		if (shadow_pass.scroll) {
+			// Mariner E10c: the cached cascade shifted to its new position.
+			RD::get_singleton()->texture_copy(shadow_pass.scroll_texture, shadow_pass.scroll_scratch, Vector3(shadow_pass.scroll_rect.position.x, shadow_pass.scroll_rect.position.y, 0), Vector3(shadow_pass.scroll_rect.position.x, shadow_pass.scroll_rect.position.y, 0), Vector3(shadow_pass.scroll_rect.size.x, shadow_pass.scroll_rect.size.y, 1), 0, 0, 0, 0);
+			copy_effects->copy_depth_rect_to_depth_fb_shifted(shadow_pass.scroll_scratch, shadow_pass.framebuffer, shadow_pass.scroll_src, shadow_pass.scroll_dst, shadow_pass.scroll_depth_offset);
+		}
 		if (shadow_pass.copy_depth_from.is_valid()) {
 			// Mariner E10: static casters of the cascade from the directional shadow cache.
 			copy_effects->copy_depth_rect_to_depth_fb(shadow_pass.copy_depth_from, shadow_pass.framebuffer, shadow_pass.rect);
@@ -4932,6 +5097,20 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		m.append_id(use && mask.is_valid() ? mask : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE));
 		uniforms.push_back(m);
 	}
+	{
+		// Mariner G1a: the overhead map of the viewport when it was drawn for this camera, else inactive.
+		RenderSceneBuffersRD *om_rb = (p_render_data && p_render_data->overhead_map && p_render_data->reflection_probe.is_null()) ? p_render_data->render_buffers.ptr() : nullptr;
+		RD::Uniform u;
+		u.binding = 53;
+		u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
+		u.append_id(overhead_map->get_uniform_buffer(om_rb));
+		uniforms.push_back(u);
+		RD::Uniform t;
+		t.binding = 54;
+		t.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		t.append_id(overhead_map->get_height_texture(om_rb));
+		uniforms.push_back(t);
+	}
 
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.default_shader_rd, RENDER_PASS_UNIFORM_SET, uniforms);
 }
@@ -5630,6 +5809,9 @@ void RenderForwardClustered::_geometry_instance_update(RenderGeometryInstance *p
 		if (mesh_storage->multimesh_uses_custom_data(ginstance->data->base)) {
 			ginstance->base_flags |= INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA;
 		}
+		if (mesh_storage->_multimesh_uses_custom_data2(ginstance->data->base)) {
+			ginstance->base_flags |= INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA2; // Mariner E14c.
+		}
 		if (mesh_storage->multimesh_uses_indirect(ginstance->data->base)) {
 			ginstance->base_flags |= INSTANCE_DATA_FLAG_MULTIMESH_INDIRECT;
 		}
@@ -6287,6 +6469,9 @@ RenderForwardClustered::RenderForwardClustered() {
 		}
 		defines += "\n#define SDFGI_OCT_SIZE " + itos(gi.sdfgi_get_lightprobe_octahedron_size()) + "\n";
 		defines += "\n#define MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS " + itos(MAX_DIRECTIONAL_LIGHTS) + "\n";
+		if (RD::get_singleton()->has_feature(RD::SUPPORTS_CLIP_DISTANCE)) {
+			defines += "\n#define USE_CLIP_PLANE\n"; // Mariner G6.
+		}
 
 		bool force_vertex_shading = GLOBAL_GET("rendering/shading/overrides/force_vertex_shading");
 		if (force_vertex_shading) {
@@ -6427,6 +6612,7 @@ RenderForwardClustered::RenderForwardClustered() {
 	contact_shadows = memnew(RendererRD::ContactShadows); // Mariner E11.
 	hiz_occlusion_depth = memnew(RendererRD::HiZOcclusionDepth); // Mariner E13.
 	particles_screen_collision = memnew(RendererRD::ParticlesScreenCollision); // Mariner E22.
+	overhead_map = memnew(RendererRD::OverheadMap); // Mariner G1a.
 	multimesh_shadow_cull = memnew(RendererRD::MultiMeshShadowCull); // Mariner E14b.
 	ddgi = memnew(RenderDDGI); // Mariner E12 (shaders are created on first use).
 #ifdef METAL_MFXTEMPORAL_ENABLED
@@ -6465,6 +6651,10 @@ RenderForwardClustered::~RenderForwardClustered() {
 	if (particles_screen_collision) {
 		memdelete(particles_screen_collision); // Mariner E22.
 		particles_screen_collision = nullptr;
+	}
+	if (overhead_map) {
+		memdelete(overhead_map); // Mariner G1a.
+		overhead_map = nullptr;
 	}
 	if (pathtracer) {
 		memdelete(pathtracer);

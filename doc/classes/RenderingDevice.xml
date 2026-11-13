@@ -451,7 +451,7 @@
 			<param index="3" name="group_count_z" type="int" default="1" />
 			<description>
 				Draws with the bound mesh shader pipeline: launches [param group_count_x] × [param group_count_y] × [param group_count_z] workgroups of the first stage of the pipeline (the task shader, or the mesh shader when the pipeline has no task stage). No vertex or index arrays are used. The pipeline must have been created from a shader with a [constant SHADER_STAGE_MESH] stage. Group counts must not exceed [constant LIMIT_MAX_TASK_WORKGROUP_COUNT_X] (or [constant LIMIT_MAX_MESH_WORKGROUP_COUNT_X] without a task stage) and the corresponding Y/Z and total limits.
-				[b]Note:[/b] Requires [constant SUPPORTS_MESH_SHADER] (Vulkan with [code]VK_EXT_mesh_shader[/code]). Check [method has_feature] first and fall back to a vertex pipeline.
+				[b]Note:[/b] Requires [constant SUPPORTS_MESH_SHADER] (Vulkan with [code]VK_EXT_mesh_shader[/code], or Direct3D 12 with mesh shader tier 1 and [code]dxcompiler.dll[/code]). Check [method has_feature] first and fall back to a vertex pipeline.
 			</description>
 		</method>
 		<method name="draw_list_draw_mesh_tasks_indirect">
@@ -2952,21 +2952,24 @@
 		<constant name="SUPPORTS_RAY_QUERY" value="11" enum="Features">
 			Support for ray query extension.
 
-			[b]Note:[/b] This is currently only supported when using Vulkan. This is not supported on macOS and iOS (even on hardware supporting raytracing) due to MoltenVK limitations.
+			[b]Note:[/b] This is currently only supported when using Vulkan or Direct3D 12 (DXR 1.1, ray query needs shader model 6.5). This is not supported on macOS and iOS (even on hardware supporting raytracing) due to MoltenVK limitations.
 		</constant>
 		<constant name="SUPPORTS_RAYTRACING_PIPELINE" value="12" enum="Features">
 			Support for raytracing pipeline extension.
 
-			[b]Note:[/b] This is currently only supported when using Vulkan. This is not supported on macOS and iOS (even on hardware supporting raytracing) due to MoltenVK limitations.
+			[b]Note:[/b] This is currently only supported when using Vulkan or Direct3D 12 (DXR 1.1, ray query needs shader model 6.5). This is not supported on macOS and iOS (even on hardware supporting raytracing) due to MoltenVK limitations.
 		</constant>
 		<constant name="SUPPORTS_HDR_OUTPUT" value="13" enum="Features">
 			Support for high dynamic range (HDR) output.
 		</constant>
 		<constant name="SUPPORTS_MESH_SHADER" value="14" enum="Features">
-			Support for task and mesh shaders ([constant SHADER_STAGE_TASK], [constant SHADER_STAGE_MESH], [method draw_list_draw_mesh_tasks]). Available on Vulkan devices with [code]VK_EXT_mesh_shader[/code] (NVIDIA Turing and newer, AMD RDNA2 and newer, Intel Arc). Not supported on Direct3D 12 (the SPIR-V to DXIL translation has no mesh shader stages), Metal and OpenGL.
+			Support for task and mesh shaders ([constant SHADER_STAGE_TASK], [constant SHADER_STAGE_MESH], [method draw_list_draw_mesh_tasks]). Available on Vulkan devices with [code]VK_EXT_mesh_shader[/code] (NVIDIA Turing and newer, AMD RDNA2 and newer, Intel Arc). On Direct3D 12 with mesh shader tier 1 (shader model 6.5): the stages of mesh pipelines are translated to HLSL (SPIRV-Cross) and compiled by the DirectX Shader Compiler, [code]dxcompiler.dll[/code] next to the executable ([code]dxil.dll[/code] beside it validates the output); without it, this is [code]false[/code]. Specialization constants of mesh pipelines keep their default values on Direct3D 12. Not supported on Metal and OpenGL.
 		</constant>
 		<constant name="SUPPORTS_MESH_SHADER_INDIRECT_COUNT" value="15" enum="Features">
 			Support for [method draw_list_draw_mesh_tasks_indirect_count] (mesh shaders with a draw count read on the GPU).
+		</constant>
+		<constant name="SUPPORTS_CLIP_DISTANCE" value="16" enum="Features">
+			Support for user clip distances in vertex shaders ([code]gl_ClipDistance[/code]). Mariner G6: the scene shaders use them for [method RenderingServer.camera_set_clip_plane]. Not on some mobile GPUs (Mali).
 		</constant>
 		<constant name="LIMIT_MAX_BOUND_UNIFORM_SETS" value="0" enum="Limit">
 			Maximum number of uniform sets that can be bound at a given time.

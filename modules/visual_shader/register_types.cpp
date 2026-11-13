@@ -150,6 +150,8 @@ void initialize_visual_shader_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(VisualShaderNodeBillboard);
 		GDREGISTER_CLASS(VisualShaderNodeDistanceFade);
 		GDREGISTER_CLASS(VisualShaderNodeProximityFade);
+		GDREGISTER_CLASS(VisualShaderNodeDisplace); // Mariner G7.
+		GDREGISTER_CLASS(VisualShaderNodeHeightNormal);
 		GDREGISTER_CLASS(VisualShaderNodeRandomRange);
 		GDREGISTER_CLASS(VisualShaderNodeRemap);
 		GDREGISTER_CLASS(VisualShaderNodeRotationByAxis);

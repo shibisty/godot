@@ -12,15 +12,31 @@
 	<tutorials>
 	</tutorials>
 	<members>
+		<member name="auto_exposure_center_weight" type="float" setter="set_auto_exposure_center_weight" getter="get_auto_exposure_center_weight" default="0.5">
+			With [constant AUTO_EXPOSURE_MODE_HISTOGRAM]: [code]0.0[/code] weighs the whole frame alike, [code]1.0[/code] by a Gaussian around its center (exposes for what is in the middle of the view).
+		</member>
 		<member name="auto_exposure_enabled" type="bool" setter="set_auto_exposure_enabled" getter="is_auto_exposure_enabled" default="false">
 			If [code]true[/code], enables the tonemapping auto exposure mode of the scene renderer. If [code]true[/code], the renderer will automatically determine the exposure setting to adapt to the scene's illumination and the observed light.
 			[b]Note:[/b] Auto-exposure is only supported in the Forward+ rendering method, not Mobile or Compatibility.
+		</member>
+		<member name="auto_exposure_high_percentile" type="float" setter="set_auto_exposure_high_percentile" getter="get_auto_exposure_high_percentile" default="0.98">
+			With [constant AUTO_EXPOSURE_MODE_HISTOGRAM]: the part of the frame's weight below which the measurement ends; the brightest rest is left out, e.g. [code]0.98[/code] ignores the brightest 2%: the sun, lamps, a window.
+		</member>
+		<member name="auto_exposure_low_percentile" type="float" setter="set_auto_exposure_low_percentile" getter="get_auto_exposure_low_percentile" default="0.5">
+			With [constant AUTO_EXPOSURE_MODE_HISTOGRAM]: the darker part of the frame (fraction of its weight) left out of the measurement, e.g. [code]0.5[/code] measures the brighter half: dark corners and shadows do not brighten the picture.
+		</member>
+		<member name="auto_exposure_mode" type="int" setter="set_auto_exposure_mode" getter="get_auto_exposure_mode" enum="CameraAttributes.AutoExposureMode" default="0">
+			How the auto exposure measures the scene. [constant AUTO_EXPOSURE_MODE_AVERAGE] (the default) averages the luminance of the whole frame: a small very bright light (the sun, a lamp, a window) darkens everything. [constant AUTO_EXPOSURE_MODE_HISTOGRAM] (Mariner G2) builds a histogram of the log luminance and exposes for the mean between [member auto_exposure_low_percentile] and [member auto_exposure_high_percentile], center weighted ([member auto_exposure_center_weight]), with a separate speed toward darker scenes ([member auto_exposure_speed_dark]).
+			[b]Note:[/b] The histogram needs compute: on the Mobile renderer (raster effects) the average is used.
 		</member>
 		<member name="auto_exposure_scale" type="float" setter="set_auto_exposure_scale" getter="get_auto_exposure_scale" default="0.4">
 			The scale of the auto exposure effect. Affects the intensity of auto exposure.
 		</member>
 		<member name="auto_exposure_speed" type="float" setter="set_auto_exposure_speed" getter="get_auto_exposure_speed" default="0.5">
 			The speed of the auto exposure effect. Affects the time needed for the camera to perform auto exposure.
+		</member>
+		<member name="auto_exposure_speed_dark" type="float" setter="set_auto_exposure_speed_dark" getter="get_auto_exposure_speed_dark" default="0.25">
+			With [constant AUTO_EXPOSURE_MODE_HISTOGRAM]: the speed of the adaptation toward a darker scene (going from the deck into a cabin); [member auto_exposure_speed] is the speed toward a brighter one. The adaptation is exponential in log luminance: [code]1 - exp(-speed * time)[/code] of the way per step.
 		</member>
 		<member name="exposure_multiplier" type="float" setter="set_exposure_multiplier" getter="get_exposure_multiplier" default="1.0">
 			Multiplier for the exposure amount. A higher value results in a brighter image.
@@ -95,4 +111,12 @@
 			Longest blur, as a fraction of the view's height ([code]0.04[/code]: 43 pixels at 1080p). Longer blur costs more (larger tiles to search).
 		</member>
 	</members>
+	<constants>
+		<constant name="AUTO_EXPOSURE_MODE_AVERAGE" value="0" enum="AutoExposureMode">
+			The average luminance of the frame (stock Godot).
+		</constant>
+		<constant name="AUTO_EXPOSURE_MODE_HISTOGRAM" value="1" enum="AutoExposureMode">
+			A histogram of the log luminance between two percentiles, center weighted (Mariner G2).
+		</constant>
+	</constants>
 </class>

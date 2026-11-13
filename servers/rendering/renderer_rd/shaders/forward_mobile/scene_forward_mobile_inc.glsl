@@ -133,6 +133,11 @@ bool sc_multimesh_has_color() {
 	return ((sc_packed_0() >> 14) & 1U) != 0;
 }
 
+// Mariner E14c.
+bool sc_multimesh_has_custom_data2() {
+	return ((sc_packed_0() >> 19) & 1U) != 0;
+}
+
 bool sc_multimesh_has_custom_data() {
 	return ((sc_packed_0() >> 15) & 1U) != 0;
 }

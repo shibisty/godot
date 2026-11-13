@@ -59,6 +59,8 @@ public:
 	virtual void camera_set_camera_attributes(RID p_camera, RID p_attributes) = 0;
 	virtual void camera_set_compositor(RID p_camera, RID p_compositor) = 0;
 	virtual void camera_set_use_vertical_aspect(RID p_camera, bool p_enable) = 0;
+	virtual void camera_set_clip_plane(RID p_camera, bool p_enable, const Plane &p_plane) = 0; // Mariner G6.
+	virtual void camera_set_raw_output(RID p_camera, bool p_enable) = 0;
 	virtual bool is_camera(RID p_camera) const = 0;
 
 	virtual RID occluder_allocate() = 0;
@@ -337,8 +339,14 @@ public:
 	virtual void environment_set_ddgi_update(RID p_env, int p_probes_per_frame, bool p_relocation) = 0;
 	virtual void environment_set_ddgi_channels(RID p_env, float p_sky_energy, float p_lights_energy) = 0;
 	virtual void environment_set_ddgi_sea(RID p_env, bool p_enable, float p_level, const Color &p_color) = 0;
+	virtual void environment_set_overhead_map(RID p_env, bool p_enable, float p_size, float p_height, int p_resolution, uint32_t p_cull_mask, float p_sky_occlusion, float p_sky_occlusion_radius, float p_bias) = 0; // Mariner G1a.
+	virtual void environment_set_wetness(RID p_env, float p_wetness) = 0; // Mariner G4.
+	virtual void environment_set_snow(RID p_env, float p_snow) = 0; // Mariner G4b.
 	virtual void environment_set_ssao_gtao(RID p_env, bool p_enable, bool p_bent_normals, float p_thickness = 0.5) = 0;
 	virtual void environment_set_color_grading(RID p_env, bool p_enable, float p_temperature, float p_tint, const Color &p_shadows, const Color &p_midtones, const Color &p_highlights, const Vector4 &p_tonal_ranges, const Vector3 &p_slope, const Vector3 &p_offset, const Vector3 &p_power, float p_saturation, bool p_gamut_mapping) = 0; // Mariner F3.
+	virtual void environment_set_color_grading_night_vision(RID p_env, float p_amount, const Color &p_tint, float p_start, float p_end) = 0; // Mariner F3b.
+	virtual void environment_set_color_grading_channel_mixer(RID p_env, const Vector3 &p_red, const Vector3 &p_green, const Vector3 &p_blue) = 0; // Mariner F3c.
+	virtual void environment_set_color_grading_curves(RID p_env, float p_contrast, float p_vibrance, const Vector3 &p_shadow_gamma, const Vector3 &p_mid_point, const Vector3 &p_highlight_scale) = 0; // Mariner F3c.
 	virtual void environment_set_restir(RID p_env, bool p_enable, int p_candidates, int p_spatial_samples, bool p_temporal, bool p_denoise) = 0; // Mariner E20.
 	virtual bool environment_get_pathtracing_enabled(RID p_env) const = 0;
 	virtual bool pathtracing_is_supported() const = 0;

@@ -36,6 +36,7 @@
 #include "core/object/callable_mp.h"
 #include "core/object/worker_thread_pool.h"
 #include "core/os/os.h"
+#include "servers/rendering/renderer_compositor.h"
 #include "servers/rendering/rendering_light_culler.h"
 #include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_default.h"
@@ -152,6 +153,20 @@ void RendererSceneCull::camera_set_use_vertical_aspect(RID p_camera, bool p_enab
 	Camera *camera = camera_owner.get_or_null(p_camera);
 	ERR_FAIL_NULL(camera);
 	camera->vaspect = p_enable;
+}
+
+// Mariner G6.
+void RendererSceneCull::camera_set_clip_plane(RID p_camera, bool p_enable, const Plane &p_plane) {
+	Camera *camera = camera_owner.get_or_null(p_camera);
+	ERR_FAIL_NULL(camera);
+	camera->use_clip_plane = p_enable;
+	camera->clip_plane = p_plane;
+}
+
+void RendererSceneCull::camera_set_raw_output(RID p_camera, bool p_enable) {
+	Camera *camera = camera_owner.get_or_null(p_camera);
+	ERR_FAIL_NULL(camera);
+	camera->raw_output = p_enable;
 }
 
 bool RendererSceneCull::is_camera(RID p_camera) const {
@@ -1443,11 +1458,87 @@ void RendererSceneCull::_update_instance_shadow_cache_class(Instance *p_instance
 			dynamic = true; // Skeleton or blend shapes.
 		} else if (static_cast<InstanceGeometryData *>(p_instance->base_data)->material_is_animated) {
 			dynamic = true; // TIME in the vertex shader, or in the fragment shader with discard.
-		} else if (p_instance->base_type == RSE::INSTANCE_MULTIMESH && RSG::mesh_storage->multimesh_get_command_buffer_rd_rid(p_instance->base).is_valid()) {
+		} else if (p_instance->base_type == RSE::INSTANCE_MULTIMESH && !RendererCompositor::is_low_end() && RSG::mesh_storage->multimesh_get_command_buffer_rd_rid(p_instance->base).is_valid()) {
+			// (Mariner E14c fix: the Compatibility renderer has no indirect multimeshes; asking printed an error for each.)
 			dynamic = true; // Indirect multimesh: instance data and count are written on the GPU.
 		}
 	}
 	p_instance->shadow_cache_dynamic = dynamic;
+}
+
+// Mariner E10c: cascade scrolling. Compares the static casters of a cascade with those drawn last frame: the cached
+// depth can be shifted to the new cascade when every caster that touches both cascades is the same, unchanged one.
+// A caster gone from the set that still reaches into the new cascade (hidden, freed, changed, became dynamic), one
+// new in the set that reached into the old cascade (became static), or a changed one, means a full redraw. A new
+// caster that reached the old cascade's rectangle only from beyond its depth range is drawn over the overlap.
+void RendererSceneCull::_shadow_cache_scroll_check(InstanceLightData *p_light, int p_cascade, const Cull::Shadow::Cascade &p_cascade_data, const PagedArray<Instance *> &p_sources, RendererSceneRender::RenderShadowData &r_data) {
+	r_data.scroll = false;
+	r_data.scroll_extra_instances.clear();
+	if (!p_light) {
+		return;
+	}
+	InstanceLightData *light = p_light;
+	InstanceLightData::ShadowCacheScroll &sc = light->shadow_cache_scroll[p_cascade];
+
+	// The test the culling uses (InstanceBounds::in_frustum), optionally without the far plane (the last one).
+	auto in_planes = [](const AABB &p_aabb, const Vector<Plane> &p_planes, int p_count) {
+		const Vector3 end = p_aabb.get_end();
+		for (int i = 0; i < p_count; i++) {
+			const Plane &pl = p_planes[i];
+			const Vector3 v(pl.normal.x > 0 ? p_aabb.position.x : end.x, pl.normal.y > 0 ? p_aabb.position.y : end.y, pl.normal.z > 0 ? p_aabb.position.z : end.z);
+			if (pl.distance_to(v) >= 0.0) {
+				return false;
+			}
+		}
+		return true;
+	};
+	const Vector<Plane> &new_planes = p_cascade_data.frustum.planes;
+	const bool comparable = sc.valid && sc.transform.basis.is_equal_approx(p_cascade_data.transform.basis) && sc.projection == p_cascade_data.projection && Math::is_equal_approx(sc.zfar, p_cascade_data.zfar) && sc.planes.size() == 6 && new_planes.size() == 6;
+
+	bool ok = comparable;
+	HashMap<uint64_t, InstanceLightData::ShadowCacheCaster> casters;
+	casters.reserve(p_sources.size());
+	LocalVector<RenderGeometryInstance *> extra;
+	for (uint32_t i = 0; i < p_sources.size(); i++) {
+		Instance *inst = p_sources[i];
+		InstanceLightData::ShadowCacheCaster c;
+		c.version = inst->version;
+		c.aabb = inst->transformed_aabb;
+		const uint64_t id = inst->self.get_id();
+		if (ok) {
+			const InstanceLightData::ShadowCacheCaster *prev = sc.casters.getptr(id);
+			if (prev) {
+				ok = prev->version == c.version;
+			} else if (in_planes(c.aabb, sc.planes, 6)) {
+				ok = false; // In the old cascade but not drawn there: it became static.
+			} else if (in_planes(c.aabb, sc.planes, 5)) {
+				InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(inst->base_data);
+				extra.push_back(geom->geometry_instance); // Beyond the old far plane: drawn over the overlap.
+			}
+		}
+		casters.insert(id, c);
+	}
+	if (ok) {
+		for (const KeyValue<uint64_t, InstanceLightData::ShadowCacheCaster> &E : sc.casters) {
+			if (!casters.has(E.key) && in_planes(E.value.aabb, new_planes, 6)) {
+				ok = false; // Still in the cascade, but no longer a static caster there.
+				break;
+			}
+		}
+	}
+	if (ok) {
+		r_data.scroll = true;
+		r_data.scroll_from_transform = sc.transform;
+		for (RenderGeometryInstance *gi : extra) {
+			r_data.scroll_extra_instances.push_back(gi);
+		}
+	}
+	sc.valid = true;
+	sc.transform = p_cascade_data.transform;
+	sc.projection = p_cascade_data.projection;
+	sc.zfar = p_cascade_data.zfar;
+	sc.planes = new_planes;
+	sc.casters = std::move(casters);
 }
 
 void RendererSceneCull::directional_shadow_cache_set_enabled(bool p_enabled) {
@@ -2377,6 +2468,7 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 	cull.shadow_count = p_shadow_index + 1;
 	cull.shadows[p_shadow_index].cascade_count = splits;
 	cull.shadows[p_shadow_index].light_instance = light->instance;
+	cull.shadows[p_shadow_index].light_data = light; // Mariner E10c.
 	cull.shadows[p_shadow_index].caster_mask = RSG::light_storage->light_get_shadow_caster_mask(p_instance->base);
 	cull.shadows[p_shadow_index].object_layers = scene_render->directional_object_shadow_is_supported() ? RSG::light_storage->light_directional_get_object_shadow_layers(p_instance->base) : 0;
 	cull.shadows[p_shadow_index].object_from_cascade = RSG::light_storage->light_directional_get_object_shadow_from_cascade(p_instance->base);
@@ -2941,6 +3033,9 @@ void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_bu
 		}
 
 		camera_data.set_camera(transform, projection, is_orthogonal, vaspect, jitter, taa_frame_count, camera->visible_layers);
+		camera_data.use_clip_plane = camera->use_clip_plane; // Mariner G6.
+		camera_data.clip_plane = camera->clip_plane;
+		camera_data.raw_output = camera->raw_output;
 #ifndef XR_DISABLED
 	} else {
 		XRServer *xr_server = XRServer::get_singleton();
@@ -3508,21 +3603,32 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 					if (object_caster && k >= cull_data.cull->shadows[j].object_from_cascade) {
 						break;
 					}
-					if (!light_culler->cull_directional_light(cull_data.scenario->instance_aabbs[i], j, k)) { // pass the cascade index
+					// Mariner E10c: with the shadow cache the static casters skip the light culler (which depends on the
+					// camera), so that the cached set changes only where the cascade moves (cascade scrolling).
+					const bool light_culled = !light_culler->cull_directional_light(cull_data.scenario->instance_aabbs[i], j, k); // pass the cascade index
+					if (light_culled && !cull_data.cull->shadow_cache) {
 						continue;
 					}
 					if (IN_FRUSTUM(cull_data.cull->shadows[j].cascades[k].frustum) && VIS_CHECK) {
 						uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
 
 						if (((1 << base_type) & RSE::INSTANCE_GEOMETRY_MASK) && idata.flags & InstanceData::FLAG_CAST_SHADOWS && (LAYER_CHECK & cull_data.cull->shadows[j].caster_mask)) {
+							bool is_static = false;
+							if (cull_data.cull->shadow_cache) {
+								const Instance *inst = idata.instance;
+								is_static = inst->shadow_cache_mode == RSE::SHADOW_CACHE_MODE_STATIC || (inst->shadow_cache_mode == RSE::SHADOW_CACHE_MODE_AUTO && !inst->shadow_cache_dynamic && cull_data.cull->shadow_cache_frame >= inst->version_frame + shadow_cache_settle_frames);
+								if (light_culled && !is_static) {
+									continue;
+								}
+							}
 							cull_result.directional_shadows[j].cascade_geometry_instances[k].push_back(idata.instance_geometry);
 							mesh_visible = true;
 							if (cull_data.cull->shadow_cache) {
 								// Mariner E10: split into the cached (static) and the per-frame (dynamic) part.
 								const Instance *inst = idata.instance;
-								const bool is_static = inst->shadow_cache_mode == RSE::SHADOW_CACHE_MODE_STATIC || (inst->shadow_cache_mode == RSE::SHADOW_CACHE_MODE_AUTO && !inst->shadow_cache_dynamic && cull_data.cull->shadow_cache_frame >= inst->version_frame + shadow_cache_settle_frames);
 								if (is_static) {
 									cull_result.directional_shadows[j].cascade_static_instances[k].push_back(idata.instance_geometry);
+									cull_result.directional_shadows[j].cascade_static_sources[k].push_back(idata.instance); // Mariner E10c.
 									const uint64_t h = shadow_cache_mix(uint64_t(uintptr_t(idata.instance_geometry)) ^ shadow_cache_mix(inst->version));
 									cull_result.directional_shadows[j].cascade_static_hash_sum[k] += h;
 									cull_result.directional_shadows[j].cascade_static_hash_xor[k] ^= shadow_cache_mix(h);
@@ -3895,6 +4001,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 					const uint64_t sum = scene_cull_result.directional_shadows[i].cascade_static_hash_sum[j];
 					const uint64_t x = scene_cull_result.directional_shadows[i].cascade_static_hash_xor[j];
 					render_shadow_data[max_shadows_used].static_hash = shadow_cache_mix(sum ^ shadow_cache_mix(x ^ shadow_cache_mix(render_shadow_data[max_shadows_used].static_instances.size())));
+					_shadow_cache_scroll_check(cull.shadows[i].light_data, j, c, scene_cull_result.directional_shadows[i].cascade_static_sources[j], render_shadow_data[max_shadows_used]);
 				}
 				max_shadows_used++;
 			}
@@ -4199,11 +4306,41 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	scene_render->gpu_occlusion = gpu_occlusion.buffer ? &gpu_occlusion : nullptr; // Mariner E25b.
 	scene_render->raytracing_lights = cull.rt_enabled ? &scene_cull_result.rt_light_instances : nullptr;
 	scene_render->ddgi_volume = p_reflection_probe.is_null() ? &scenario->ddgi_volume : nullptr;
+	// Mariner G1a: the overhead map of the camera (not for reflection probes).
+	scene_render->overhead_map = nullptr;
+	if (p_reflection_probe.is_null() && p_render_buffers.is_valid() && scene_render->is_environment(p_environment)) {
+		overhead_map_data.settings = scene_render->environment_get_overhead_map(p_environment);
+		if (overhead_map_data.settings.enabled) {
+			RendererEnvironmentStorage::overhead_map_region(p_camera_data->main_transform.origin, overhead_map_data.settings.size, overhead_map_data.settings.height, overhead_map_data.settings.resolution, overhead_map_data.box_min, overhead_map_data.box_max);
+			overhead_map_data.instances.clear();
+			struct CullOverhead {
+				PagedArray<RenderGeometryInstance *> *result;
+				uint32_t mask;
+				_FORCE_INLINE_ bool operator()(void *p_data) {
+					Instance *instance = (Instance *)p_data;
+					if (instance->visible && (instance->layer_mask & mask) && ((1 << instance->base_type) & (RSE::INSTANCE_GEOMETRY_MASK & ~(1 << RSE::INSTANCE_PARTICLES))) && instance->base_data) {
+						InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(instance->base_data);
+						if (geom->geometry_instance) {
+							result->push_back(geom->geometry_instance);
+						}
+					}
+					return false;
+				}
+			};
+			CullOverhead cull_overhead;
+			cull_overhead.result = &overhead_map_data.instances;
+			cull_overhead.mask = overhead_map_data.settings.cull_mask & p_visible_layers;
+			scenario->indexers[Scenario::INDEXER_GEOMETRY].aabb_query(AABB(overhead_map_data.box_min, overhead_map_data.box_max - overhead_map_data.box_min), cull_overhead);
+			scene_render->overhead_map = &overhead_map_data;
+		}
+	}
 	scene_render->render_scene(p_render_buffers, p_camera_data, prev_camera_data, scene_cull_result.geometry_instances, scene_cull_result.light_instances, scene_cull_result.reflections, scene_cull_result.voxel_gi_instances, scene_cull_result.decals, scene_cull_result.lightmaps, scene_cull_result.fog_volumes, p_environment, camera_attributes, p_compositor, p_shadow_atlas, occluders_tex, p_reflection_probe.is_valid() ? RID() : scenario->reflection_atlas, p_reflection_probe, p_reflection_probe_pass, p_screen_mesh_lod_threshold, render_shadow_data, max_shadows_used, render_sdfgi_data, cull.sdfgi.region_count, p_window_output_max_value, &sdfgi_update_data, r_render_info);
 	scene_render->raytracing_instances = nullptr;
 	scene_render->gpu_occlusion = nullptr;
 	scene_render->raytracing_lights = nullptr;
 	scene_render->ddgi_volume = nullptr;
+	scene_render->overhead_map = nullptr;
+	overhead_map_data.instances.clear();
 
 	if (p_viewport.is_valid()) {
 		RSG::viewport->viewport_set_prev_camera_data(p_viewport, p_camera_data);
@@ -4213,6 +4350,8 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		render_shadow_data[i].instances.clear();
 		render_shadow_data[i].static_instances.clear();
 		render_shadow_data[i].dynamic_instances.clear();
+		render_shadow_data[i].scroll_extra_instances.clear();
+		render_shadow_data[i].scroll = false;
 		render_shadow_data[i].cache = false;
 	}
 	max_shadows_used = 0;
@@ -5278,12 +5417,14 @@ RendererSceneCull::RendererSceneCull() {
 		render_shadow_data[i].instances.set_page_pool(&geometry_instance_cull_page_pool);
 		render_shadow_data[i].static_instances.set_page_pool(&geometry_instance_cull_page_pool);
 		render_shadow_data[i].dynamic_instances.set_page_pool(&geometry_instance_cull_page_pool);
+		render_shadow_data[i].scroll_extra_instances.set_page_pool(&geometry_instance_cull_page_pool); // Mariner E10c.
 	}
 	for (uint32_t i = 0; i < SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE; i++) {
 		render_sdfgi_data[i].instances.set_page_pool(&geometry_instance_cull_page_pool);
 	}
 
 	scene_cull_result.init(&rid_cull_page_pool, &geometry_instance_cull_page_pool, &instance_cull_page_pool);
+	overhead_map_data.instances.set_page_pool(&geometry_instance_cull_page_pool); // Mariner G1a.
 	scene_cull_result_threads.resize(WorkerThreadPool::get_singleton()->get_thread_count());
 	for (InstanceCullResult &thread : scene_cull_result_threads) {
 		thread.init(&rid_cull_page_pool, &geometry_instance_cull_page_pool, &instance_cull_page_pool);
@@ -5316,6 +5457,7 @@ RendererSceneCull::~RendererSceneCull() {
 		render_shadow_data[i].instances.reset();
 		render_shadow_data[i].static_instances.reset();
 		render_shadow_data[i].dynamic_instances.reset();
+		render_shadow_data[i].scroll_extra_instances.reset();
 	}
 	for (uint32_t i = 0; i < SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE; i++) {
 		render_sdfgi_data[i].instances.reset();

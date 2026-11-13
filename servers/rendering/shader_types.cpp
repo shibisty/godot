@@ -100,6 +100,7 @@ ShaderTypes::ShaderTypes() {
 	shader_modes[RSE::SHADER_SPATIAL].functions["vertex"].built_ins["Z_CLIP_SCALE"] = ShaderLanguage::TYPE_FLOAT;
 	shader_modes[RSE::SHADER_SPATIAL].functions["vertex"].built_ins["INSTANCE_ID"] = constt(ShaderLanguage::TYPE_INT);
 	shader_modes[RSE::SHADER_SPATIAL].functions["vertex"].built_ins["INSTANCE_CUSTOM"] = constt(ShaderLanguage::TYPE_VEC4);
+	shader_modes[RSE::SHADER_SPATIAL].functions["vertex"].built_ins["INSTANCE_CUSTOM2"] = constt(ShaderLanguage::TYPE_VEC4); // Mariner E14c.
 	shader_modes[RSE::SHADER_SPATIAL].functions["vertex"].built_ins["VERTEX_ID"] = constt(ShaderLanguage::TYPE_INT);
 	// Mariner: true while the vertex function runs for the previous frame (motion vectors pass); lets shaders that
 	// animate through textures/uniforms (FFT ocean) reproduce last frame's position.
@@ -161,6 +162,12 @@ ShaderTypes::ShaderTypes() {
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["RIM_TINT"] = ShaderLanguage::TYPE_FLOAT;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["CLEARCOAT"] = ShaderLanguage::TYPE_FLOAT;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["CLEARCOAT_ROUGHNESS"] = ShaderLanguage::TYPE_FLOAT;
+	// Mariner M6, F5.
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["SHEEN"] = ShaderLanguage::TYPE_VEC3;
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["SHEEN_ROUGHNESS"] = ShaderLanguage::TYPE_FLOAT;
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["IRIDESCENCE"] = ShaderLanguage::TYPE_FLOAT;
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["IRIDESCENCE_IOR"] = ShaderLanguage::TYPE_FLOAT;
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["IRIDESCENCE_THICKNESS"] = ShaderLanguage::TYPE_FLOAT;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["ANISOTROPY"] = ShaderLanguage::TYPE_FLOAT;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["ANISOTROPY_FLOW"] = ShaderLanguage::TYPE_VEC2;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["SSS_STRENGTH"] = ShaderLanguage::TYPE_FLOAT;
@@ -171,6 +178,14 @@ ShaderTypes::ShaderTypes() {
 	// Mariner E16: the first directional light (view space, towards the light) and a shadow factor for it alone.
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["MAIN_LIGHT_DIRECTION"] = constt(ShaderLanguage::TYPE_VEC3);
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["MAIN_LIGHT_SHADOW"] = ShaderLanguage::TYPE_FLOAT;
+	// Mariner G1b: from the overhead map (Environment.overhead_map_*): the sky visibility (1 open) and the cover from
+	// above (1 under a roof: no rain, no snow).
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["SKY_OCCLUSION"] = constt(ShaderLanguage::TYPE_FLOAT);
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["OVERHEAD_COVER"] = constt(ShaderLanguage::TYPE_FLOAT);
+	// Mariner G4: the wetness of the world (Environment.wetness, 0 dry .. 1 soaked).
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["WETNESS"] = constt(ShaderLanguage::TYPE_FLOAT);
+	// Mariner G4b: the snow on the world (Environment.snow, 0 none .. 1 deep).
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["SNOW"] = constt(ShaderLanguage::TYPE_FLOAT);
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["AO"] = ShaderLanguage::TYPE_FLOAT;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["AO_LIGHT_AFFECT"] = ShaderLanguage::TYPE_FLOAT;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["EMISSION"] = ShaderLanguage::TYPE_VEC3;
@@ -198,6 +213,7 @@ ShaderTypes::ShaderTypes() {
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["VIEWPORT_SIZE"] = constt(ShaderLanguage::TYPE_VEC2);
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["FOG"] = ShaderLanguage::TYPE_VEC4; // TODO consider adding to light shader
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["RADIANCE"] = ShaderLanguage::TYPE_VEC4;
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["REFLECTION"] = ShaderLanguage::TYPE_VEC4; // Mariner G6.
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["IRRADIANCE"] = ShaderLanguage::TYPE_VEC4;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].can_discard = true;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].main_function = true;

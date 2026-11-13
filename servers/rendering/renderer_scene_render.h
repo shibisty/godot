@@ -270,6 +270,12 @@ public:
 	bool environment_get_ddgi_enabled(RID p_env) const;
 	void environment_set_ddgi_channels(RID p_env, float p_sky_energy, float p_lights_energy);
 	void environment_set_ddgi_sea(RID p_env, bool p_enable, float p_level, const Color &p_color);
+	void environment_set_overhead_map(RID p_env, bool p_enable, float p_size, float p_height, int p_resolution, uint32_t p_cull_mask, float p_sky_occlusion, float p_sky_occlusion_radius, float p_bias); // Mariner G1a.
+	RendererEnvironmentStorage::OverheadMapSettings environment_get_overhead_map(RID p_env) const;
+	void environment_set_wetness(RID p_env, float p_wetness); // Mariner G4.
+	float environment_get_wetness(RID p_env) const;
+	void environment_set_snow(RID p_env, float p_snow); // Mariner G4b.
+	float environment_get_snow(RID p_env) const;
 	void environment_set_ssao_gtao(RID p_env, bool p_enable, bool p_bent_normals, float p_thickness);
 	void environment_set_restir(RID p_env, bool p_enable, int p_candidates, int p_spatial_samples, bool p_temporal, bool p_denoise); // Mariner E20.
 	bool environment_get_ssao_gtao(RID p_env) const;
@@ -277,6 +283,9 @@ public:
 	float environment_get_ssao_gtao_thickness(RID p_env) const;
 	void environment_set_color_grading(RID p_env, bool p_enable, float p_temperature, float p_tint, const Color &p_shadows, const Color &p_midtones, const Color &p_highlights, const Vector4 &p_tonal_ranges, const Vector3 &p_slope, const Vector3 &p_offset, const Vector3 &p_power, float p_saturation, bool p_gamut_mapping); // Mariner F3.
 	RendererEnvironmentStorage::ColorGrading environment_get_color_grading(RID p_env) const;
+	void environment_set_color_grading_night_vision(RID p_env, float p_amount, const Color &p_tint, float p_start, float p_end); // Mariner F3b.
+	void environment_set_color_grading_channel_mixer(RID p_env, const Vector3 &p_red, const Vector3 &p_green, const Vector3 &p_blue); // Mariner F3c.
+	void environment_set_color_grading_curves(RID p_env, float p_contrast, float p_vibrance, const Vector3 &p_shadow_gamma, const Vector3 &p_mid_point, const Vector3 &p_highlight_scale); // Mariner F3c.
 	void environment_set_ddgi_update(RID p_env, int p_probes_per_frame, bool p_relocation);
 	bool environment_get_pathtracing_enabled(RID p_env) const;
 	int environment_get_pathtracing_debug_mode(RID p_env) const;
@@ -328,6 +337,14 @@ public:
 		uint64_t static_hash = 0;
 		PagedArray<RenderGeometryInstance *> static_instances;
 		PagedArray<RenderGeometryInstance *> dynamic_instances;
+		// Mariner E10c: cascade scrolling. With `scroll`, the static casters of the cascade drawn with
+		// `scroll_from_transform` (the last frame's cascade: same orientation, projection and depth range) are the
+		// same ones, unchanged, where the two cascades overlap - the cached depth can be shifted to the new position
+		// and only the uncovered strips drawn. `scroll_extra_instances`: static casters that newly reach into the
+		// overlap from beyond the last depth range (drawn over it).
+		bool scroll = false;
+		Transform3D scroll_from_transform;
+		PagedArray<RenderGeometryInstance *> scroll_extra_instances;
 	};
 
 	struct RenderSDFGIData {
@@ -361,6 +378,10 @@ public:
 		Projection view_projection[RendererSceneRender::MAX_RENDER_VIEWS];
 		Vector2 taa_jitter;
 		float taa_frame_count = 0.0f;
+		// Mariner G6: RS.camera_set_clip_plane() (world space), RS.camera_set_raw_output().
+		bool use_clip_plane = false;
+		Plane clip_plane;
+		bool raw_output = false;
 
 		void set_camera(const Transform3D p_transform, const Projection p_projection, bool p_is_orthogonal, bool p_vaspect, const Vector2 &p_taa_jitter = Vector2(), float p_taa_frame_count = 0.0f, uint32_t p_visible_layers = 0xFFFFFFFF);
 		void set_multiview_camera(uint32_t p_view_count, const Transform3D *p_transforms, const Projection *p_projections, bool p_is_orthogonal, bool p_vaspect, uint32_t p_visible_layers = 0xFFFFFFFF);
@@ -404,6 +425,16 @@ public:
 		int probes_per_frame = 0;
 	};
 	const DDGIVolumeData *ddgi_volume = nullptr;
+
+	// Mariner G1a: the overhead map of this camera (Environment.overhead_map_*): its box and the geometry in it (the
+	// cull mask, all but particles), culled by RendererSceneCull for the next render_scene() call.
+	struct OverheadMapData {
+		RendererEnvironmentStorage::OverheadMapSettings settings;
+		Vector3 box_min;
+		Vector3 box_max;
+		PagedArray<RenderGeometryInstance *> instances;
+	};
+	const OverheadMapData *overhead_map = nullptr;
 	// Whether the renderer can build a raytracing scene (Forward+, ray query support, project setting on).
 	virtual bool raytracing_scene_is_supported() const { return false; }
 	virtual void set_time(double p_time, double p_step) = 0;

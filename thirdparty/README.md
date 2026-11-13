@@ -74,6 +74,8 @@ Patches:
   assert symbols, context sizes for 4-byte `wchar_t`, one FSR1 include in the RCAS pass)
 - `0002-godot-fsr3-options.patch` (reprojection matrix for invalid motion vectors, reactive mask clamp, luma history
   storage format)
+- `0003-sampler-bindings-below-1000.patch` (sampler bindings 900/901 instead of 1000/1001: the D3D12 driver
+  encodes `set * 10^8 + binding * 10^5` in one register number, so bindings must stay below 1000)
 
 
 ## angle
@@ -1059,7 +1061,8 @@ Patches:
 
 Files extracted from upstream source:
 
-- All `.cpp`, `.hpp` and `.h` files, minus `main.cpp`, `spirv.h*`, `spirv_cross_c.*`, `spirv_hlsl.*`, `spirv_cpp.*`
+- All `.cpp`, `.hpp` and `.h` files, minus `main.cpp`, `spirv.h*`, `spirv_cross_c.*`, `spirv_cpp.*`
+  (Mariner E7b: `spirv_hlsl.*` is kept, for the HLSL of mesh pipelines on Direct3D 12)
 - `include/` folder
 - `LICENSE` and `LICENSES/` folder, minus `CC-BY-4.0.txt`
 

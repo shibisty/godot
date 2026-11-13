@@ -81,6 +81,7 @@ private:
 	NodePath sub_emitter;
 	real_t collision_base_size = 0.01;
 	bool screen_space_collision = false; // Mariner E22.
+	bool overhead_map_collision = false; // Mariner G1c.
 	uint32_t seed = 0;
 	bool use_fixed_seed = false;
 
@@ -137,6 +138,8 @@ public:
 	void set_speed_scale(double p_scale);
 	void set_collision_base_size(real_t p_ratio);
 	void set_screen_space_collision(bool p_enable);
+	void set_overhead_map_collision(bool p_enable); // Mariner G1c.
+	bool is_overhead_map_collision() const;
 	bool is_screen_space_collision() const;
 	void set_trail_enabled(bool p_enabled);
 	void set_trail_lifetime(double p_seconds);

@@ -105,4 +105,5 @@ public:
 	bool restir_active = false; // Mariner E20: ReSTIR DI lights this frame's opaque pass (decided after the TLAS build).
 	/* Mariner E12 DG2: DDGI probe volume of the scenario (ship), nullptr for reflection probes. */
 	const RendererSceneRender::DDGIVolumeData *ddgi_volume = nullptr;
+	const RendererSceneRender::OverheadMapData *overhead_map = nullptr; // Mariner G1a.
 };

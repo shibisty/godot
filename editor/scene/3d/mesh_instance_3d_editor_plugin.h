@@ -39,6 +39,7 @@ class AspectRatioContainer;
 class ConfirmationDialog;
 class MenuButton;
 class SpinBox;
+class CheckBox;
 
 class MeshInstance3DEditor : public Control {
 	GDCLASS(MeshInstance3DEditor, Control);
@@ -51,6 +52,7 @@ class MeshInstance3DEditor : public Control {
 		MENU_OPTION_CREATE_UV2,
 		MENU_OPTION_DEBUG_UV1,
 		MENU_OPTION_DEBUG_UV2,
+		MENU_OPTION_TESSELLATE, // Mariner G7.
 	};
 
 	enum ShapePlacement {
@@ -100,6 +102,12 @@ class MeshInstance3DEditor : public Control {
 
 	ConfirmationDialog *navigation_mesh_dialog = nullptr;
 
+	ConfirmationDialog *tessellate_dialog = nullptr; // Mariner G7.
+	SpinBox *tessellate_edge_length = nullptr;
+	CheckBox *tessellate_phong = nullptr;
+	SpinBox *tessellate_phong_shape = nullptr;
+	CheckBox *tessellate_lods = nullptr;
+
 	void _shape_dialog_about_to_popup();
 	void _shape_type_selected(int p_option);
 	void _create_collision_shape();
@@ -107,6 +115,7 @@ class MeshInstance3DEditor : public Control {
 	void _menu_option(int p_option);
 	void _create_outline_mesh();
 	void _create_navigation_mesh();
+	void _tessellate_mesh();
 
 	void _create_uv_lines(int p_layer);
 	friend class MeshInstance3DEditorPlugin;

@@ -552,7 +552,9 @@ Error RenderingDevice::tlas_build(RID p_tlas, Span<AccelerationStructureInstance
 
 	_tlas_remove_blas_dependencies(tlas, p_tlas);
 
+	thread_local LocalVector<RDD::AccelerationStructureID> blases;
 	thread_local LocalVector<RDG::ResourceTracker *> draw_trackers;
+	blases.clear();
 	draw_trackers.clear();
 
 	// Write instances to a CPU-side buffer first and copy it to the persistently mapped (write-combined) buffer
@@ -583,6 +585,8 @@ Error RenderingDevice::tlas_build(RID p_tlas, Span<AccelerationStructureInstance
 				tlas->acceleration_structure_dependencies.insert(rd_instance.blas);
 				blas->acceleration_structure_dependencies.insert(p_tlas);
 
+				blases.push_back(blas->driver_id);
+
 				if (blas->draw_tracker != nullptr) {
 					draw_trackers.push_back(blas->draw_tracker);
 				}
@@ -596,7 +600,7 @@ Error RenderingDevice::tlas_build(RID p_tlas, Span<AccelerationStructureInstance
 		memcpy(instance_buffer.data_ptr + instance_buffer_offset, shadow_buffer.ptr(), instance_buffer_used_size);
 	}
 
-	draw_graph.add_tlas_build(tlas->driver_id, tlas->scratch_buffer, instance_buffer.driver_id, instance_buffer_offset, p_instances.size(), tlas->draw_tracker, draw_trackers);
+	draw_graph.add_tlas_build(tlas->driver_id, tlas->scratch_buffer, instance_buffer.driver_id, instance_buffer_offset, p_instances.size(), blases, tlas->draw_tracker, draw_trackers);
 
 	tlas->invalidated = false;
 
@@ -4766,48 +4770,51 @@ RID RenderingDevice::uniform_set_create(const VectorView<RD::Uniform> &p_uniform
 			} break;
 			case UNIFORM_TYPE_STORAGE_BUFFER:
 			case UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC: {
-				ERR_FAIL_COND_V_MSG(uniform.get_id_count() != 1, RID(),
-						"Storage buffer supplied (binding: " + itos(uniform.binding) + ") must provide one ID (" + itos(uniform.get_id_count()) + " provided).");
+				// Mariner E5d: an array of storage buffers takes one ID per element.
+				ERR_FAIL_COND_V_MSG(uniform.get_id_count() != set_uniform.array_count, RID(),
+						"Storage buffer supplied (binding: " + itos(uniform.binding) + ") must provide " + itos(set_uniform.array_count) + " ID(s) (" + itos(uniform.get_id_count()) + " provided).");
 
-				Buffer *buffer = nullptr;
+				for (uint32_t j = 0; j < uniform.get_id_count(); j++) {
+					Buffer *buffer = nullptr;
 
-				RID buffer_id = uniform.get_id(0);
-				if (storage_buffer_owner.owns(buffer_id)) {
-					buffer = storage_buffer_owner.get_or_null(buffer_id);
-				} else if (vertex_buffer_owner.owns(buffer_id)) {
-					buffer = vertex_buffer_owner.get_or_null(buffer_id);
+					RID buffer_id = uniform.get_id(j);
+					if (storage_buffer_owner.owns(buffer_id)) {
+						buffer = storage_buffer_owner.get_or_null(buffer_id);
+					} else if (vertex_buffer_owner.owns(buffer_id)) {
+						buffer = vertex_buffer_owner.get_or_null(buffer_id);
 
-					ERR_FAIL_COND_V_MSG(!(buffer->usage.has_flag(RDD::BUFFER_USAGE_STORAGE_BIT)), RID(), "Vertex buffer supplied (binding: " + itos(uniform.binding) + ") was not created with storage flag.");
-				} else if (index_buffer_owner.owns(buffer_id)) {
-					buffer = index_buffer_owner.get_or_null(buffer_id);
+						ERR_FAIL_COND_V_MSG(!(buffer->usage.has_flag(RDD::BUFFER_USAGE_STORAGE_BIT)), RID(), "Vertex buffer supplied (binding: " + itos(uniform.binding) + ") was not created with storage flag.");
+					} else if (index_buffer_owner.owns(buffer_id)) {
+						buffer = index_buffer_owner.get_or_null(buffer_id);
 
-					ERR_FAIL_COND_V_MSG(!(buffer->usage.has_flag(RDD::BUFFER_USAGE_STORAGE_BIT)), RID(), "Index buffer supplied (binding: " + itos(uniform.binding) + ") was not created with storage flag.");
-				}
-				ERR_FAIL_NULL_V_MSG(buffer, RID(), "Storage buffer supplied (binding: " + itos(uniform.binding) + ") is invalid.");
-
-				// If 0, then it's sized on link time.
-				ERR_FAIL_COND_V_MSG(set_uniform.length > 0 && buffer->size != (uint32_t)set_uniform.length, RID(),
-						"Storage buffer supplied (binding: " + itos(uniform.binding) + ") size (" + itos(buffer->size) + ") does not match size of shader uniform: (" + itos(set_uniform.length) + ").");
-
-				if (set_uniform.writable && _buffer_make_mutable(buffer, buffer_id)) {
-					// The buffer must be mutable if it's used for writing.
-					draw_graph.add_synchronization();
-				}
-
-				if (buffer->draw_tracker != nullptr) {
-					draw_trackers.push_back(buffer->draw_tracker);
-
-					if (set_uniform.writable) {
-						draw_trackers_usage.push_back(RDG::RESOURCE_USAGE_STORAGE_BUFFER_READ_WRITE);
-					} else {
-						draw_trackers_usage.push_back(RDG::RESOURCE_USAGE_STORAGE_BUFFER_READ);
+						ERR_FAIL_COND_V_MSG(!(buffer->usage.has_flag(RDD::BUFFER_USAGE_STORAGE_BIT)), RID(), "Index buffer supplied (binding: " + itos(uniform.binding) + ") was not created with storage flag.");
 					}
-				} else {
-					untracked_usage[buffer_id] = RDG::RESOURCE_USAGE_STORAGE_BUFFER_READ;
-				}
+					ERR_FAIL_NULL_V_MSG(buffer, RID(), "Storage buffer supplied (binding: " + itos(uniform.binding) + ") is invalid.");
 
-				driver_uniform.ids.push_back(buffer->driver_id);
-				_check_transfer_worker_buffer(buffer);
+					// If 0, then it's sized on link time.
+					ERR_FAIL_COND_V_MSG(set_uniform.length > 0 && buffer->size != (uint32_t)set_uniform.length, RID(),
+							"Storage buffer supplied (binding: " + itos(uniform.binding) + ") size (" + itos(buffer->size) + ") does not match size of shader uniform: (" + itos(set_uniform.length) + ").");
+
+					if (set_uniform.writable && _buffer_make_mutable(buffer, buffer_id)) {
+						// The buffer must be mutable if it's used for writing.
+						draw_graph.add_synchronization();
+					}
+
+					if (buffer->draw_tracker != nullptr) {
+						draw_trackers.push_back(buffer->draw_tracker);
+
+						if (set_uniform.writable) {
+							draw_trackers_usage.push_back(RDG::RESOURCE_USAGE_STORAGE_BUFFER_READ_WRITE);
+						} else {
+							draw_trackers_usage.push_back(RDG::RESOURCE_USAGE_STORAGE_BUFFER_READ);
+						}
+					} else {
+						untracked_usage[buffer_id] = RDG::RESOURCE_USAGE_STORAGE_BUFFER_READ;
+					}
+
+					driver_uniform.ids.push_back(buffer->driver_id);
+					_check_transfer_worker_buffer(buffer);
+				}
 			} break;
 			case UNIFORM_TYPE_INPUT_ATTACHMENT: {
 				ERR_FAIL_COND_V_MSG(shader->pipeline_type != PIPELINE_TYPE_RASTERIZATION, RID(), "InputAttachment (binding: " + itos(uniform.binding) + ") supplied for non-render shader (this is not allowed).");
@@ -5058,7 +5065,7 @@ RID RenderingDevice::render_pipeline_create(RID p_shader, FramebufferFormatID p_
 		return RID();
 	}
 
-	ERR_FAIL_COND_V(!pipeline.driver_id, RID());
+	ERR_FAIL_COND_V_MSG(!pipeline.driver_id, RID(), "Failed to create render pipeline for shader '" + shader->name + "'.");
 
 	if (pipeline_cache_enabled) {
 		update_pipeline_cache();
@@ -5146,7 +5153,7 @@ RID RenderingDevice::compute_pipeline_create(RID p_shader, const Vector<Pipeline
 
 	ComputePipeline pipeline;
 	pipeline.driver_id = driver->compute_pipeline_create(shader->driver_id, p_specialization_constants);
-	ERR_FAIL_COND_V(!pipeline.driver_id, RID());
+	ERR_FAIL_COND_V_MSG(!pipeline.driver_id, RID(), "Failed to create compute pipeline for shader '" + shader->name + "'.");
 
 	if (pipeline_cache_enabled) {
 		update_pipeline_cache();
@@ -5392,7 +5399,7 @@ RID RenderingDevice::raytracing_pipeline_create(Span<PipelineShader> p_raygen_sh
 			p_max_trace_recursion_depth,
 			layout_defining_shader->driver_id);
 
-	ERR_FAIL_COND_V(!pipeline.driver_id, RID());
+	ERR_FAIL_COND_V_MSG(!pipeline.driver_id, RID(), "Failed to create raytracing pipeline for shader '" + layout_defining_shader->name + "'.");
 
 	if (pipeline_cache_enabled) {
 		update_pipeline_cache();
@@ -11045,6 +11052,7 @@ void RenderingDevice::_bind_methods() {
 	BIND_ENUM_CONSTANT(SUPPORTS_HDR_OUTPUT);
 	BIND_ENUM_CONSTANT(SUPPORTS_MESH_SHADER);
 	BIND_ENUM_CONSTANT(SUPPORTS_MESH_SHADER_INDIRECT_COUNT);
+	BIND_ENUM_CONSTANT(SUPPORTS_CLIP_DISTANCE); // Mariner G6.
 
 	BIND_ENUM_CONSTANT(LIMIT_MAX_BOUND_UNIFORM_SETS);
 	BIND_ENUM_CONSTANT(LIMIT_MAX_FRAMEBUFFER_COLOR_ATTACHMENTS);

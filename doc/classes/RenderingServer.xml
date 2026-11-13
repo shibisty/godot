@@ -63,6 +63,18 @@
 				Sets the parameters to use with the auto-exposure effect. These parameters take on the same meaning as their counterparts in [CameraAttributes] and [CameraAttributesPractical].
 			</description>
 		</method>
+		<method name="camera_attributes_set_auto_exposure_histogram">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="histogram" type="bool" />
+			<param index="2" name="low_percentile" type="float" />
+			<param index="3" name="high_percentile" type="float" />
+			<param index="4" name="center_weight" type="float" />
+			<param index="5" name="speed_dark" type="float" />
+			<description>
+				Sets the histogram auto exposure of the camera attributes (Mariner G2): [param histogram] [code]true[/code] measures the scene by a histogram of the log luminance between [param low_percentile] and [param high_percentile] of its weight, center weighted by [param center_weight], adapting toward darker scenes at [param speed_dark]. See [member CameraAttributes.auto_exposure_mode].
+			</description>
+		</method>
 		<method name="camera_attributes_set_dof_blur">
 			<return type="void" />
 			<param index="0" name="camera_attributes" type="RID" />
@@ -175,6 +187,15 @@
 				Sets the camera_attributes created with [method camera_attributes_create] to the given camera.
 			</description>
 		</method>
+		<method name="camera_set_clip_plane">
+			<return type="void" />
+			<param index="0" name="camera" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="plane" type="Plane" />
+			<description>
+				Mariner G6. Sets a clip plane in world space for the camera: what is behind [param plane] (its negative side) is not drawn - for the camera of a planar reflection, which must not see what is under the mirror. Done by the hardware's clip distances in the vertex shaders (Forward+ and Mobile where [constant RenderingDevice.SUPPORTS_CLIP_DISTANCE] is supported; Compatibility on desktop OpenGL), so the projection, light clusters and screen-space effects are unchanged.
+			</description>
+		</method>
 		<method name="camera_set_compositor">
 			<return type="void" />
 			<param index="0" name="camera" type="RID" />
@@ -228,6 +249,14 @@
 			<param index="3" name="z_far" type="float" />
 			<description>
 				Sets camera to use perspective projection. Objects on the screen becomes smaller when they are far away.
+			</description>
+		</method>
+		<method name="camera_set_raw_output">
+			<return type="void" />
+			<param index="0" name="camera" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<description>
+				Mariner G6. If [param enable] is [code]true[/code], the camera's image is the scene's light as it is: no tone mapping (linear, exposure 1), auto exposure, glow, adjustments, color grading or camera effects - with an HDR viewport ([member Viewport.use_hdr_2d]), unclamped. For the camera of a planar reflection, whose image is lit again by the main camera's tone mapping.
 			</description>
 		</method>
 		<method name="camera_set_transform">
@@ -1313,7 +1342,7 @@
 		<method name="directional_shadow_cache_get_stats" qualifiers="const">
 			<return type="Dictionary" />
 			<description>
-				Returns statistics of the directional shadow cache (Forward+ only, see [method directional_shadow_cache_set_enabled]): [code]enabled[/code]; for the last complete frame [code]cascades[/code], [code]hits[/code] (static casters copied from the cache), [code]refreshes[/code] (static casters redrawn into the cache), [code]uncached[/code] (drawn without the cache), [code]static_instances[/code] (drawn into the cache), [code]dynamic_instances[/code] (drawn every frame), [code]memory[/code] (bytes of the cache texture); running totals [code]total_hits[/code] and [code]total_refreshes[/code] since the cache was enabled. Other renderers return an empty dictionary or [code]enabled[/code] only.
+				Returns statistics of the directional shadow cache (Forward+ only, see [method directional_shadow_cache_set_enabled]): [code]enabled[/code]; for the last complete frame [code]cascades[/code], [code]hits[/code] (static casters copied from the cache), [code]refreshes[/code] (static casters redrawn into the cache), [code]scrolls[/code] (cascades scrolled, see [member ProjectSettings.rendering/lights_and_shadows/directional_shadow/cache_scrolling]) and [code]scroll_strip_instances[/code] (static casters drawn into their strips), [code]uncached[/code] (drawn without the cache), [code]static_instances[/code] (drawn into the cache), [code]dynamic_instances[/code] (drawn every frame), [code]memory[/code] (bytes of the cache texture); running totals [code]total_hits[/code], [code]total_refreshes[/code] and [code]total_scrolls[/code] since the cache was enabled. Other renderers return an empty dictionary or [code]enabled[/code] only.
 				[b]Note:[/b] Mariner fork (patch E10).
 			</description>
 		</method>
@@ -1444,6 +1473,39 @@
 				Sets the color grading of the environment (Mariner F3). See [member Environment.color_grading_enabled] and the other [code]color_grading_*[/code] properties of [Environment].
 			</description>
 		</method>
+		<method name="environment_set_color_grading_channel_mixer">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="red" type="Vector3" />
+			<param index="2" name="green" type="Vector3" />
+			<param index="3" name="blue" type="Vector3" />
+			<description>
+				Sets the channel mixer of the color grading of the environment, see [member Environment.color_grading_mixer_red], [member Environment.color_grading_mixer_green] and [member Environment.color_grading_mixer_blue]. Mariner engine patch F3c.
+			</description>
+		</method>
+		<method name="environment_set_color_grading_curves">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="contrast" type="float" />
+			<param index="2" name="vibrance" type="float" />
+			<param index="3" name="shadow_gamma" type="Vector3" />
+			<param index="4" name="mid_point" type="Vector3" />
+			<param index="5" name="highlight_scale" type="Vector3" />
+			<description>
+				Sets the contrast, vibrance and per channel curves of the color grading of the environment, see [member Environment.color_grading_contrast], [member Environment.color_grading_vibrance], [member Environment.color_grading_curves_shadow_gamma], [member Environment.color_grading_curves_mid_point] and [member Environment.color_grading_curves_highlight_scale]. Mariner engine patch F3c.
+			</description>
+		</method>
+		<method name="environment_set_color_grading_night_vision">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="amount" type="float" />
+			<param index="2" name="tint" type="Color" />
+			<param index="3" name="start" type="float" />
+			<param index="4" name="end" type="float" />
+			<description>
+				Sets the night vision of the color grading of the environment, see [member Environment.color_grading_night_vision], [member Environment.color_grading_night_vision_tint], [member Environment.color_grading_night_vision_start] and [member Environment.color_grading_night_vision_end]. Mariner engine patch F3b.
+			</description>
+		</method>
 		<method name="environment_set_ddgi">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />
@@ -1531,6 +1593,21 @@
 			<param index="12" name="glow_map" type="RID" />
 			<description>
 				Configures glow for the specified environment RID. See [code]glow_*[/code] properties in [Environment] for more information.
+			</description>
+		</method>
+		<method name="environment_set_overhead_map">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="size" type="float" />
+			<param index="3" name="height" type="float" />
+			<param index="4" name="resolution" type="int" />
+			<param index="5" name="cull_mask" type="int" />
+			<param index="6" name="sky_occlusion" type="float" />
+			<param index="7" name="sky_occlusion_radius" type="float" />
+			<param index="8" name="bias" type="float" />
+			<description>
+				Sets the overhead map of the environment (Mariner G1a): the depth of the scene from above around each camera, and the sky occlusion of the ambient light and the sky reflection computed from it. See [member Environment.overhead_map_enabled] and the other [code]overhead_map_*[/code] properties of [Environment] for the parameters.
 			</description>
 		</method>
 		<method name="environment_set_pathtracing">
@@ -1627,6 +1704,14 @@
 			<param index="1" name="orientation" type="Basis" />
 			<description>
 				Sets the rotation of the background [Sky] expressed as a [Basis]. Equivalent to [member Environment.sky_rotation], where the rotation vector is used to construct the [Basis].
+			</description>
+		</method>
+		<method name="environment_set_snow">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="snow" type="float" />
+			<description>
+				Sets the snow on the world, from [code]0.0[/code] to [code]1.0[/code]. See [member Environment.snow].
 			</description>
 		</method>
 		<method name="environment_set_ssao">
@@ -1755,6 +1840,14 @@
 			<param index="1" name="depth" type="int" />
 			<description>
 				Sets the resolution of the volumetric fog's froxel buffer. [param size] is modified by the screen's aspect ratio and then used to set the width and height of the buffer. While [param depth] is directly used to set the depth of the buffer.
+			</description>
+		</method>
+		<method name="environment_set_wetness">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="wetness" type="float" />
+			<description>
+				Sets the wetness of the world (Mariner G4), [code]0.0[/code] to [code]1.0[/code]. See [member Environment.wetness].
 			</description>
 		</method>
 		<method name="fog_volume_create">
@@ -2448,6 +2541,16 @@
 				Sets the bake mode to use for the specified 3D light. Equivalent to [member Light3D.light_bake_mode].
 			</description>
 		</method>
+		<method name="light_set_clip_volume">
+			<return type="void" />
+			<param index="0" name="light" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="offset" type="Vector3" />
+			<param index="3" name="size" type="Vector3" />
+			<description>
+				Sets the clip box of a positional light (Mariner G3): with [param enable], the light does not shine outside the box of [param size] centered at [param offset] in the light's space. Equivalent to [member Light3D.clip_volume_enabled].
+			</description>
+		</method>
 		<method name="light_set_color">
 			<return type="void" />
 			<param index="0" name="light" type="RID" />
@@ -2989,8 +3092,9 @@
 			<param index="3" name="color_format" type="bool" default="false" />
 			<param index="4" name="custom_data_format" type="bool" default="false" />
 			<param index="5" name="use_indirect" type="bool" default="false" />
+			<param index="6" name="custom_data2_format" type="bool" default="false" />
 			<description>
-				Sets up the multimesh using the specified data. The number of instances is set by [param instances]. The format of the instance transforms is set by [param transform_format], which should be set according to whether the multimesh is meant to be rendered in 2D or 3D. If [param color_format] is [code]true[/code], each instance will have a color associated with it. If [param custom_data_format] is [code]true[/code], each instance will have a custom data vector associated with it. If [param use_indirect] is [code]true[/code], an indirect command buffer will be created for this multimesh, allowing the instance count to be modified directly on the GPU. See also [method multimesh_get_command_buffer_rd_rid].
+				Sets up the multimesh using the specified data. The number of instances is set by [param instances]. The format of the instance transforms is set by [param transform_format], which should be set according to whether the multimesh is meant to be rendered in 2D or 3D. If [param color_format] is [code]true[/code], each instance will have a color associated with it. If [param custom_data_format] is [code]true[/code], each instance will have a custom data vector associated with it. If [param use_indirect] is [code]true[/code], an indirect command buffer will be created for this multimesh, allowing the instance count to be modified directly on the GPU. See also [method multimesh_get_command_buffer_rd_rid]. If [param custom_data2_format] is [code]true[/code] (with [param custom_data_format] and 3D transforms), each instance has a second custom data vector after the first, [code]INSTANCE_CUSTOM2[/code] in the vertex shader (Mariner E14c).
 			</description>
 		</method>
 		<method name="multimesh_create">
@@ -3106,6 +3210,14 @@
 				Returns the custom data associated with the specified instance.
 			</description>
 		</method>
+		<method name="multimesh_instance_get_custom_data2" qualifiers="const">
+			<return type="Color" />
+			<param index="0" name="multimesh" type="RID" />
+			<param index="1" name="index" type="int" />
+			<description>
+				Returns the second custom data of the instance (Mariner E14c). See [member MultiMesh.use_custom_data2].
+			</description>
+		</method>
 		<method name="multimesh_instance_get_transform" qualifiers="const">
 			<return type="Transform3D" />
 			<param index="0" name="multimesh" type="RID" />
@@ -3147,6 +3259,15 @@
 			<param index="2" name="custom_data" type="Color" />
 			<description>
 				Sets the custom data for this instance. Custom data is passed as a [Color], but is interpreted as a [code]vec4[/code] in the shader. Equivalent to [method MultiMesh.set_instance_custom_data].
+			</description>
+		</method>
+		<method name="multimesh_instance_set_custom_data2">
+			<return type="void" />
+			<param index="0" name="multimesh" type="RID" />
+			<param index="1" name="index" type="int" />
+			<param index="2" name="custom_data" type="Color" />
+			<description>
+				Sets the second custom data of the instance, [code]INSTANCE_CUSTOM2[/code] in the vertex shader (Mariner E14c). See [member MultiMesh.use_custom_data2].
 			</description>
 		</method>
 		<method name="multimesh_instance_set_transform">
@@ -3267,6 +3388,13 @@
 			<param index="1" name="visible" type="int" />
 			<description>
 				Sets the number of instances visible at a given time. If -1, all instances that have been allocated are drawn. Equivalent to [member MultiMesh.visible_instance_count].
+			</description>
+		</method>
+		<method name="multimesh_uses_custom_data2" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="multimesh" type="RID" />
+			<description>
+				Returns [code]true[/code] if the multimesh was allocated with a second custom data per instance (Mariner E14c).
 			</description>
 		</method>
 		<method name="occluder_create">
@@ -3599,6 +3727,14 @@
 			<param index="1" name="one_shot" type="bool" />
 			<description>
 				If [code]true[/code], particles will emit once and then stop. Equivalent to [member GPUParticles3D.one_shot].
+			</description>
+		</method>
+		<method name="particles_set_overhead_map_collision">
+			<return type="void" />
+			<param index="0" name="particles" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<description>
+				If [param enable] is [code]true[/code], the particles collide with the overhead map of the environment. Equivalent to [member GPUParticles3D.collision_overhead_map].
 			</description>
 		</method>
 		<method name="particles_set_pre_process_time">

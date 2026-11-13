@@ -198,6 +198,7 @@ struct MultiMesh {
 	RSE::MultimeshTransformFormat xform_format = RSE::MULTIMESH_TRANSFORM_3D;
 	bool uses_colors = false;
 	bool uses_custom_data = false;
+	bool uses_custom_data2 = false; // Mariner E14c: accepted in the buffer, not kept (no vertex attribute left).
 	int visible_instances = -1;
 	AABB aabb;
 	AABB custom_aabb;
@@ -529,7 +530,7 @@ public:
 	virtual RID _multimesh_allocate() override;
 	virtual void _multimesh_initialize(RID p_rid) override;
 	virtual void _multimesh_free(RID p_rid) override;
-	virtual void _multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors = false, bool p_use_custom_data = false, bool p_use_indirect = false) override;
+	virtual void _multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors = false, bool p_use_custom_data = false, bool p_use_indirect = false, bool p_use_custom_data2 = false) override;
 	virtual int _multimesh_get_instance_count(RID p_multimesh) const override;
 
 	virtual void _multimesh_set_mesh(RID p_multimesh, RID p_mesh) override;
@@ -547,6 +548,9 @@ public:
 	virtual Transform2D _multimesh_instance_get_transform_2d(RID p_multimesh, int p_index) const override;
 	virtual Color _multimesh_instance_get_color(RID p_multimesh, int p_index) const override;
 	virtual Color _multimesh_instance_get_custom_data(RID p_multimesh, int p_index) const override;
+	virtual void _multimesh_instance_set_custom_data2(RID p_multimesh, int p_index, const Color &p_color) override {} // Mariner E14c: not kept here.
+	virtual Color _multimesh_instance_get_custom_data2(RID p_multimesh, int p_index) const override { return Color(); }
+	virtual bool _multimesh_uses_custom_data2(RID p_multimesh) const override;
 	virtual void _multimesh_set_buffer(RID p_multimesh, const Vector<float> &p_buffer) override;
 	virtual RID _multimesh_get_command_buffer_rd_rid(RID p_multimesh) const override;
 	virtual RID _multimesh_get_buffer_rd_rid(RID p_multimesh) const override;

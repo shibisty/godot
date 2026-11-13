@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BoxImpostorBaker" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Bakes a model into a box impostor: its bounding box with what the model looks like from each side (Mariner G5b).
+	</brief_description>
+	<description>
+		A box impostor draws a model seen from far away (a building, a warehouse, a quay, a ship at anchor) as its bounding box, a dozen triangles. Every face of the box carries what an orthographic camera saw of the model from that side - the color, the normals and the depth of the relief below the face - and the material's deep parallax in impostor mode ([member BaseMaterial3D.heightmap_impostor]) traces the view ray into that relief: the right parallax and silhouette from any angle, the relief's depth for intersections and the sun's shadow maps, and the light, wetness, fog and windows of an ordinary [StandardMaterial3D].
+		[method bake] photographs a copy of the source (without scripts) in a viewport of its own, five sides (six with [member bake_bottom]), and packs the faces into a square atlas at one texel density, so that one relief scale serves every face. Bake with the Forward+ renderer (Mobile: materials other than [BaseMaterial3D] are baked lit; Compatibility: LDR colors); the impostor is drawn by every renderer.
+		[codeblock]
+		var baker = BoxImpostorBaker.new()
+		baker.texels_per_meter = 8.0
+		var mesh = baker.bake($Warehouse)
+		ResourceSaver.save(mesh, "res://warehouse_impostor.res")
+		[/codeblock]
+		In the editor: select the model's root node and use [b]Project &gt; Tools &gt; Bake Box Impostor[/b]; the mesh is saved next to the scene and added as a sibling [MeshInstance3D]. Switch between the model and its impostor with the visibility ranges of [GeometryInstance3D] (for example the model to 300 m, the impostor from 300 m with a fade).
+		With [member hull] (the default) the ray is traced against all the faces' reliefs at once (the visual hull of the five views): inner corners and walls seen edge-on by one face are right. Still, a hollow no face sees into (a courtyard closed on four sides, a recess under a roof) is filled in.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="bake">
+			<return type="ArrayMesh" />
+			<param index="0" name="source" type="Node3D" />
+			<description>
+				Bakes [param source] (a [Node3D] inside the scene tree with its visible geometry below it) into a box impostor: a mesh with one surface (the box's faces, each with its rectangle of the atlas in [constant Mesh.ARRAY_CUSTOM0]) and its [StandardMaterial3D] (albedo, normal map, height map in impostor mode with the depth offset; [member BaseMaterial3D.interior_mask_texture] where the source has transparent glass). Returns [code]null[/code] if the source has no visible geometry. Renders several frames at once ([method RenderingServer.force_draw]): call it from the main thread, not while a frame is being drawn.
+			</description>
+		</method>
+		<method name="get_albedo_image" qualifiers="const">
+			<return type="Image" />
+			<description>
+				The last bake's color atlas (sRGB, alpha: the model's coverage).
+			</description>
+		</method>
+		<method name="get_atlas_meters" qualifiers="const">
+			<return type="float" />
+			<description>
+				The side of the last bake's atlas in meters (the atlas is square, at one texel density).
+			</description>
+		</method>
+		<method name="get_height_image" qualifiers="const">
+			<return type="Image" />
+			<description>
+				The last bake's relief atlas: [code]1[/code] on a face, [code]0[/code] at [method get_relief_depth] below it or where nothing is.
+			</description>
+		</method>
+		<method name="get_normal_image" qualifiers="const">
+			<return type="Image" />
+			<description>
+				The last bake's normal map atlas (tangent space of the impostor's faces).
+			</description>
+		</method>
+		<method name="get_relief_depth" qualifiers="const">
+			<return type="float" />
+			<description>
+				The depth of the last bake's relief in meters: the box's largest side and 2 percent.
+			</description>
+		</method>
+		<method name="get_window_image" qualifiers="const">
+			<return type="Image" />
+			<description>
+				The last bake's window mask (the source's surfaces with transparent materials), or [code]null[/code] if it has none.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="bake_bottom" type="bool" setter="set_bake_bottom" getter="is_bake_bottom_enabled" default="false">
+			If [code]true[/code], the bottom face is baked too (for models seen from below: a bridge, a ship's hull).
+		</member>
+		<member name="hull" type="bool" setter="set_hull" getter="is_hull_enabled" default="true">
+			If [code]true[/code], the material traces the visual hull of all the faces' reliefs ([member BaseMaterial3D.heightmap_impostor_faces], Mariner G5c): right inner corners and walls seen edge-on by a face. If [code]false[/code], each face traces its own relief (cheaper, wrong in inner corners).
+		</member>
+		<member name="max_size" type="int" setter="set_max_size" getter="get_max_size" default="2048">
+			The largest side of the atlas in texels: when the faces do not fit at [member texels_per_meter], the density is lowered.
+		</member>
+		<member name="padding" type="int" setter="set_padding" getter="get_padding" default="4">
+			Texels around each face in the atlas (filled with the face's edge colors, so that filtering and mipmaps do not bleed).
+		</member>
+		<member name="texels_per_meter" type="float" setter="set_texels_per_meter" getter="get_texels_per_meter" default="8.0">
+			The atlas's texel density. At 300 m a 1920 x 1080 view at 60 degrees shows about 3 pixels per meter.
+		</member>
+	</members>
+</class>

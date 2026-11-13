@@ -134,6 +134,11 @@ bool sc_multimesh_has_color() {
 	return ((sc_packed_1() >> 2) & 1U) != 0;
 }
 
+// Mariner E14c.
+bool sc_multimesh_has_custom_data2() {
+	return ((sc_packed_1() >> 6) & 1U) != 0;
+}
+
 bool sc_multimesh_has_custom_data() {
 	return ((sc_packed_1() >> 3) & 1U) != 0;
 }
@@ -506,6 +511,16 @@ layout(set = 1, binding = 49) uniform texture2D translucent_shadow_distance; // 
 layout(set = 1, binding = 50) uniform texture2D restir_diffuse; // Mariner E20: demodulated diffuse light of the ReSTIR lights.
 layout(set = 1, binding = 51) uniform texture2D restir_specular; // Mariner E20: specular without Fresnel (rgb), Fresnel weight (a).
 layout(set = 1, binding = 52) uniform texture2D restir_shadow_mask; // Mariner E20b: ray traced shadows of directional lights (r, g).
+// Mariner G1a: the overhead map (inactive: OverheadMapData.params.w = 0).
+#include "../overhead_map_data_inc.glsl"
+layout(set = 1, binding = 53, std140) uniform OverheadMapBlock {
+	OverheadMapData data;
+}
+overhead_map_block;
+layout(set = 1, binding = 54) uniform texture2D overhead_map_height_texture;
+#define OVERHEAD_MAP overhead_map_block.data
+#define OVERHEAD_HEIGHT overhead_map_height_texture
+#include "../overhead_map_inc.glsl"
 #define DDGI_VOLUMES ddgi_block.volumes
 #define DDGI_IRRADIANCE_0 ddgi_irradiance_world
 #define DDGI_DISTANCE_0 ddgi_distance_world

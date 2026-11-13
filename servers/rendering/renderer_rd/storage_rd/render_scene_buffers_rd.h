@@ -287,6 +287,11 @@ public:
 	}
 
 	bool has_depth_texture();
+	// Mariner E13b: the depth pyramid of the frame (RG32F, r the farthest raw depth, g the nearest; a layer per view,
+	// all mipmaps), built from the depth buffer at the first call of the frame (or when p_update).
+	RID get_hiz(bool p_update = false);
+	uint32_t get_hiz_mipmap_count() const;
+
 	RID get_depth_texture();
 	RID get_depth_texture(const uint32_t p_layer);
 
@@ -497,6 +502,9 @@ public:
 		// Bindless material textures (index 0 is white), copied from the renderer when they change.
 		Vector<RID> textures;
 		uint64_t textures_version = 0;
+		// Mariner E5d: the geometry buffer array (RT_InstanceData buffer indices; index 0 is a dummy).
+		Vector<RID> geometry_buffers;
+		uint64_t geometry_buffers_version = 0;
 
 		struct TextureSet {
 			RID shader;
@@ -516,11 +524,16 @@ public:
 	uint32_t get_raytracing_instance_count() const;
 	TypedArray<RID> get_raytracing_textures() const;
 	RID get_raytracing_texture_uniform_set(RID p_shader, uint32_t p_set);
+	// Mariner E5d: the array of the meshes' buffers RT_InstanceData indexes (pathtracer_scene_inc.glsl,
+	// RT_GEOMETRY_BUFFERS_BINDING), as a uniform of the given binding.
+	RD::Uniform get_raytracing_geometry_buffers_uniform(uint32_t p_binding) const;
+	TypedArray<RID> get_raytracing_geometry_buffers() const;
 
 	/* Late opaque pass (render_mode opaque_late): copy of the scene color and depth drawn before it, made by the
 	   Forward+ renderer in the frames where late opaque surfaces are visible. Exposed to compositor effects. */
 
 	uint64_t opaque_late_frame = UINT64_MAX; // Frame the copy was last made in.
+	uint64_t hiz_frame = UINT64_MAX; // Mariner E13b: the frame the depth pyramid was last built in.
 
 	void set_opaque_late_frame(uint64_t p_frame) { opaque_late_frame = p_frame; }
 	bool has_opaque_late_textures() const;

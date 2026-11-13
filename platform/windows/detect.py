@@ -267,6 +267,11 @@ def get_opts():
             "Whether the Agility SDK DLLs will be stored in arch-specific subdirectories",
             False,
         ),
+        (
+            "dxc_path",
+            "Path to the DirectX Shader Compiler release (dxcompiler.dll and dxil.dll, needed by D3D12 mesh shaders)",
+            os.path.join(deps_folder, "dxc"),
+        ),
         BoolVariable("use_pix", "Use PIX (Performance tuning and debugging for DirectX 12) runtime", False),
         (
             "pix_path",

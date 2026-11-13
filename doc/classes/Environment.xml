@@ -82,6 +82,18 @@
 		<member name="background_mode" type="int" setter="set_background" getter="get_background" enum="Environment.BGMode" default="0">
 			The background mode.
 		</member>
+		<member name="color_grading_contrast" type="float" setter="set_color_grading_contrast" getter="get_color_grading_contrast" default="1.0">
+			Contrast around the middle grey (0.18 linear), in ACEScct after the ASC CDL: the same in every stop above and below, the hue is kept. [code]1.0[/code] — no change. Mariner engine patch F3c.
+		</member>
+		<member name="color_grading_curves_highlight_scale" type="Vector3" setter="set_color_grading_curves_highlight_scale" getter="get_color_grading_curves_highlight_scale" default="Vector3(1, 1, 1)">
+			Per channel curves: above [member color_grading_curves_mid_point] the value [code]x[/code] becomes [code]mid + (x - mid) * scale[/code] — below [code]1[/code] softer highlights. Continuous with the shadow part at the mid point. Mariner engine patch F3c.
+		</member>
+		<member name="color_grading_curves_mid_point" type="Vector3" setter="set_color_grading_curves_mid_point" getter="get_color_grading_curves_mid_point" default="Vector3(0.18, 0.18, 0.18)">
+			Pivot of the per channel curves, scene-linear (middle grey [code]0.18[/code] by default); it stays unchanged. See [member color_grading_curves_shadow_gamma] and [member color_grading_curves_highlight_scale]. Mariner engine patch F3c.
+		</member>
+		<member name="color_grading_curves_shadow_gamma" type="Vector3" setter="set_color_grading_curves_shadow_gamma" getter="get_color_grading_curves_shadow_gamma" default="Vector3(1, 1, 1)">
+			Per channel curves in scene-linear light (after the saturation, before the tone mapper): below [member color_grading_curves_mid_point] the value [code]x[/code] becomes [code]mid * pow(x / mid, gamma)[/code] — above [code]1[/code] darker shadows, below lighter. Mariner engine patch F3c.
+		</member>
 		<member name="color_grading_enabled" type="bool" setter="set_color_grading_enabled" getter="is_color_grading_enabled" default="false">
 			Mariner F3. If [code]true[/code], the color grading below is applied to the scene in linear light, after the exposure and before the tone mapper (white balance, shadows / midtones / highlights, ASC CDL, saturation), with optional gamut mapping after the tone mapper. Forward+ only (Mobile and Compatibility ignore it). The [code]adjustment_*[/code] properties still apply after it.
 		</member>
@@ -93,6 +105,27 @@
 		</member>
 		<member name="color_grading_midtones" type="Color" setter="set_color_grading_midtones" getter="get_color_grading_midtones" default="Color(1, 1, 1, 1)">
 			Multiplier of the middle tones, see [member color_grading_shadows].
+		</member>
+		<member name="color_grading_mixer_blue" type="Vector3" setter="set_color_grading_mixer_blue" getter="get_color_grading_mixer_blue" default="Vector3(0, 0, 1)">
+			Channel mixer: the weights of the input red, green and blue in the output blue. See [member color_grading_mixer_red]. Mariner engine patch F3c.
+		</member>
+		<member name="color_grading_mixer_green" type="Vector3" setter="set_color_grading_mixer_green" getter="get_color_grading_mixer_green" default="Vector3(0, 1, 0)">
+			Channel mixer: the weights of the input red, green and blue in the output green. See [member color_grading_mixer_red]. Mariner engine patch F3c.
+		</member>
+		<member name="color_grading_mixer_red" type="Vector3" setter="set_color_grading_mixer_red" getter="get_color_grading_mixer_red" default="Vector3(1, 0, 0)">
+			Channel mixer: the weights of the input red, green and blue in the output red (applied after the white balance, before the tonal ranges). [code]Vector3(1, 0, 0)[/code] leaves red as it is. Mariner engine patch F3c.
+		</member>
+		<member name="color_grading_night_vision" type="float" setter="set_color_grading_night_vision" getter="get_color_grading_night_vision" default="0.0">
+			Strength of the night vision (Purkinje shift) in the color grading, [code]0.0[/code] off. Below [member color_grading_night_vision_start] of scene luminance (before exposure) colors fade toward the scotopic luminance (rods, Larson et al. 1997) tinted with [member color_grading_night_vision_tint]: at night the eye loses color and sees blue-green better than red. Works with [member color_grading_enabled]. Mariner engine patch F3b.
+		</member>
+		<member name="color_grading_night_vision_end" type="float" setter="set_color_grading_night_vision_end" getter="get_color_grading_night_vision_end" default="0.0005">
+			Scene luminance (before exposure) at which the night vision is complete; between [member color_grading_night_vision_start] and this value the blend runs in log space. Mariner engine patch F3b.
+		</member>
+		<member name="color_grading_night_vision_start" type="float" setter="set_color_grading_night_vision_start" getter="get_color_grading_night_vision_start" default="0.05">
+			Scene luminance (before exposure) below which the night vision starts (mesopic vision, [code]0.05[/code] is about a deep twilight). Mariner engine patch F3b.
+		</member>
+		<member name="color_grading_night_vision_tint" type="Color" setter="set_color_grading_night_vision_tint" getter="get_color_grading_night_vision_tint" default="Color(0.7, 0.85, 1.35, 1)">
+			Tint of the scotopic luminance in the night vision, normalized to a luminance of [code]1.0[/code] (only the hue counts). The default is the blue shift of night scenes. Mariner engine patch F3b.
 		</member>
 		<member name="color_grading_offset" type="Vector3" setter="set_color_grading_offset" getter="get_color_grading_offset" default="Vector3(0, 0, 0)">
 			ASC CDL offset per channel (ACEScct). In this encoding [code]0.057[/code] is about one stop.
@@ -118,12 +151,15 @@
 		<member name="color_grading_tonal_ranges" type="Vector4" setter="set_color_grading_tonal_ranges" getter="get_color_grading_tonal_ranges" default="Vector4(0, 0.333, 0.55, 1)">
 			Linear luminance ranges of the tones: the shadows weight falls from 1 to 0 over [code]x..y[/code], the highlights weight rises from 0 to 1 over [code]z..w[/code], the midtones take the rest.
 		</member>
+		<member name="color_grading_vibrance" type="float" setter="set_color_grading_vibrance" getter="get_color_grading_vibrance" default="1.0">
+			Vibrance: a saturation that changes the less saturated colors most (the chroma is scaled by [code]1 + (vibrance - 1) * (1 - saturation)[/code]), so skin, sky and foliage gain color while already vivid colors barely change. Applied before [member color_grading_saturation]. [code]1.0[/code] — no change. Mariner engine patch F3c.
+		</member>
 		<member name="ddgi_bias" type="float" setter="set_ddgi_bias" getter="get_ddgi_bias" default="0.3">
 			Distance in meters by which a surface point is moved off the surface (mostly towards the camera) before the probes are sampled. Larger values reduce shadow acne-like dark blotches and light leaking at contact, smaller values keep thin features. Mariner engine patch E12.
 		</member>
 		<member name="ddgi_enabled" type="bool" setter="set_ddgi_enabled" getter="is_ddgi_enabled" default="false">
 			If [code]true[/code], dynamic diffuse global illumination probes (DDGI) replace the ambient light of opaque and transparent surfaces: a grid of [member ddgi_probe_count] probes, [member ddgi_probe_spacing] apart and centered on the camera, is updated every frame by rays traced against the viewport's raytracing scene (sun, lamps with ray traced shadows, emissive materials, the sky through openings, and multiple bounces). Interiors become dark where the sky does not reach and colored surfaces tint their surroundings. The sky reflection is darkened where the probes see less light than the ambient light (see [member ddgi_specular_occlusion]). Surfaces lit by [VoxelGI], SDFGI or lightmaps keep those.
-			[b]Note:[/b] Only available in the Forward+ renderer on Vulkan with ray query support, with [member ProjectSettings.rendering/raytracing/scene_acceleration_structures] enabled and [member Viewport.raytracing_scene_enabled] on the viewport; otherwise the ambient light is used. Positional lights within the viewport's raytracing distance light the probes, also off-screen. Mariner engine patch E12.
+			[b]Note:[/b] Only available in the Forward+ renderer on Vulkan or Direct3D 12 with ray query support, with [member ProjectSettings.rendering/raytracing/scene_acceleration_structures] enabled and [member Viewport.raytracing_scene_enabled] on the viewport; otherwise the ambient light is used. Positional lights within the viewport's raytracing distance light the probes, also off-screen. Mariner engine patch E12.
 		</member>
 		<member name="ddgi_energy" type="float" setter="set_ddgi_energy" getter="get_ddgi_energy" default="1.0">
 			Multiplier for the light of the probes.
@@ -282,6 +318,33 @@
 			The strength that is used when blurring across the screen to generate the glow effect. This affects the distance and intensity of the blur. When using the Mobile rendering method, this should be increased to compensate for the lower dynamic range.
 			[b]Note:[/b] [member glow_strength] has no effect when using the Compatibility rendering method, due to this rendering method using a simpler glow implementation optimized for low-end devices.
 		</member>
+		<member name="overhead_map_bias" type="float" setter="set_overhead_map_bias" getter="get_overhead_map_bias" default="0.3">
+			How far a point is moved off its surface (along the normal, plus 1.5 texels of the map) before its sky occlusion is computed, in meters: a surface does not occlude itself. Also the least height of something above a point for it to count as a cover.
+		</member>
+		<member name="overhead_map_cull_mask" type="int" setter="set_overhead_map_cull_mask" getter="get_overhead_map_cull_mask" default="1048575">
+			The render layers drawn into the overhead map. Exclude what should not shade the ground below it, e.g. foliage that has its own canopy light, or the sea surface.
+		</member>
+		<member name="overhead_map_enabled" type="bool" setter="set_overhead_map_enabled" getter="is_overhead_map_enabled" default="false">
+			If [code]true[/code], the depth of the scene seen from above is drawn each frame into a map around the camera of each viewport (Mariner G1a), and the sky / color ambient light and the sky reflection are darkened by the sky occlusion computed from it: under roofs, decks and bridges, between walls, in streets and valleys (as CryEngine's height map ambient occlusion). Not where SDFGI, VoxelGI, lightmaps or DDGI apply: they see the occluders themselves; reflection probes replace the sky reflection where they apply.
+			The map is a height field: under a cover, the sky is seen from below the elevation of the cover's edge; next to a wall, above the wall's top. Glass and other transparent surfaces are not drawn into it.
+			Spatial shaders read the map in [code]fragment()[/code] through the built-ins [code]SKY_OCCLUSION[/code] (the sky visibility of the point, [code]1.0[/code] open, with [member overhead_map_sky_occlusion] applied) and [code]OVERHEAD_COVER[/code] ([code]1.0[/code] under a roof, a deck or a bridge, [code]0.0[/code] in the open, soft over the edge of the cover: no rain, no snow, dry ground under it); without a map they are [code]1.0[/code] and [code]0.0[/code]. Also the VisualShader inputs [code]sky_occlusion[/code] and [code]overhead_cover[/code].
+			[b]Note:[/b] Only supported in the Forward+ rendering method.
+		</member>
+		<member name="overhead_map_height" type="float" setter="set_overhead_map_height" getter="get_overhead_map_height" default="256.0">
+			The vertical extent of the map, in meters: half above the camera, half below (the top snapped to whole meters). Points above or below get no occlusion.
+		</member>
+		<member name="overhead_map_resolution" type="int" setter="set_overhead_map_resolution" getter="get_overhead_map_resolution" default="1024">
+			The size of the map in texels per side (a power of two from 128 to 4096). The texel size is [member overhead_map_size] divided by the resolution: the map moves with the camera in whole texels.
+		</member>
+		<member name="overhead_map_size" type="float" setter="set_overhead_map_size" getter="get_overhead_map_size" default="512.0">
+			The side of the square map around the camera, in meters. Points outside it get no occlusion.
+		</member>
+		<member name="overhead_map_sky_occlusion" type="float" setter="set_overhead_map_sky_occlusion" getter="get_overhead_map_sky_occlusion" default="1.0">
+			The amount of the sky occlusion: [code]0.0[/code] leaves the ambient light unchanged, [code]1.0[/code] applies the full occlusion.
+		</member>
+		<member name="overhead_map_sky_occlusion_radius" type="float" setter="set_overhead_map_sky_occlusion_radius" getter="get_overhead_map_sky_occlusion_radius" default="16.0">
+			How far from a point the occluders are looked for, in meters (at most half of [member overhead_map_size]). Larger radii see larger shapes (valleys, streets) and lower horizons; the samples are spaced geometrically from two texels to the radius.
+		</member>
 		<member name="pathtracing_accumulate" type="bool" setter="set_pathtracing_accumulate" getter="is_pathtracing_accumulate" default="true">
 			If [code]true[/code], samples are accumulated over frames into a converging image; the accumulation restarts when the camera, the internal size, the scene (instances, transforms, meshes, materials), the lights or the path tracing settings change, or when [method Viewport.reset_pathtracing] is called. If [code]false[/code], every frame is traced from scratch.
 		</member>
@@ -293,7 +356,7 @@
 		</member>
 		<member name="pathtracing_enabled" type="bool" setter="set_pathtracing_enabled" getter="is_pathtracing_enabled" default="false">
 			If [code]true[/code], the opaque scene of viewports using this environment is path traced on the viewport's ray tracing scene (TLAS) instead of rasterized: global illumination, reflections, refraction through dielectric media and shadows from light sampling. The sky, transparent materials, compositor effects and post-processing are rendered as usual. Samples accumulate over frames while the camera, the scene, the lights and the path tracing settings stay the same (see [member pathtracing_accumulate]).
-			[b]Note:[/b] Mariner engine patch E5c. Requires Forward+ on Vulkan with ray query support, the [member ProjectSettings.rendering/raytracing/scene_acceleration_structures] project setting and [member Viewport.raytracing_scene_enabled] on the viewport; otherwise the viewport is rasterized.
+			[b]Note:[/b] Mariner engine patch E5c. Requires Forward+ on Vulkan or Direct3D 12 with ray query support, the [member ProjectSettings.rendering/raytracing/scene_acceleration_structures] project setting and [member Viewport.raytracing_scene_enabled] on the viewport; otherwise the viewport is rasterized.
 		</member>
 		<member name="pathtracing_firefly_clamp" type="float" setter="set_pathtracing_firefly_clamp" getter="get_pathtracing_firefly_clamp" default="0.0">
 			Clamps the luminance of the indirect light of each sample to this value to suppress fireflies (bright isolated pixels) at the cost of some energy. [code]0[/code] disables the clamp.
@@ -319,7 +382,7 @@
 		<member name="restir_enabled" type="bool" setter="set_restir_enabled" getter="is_restir_enabled" default="false">
 			If [code]true[/code], the direct light of the omni and spot lights with [member Light3D.light_restir] comes from ReSTIR DI (spatiotemporal reservoir resampling): every pixel of the opaque pass takes one light sample, chosen among many candidates and reused from neighbouring pixels and previous frames, with a ray traced shadow, then the result is denoised. This lets hundreds of lights cast shadows at a fixed cost per pixel, without shadow maps.
 			The light matches the rasterizer's lights (Burley diffuse, GGX specular, distance and spot attenuation) where nothing is in the way. Transparent surfaces and [code]render_mode opaque_late[/code] surfaces still get these lights from the rasterizer, without shadows.
-			[b]Note:[/b] Needs the Forward+ renderer on Vulkan with ray query support, [member ProjectSettings.rendering/raytracing/scene_acceleration_structures] and [member Viewport.raytracing_scene_enabled] on the viewport, a single view and 3D MSAA disabled; otherwise the lights are rasterized as usual.
+			[b]Note:[/b] Needs the Forward+ renderer on Vulkan or Direct3D 12 with ray query support, [member ProjectSettings.rendering/raytracing/scene_acceleration_structures] and [member Viewport.raytracing_scene_enabled] on the viewport, a single view and 3D MSAA disabled; otherwise the lights are rasterized as usual.
 		</member>
 		<member name="restir_spatial_samples" type="int" setter="set_restir_spatial_samples" getter="get_restir_spatial_samples" default="3">
 			Neighbouring pixels whose chosen samples are reused per pixel. [code]0[/code] disables the spatial reuse.
@@ -378,6 +441,9 @@
 		</member>
 		<member name="sky_rotation" type="Vector3" setter="set_sky_rotation" getter="get_sky_rotation" default="Vector3(0, 0, 0)">
 			The rotation to use for sky rendering.
+		</member>
+		<member name="snow" type="float" setter="set_snow" getter="get_snow" default="0.0">
+			The snow on the world, from [code]0.0[/code] (none) to [code]1.0[/code] (deep) - set by the game's weather. Read by materials with [member BaseMaterial3D.snow_enabled] and by spatial shaders through the fragment built-in [code]SNOW[/code] (Mariner G4b). Under cover from above (the overhead map, [member overhead_map_enabled]) materials stay bare. All three renderers.
 		</member>
 		<member name="ssao_ao_channel_affect" type="float" setter="set_ssao_ao_channel_affect" getter="get_ssao_ao_channel_affect" default="0.0">
 			The screen-space ambient occlusion intensity on materials that have an AO texture defined. Values higher than [code]0[/code] will make the SSAO effect visible in areas darkened by AO textures.
@@ -513,6 +579,9 @@
 		</member>
 		<member name="volumetric_fog_temporal_reprojection_enabled" type="bool" setter="set_volumetric_fog_temporal_reprojection_enabled" getter="is_volumetric_fog_temporal_reprojection_enabled" default="true">
 			Enables temporal reprojection in the volumetric fog. Temporal reprojection blends the current frame's volumetric fog with the last frame's volumetric fog to smooth out jagged edges. The performance cost is minimal; however, it leads to moving [FogVolume]s and [Light3D]s "ghosting" and leaving a trail behind them. When temporal reprojection is enabled, try to avoid moving [FogVolume]s or [Light3D]s too fast. Short-lived dynamic lighting effects should have [member Light3D.light_volumetric_fog_energy] set to [code]0.0[/code] to avoid ghosting.
+		</member>
+		<member name="wetness" type="float" setter="set_wetness" getter="get_wetness" default="0.0">
+			The wetness of the world, from [code]0.0[/code] (dry) to [code]1.0[/code] (soaked) - set by the game's weather (rain raises it, drying lowers it over time). Read by materials with [member BaseMaterial3D.wetness_enabled] and by spatial shaders through the fragment built-in [code]WETNESS[/code] (Mariner G4). Under cover from above (the overhead map, [member overhead_map_enabled]) materials stay dry. All three renderers.
 		</member>
 	</members>
 	<constants>

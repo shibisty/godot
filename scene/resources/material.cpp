@@ -591,6 +591,41 @@ void BaseMaterial3D::init_shaders() {
 	shader_names->heightmap_max_layers = "heightmap_max_layers";
 	shader_names->heightmap_flip = "heightmap_flip";
 	shader_names->heightmap_self_shadow_strength = "heightmap_self_shadow_strength";
+	shader_names->sheen_color = "sheen_color";
+	shader_names->sheen_roughness = "sheen_roughness";
+	shader_names->wetness_amount = "wetness_amount"; // Mariner G4.
+	shader_names->wetness_porosity = "wetness_porosity";
+	shader_names->wetness_puddles = "wetness_puddles";
+	shader_names->snow_amount = "snow_amount"; // Mariner G4b.
+	shader_names->snow_color = "snow_color";
+	shader_names->snow_roughness = "snow_roughness";
+	shader_names->snow_max_slope = "snow_max_slope";
+	shader_names->snow_relief = "snow_relief";
+	shader_names->impostor_faces = "impostor_faces"; // Mariner G5c.
+	shader_names->planar_reflection_amount = "planar_reflection_amount"; // Mariner G6.
+	shader_names->planar_reflection_distortion = "planar_reflection_distortion";
+	shader_names->displacement_scale = "displacement_scale"; // Mariner G7.
+	shader_names->displacement_midlevel = "displacement_midlevel";
+	shader_names->displacement_texture_lod = "displacement_texture_lod";
+	shader_names->interior_rooms = "interior_rooms"; // Mariner G5a.
+	shader_names->interior_room_size = "interior_room_size";
+	shader_names->interior_atlas_size = "interior_atlas_size";
+	shader_names->interior_back_wall = "interior_back_wall";
+	shader_names->interior_brightness = "interior_brightness";
+	shader_names->interior_lights = "interior_lights";
+	shader_names->interior_lit_fraction = "interior_lit_fraction";
+	shader_names->interior_light_color = "interior_light_color";
+	shader_names->interior_curtains = "interior_curtains"; // Mariner G5d.
+	shader_names->interior_blinds = "interior_blinds";
+	shader_names->interior_curtain_color = "interior_curtain_color";
+	shader_names->iridescence = "iridescence";
+	shader_names->iridescence_ior = "iridescence_ior";
+	shader_names->iridescence_thickness_min = "iridescence_thickness_min";
+	shader_names->iridescence_thickness_max = "iridescence_thickness_max";
+	shader_names->refraction_ior = "refraction_ior";
+	shader_names->refraction_thickness = "refraction_thickness";
+	shader_names->refraction_absorption_color = "refraction_absorption_color";
+	shader_names->refraction_absorption_distance = "refraction_absorption_distance";
 
 	shader_names->grow = "grow";
 
@@ -620,6 +655,12 @@ void BaseMaterial3D::init_shaders() {
 	shader_names->texture_names[TEXTURE_EMISSION] = "texture_emission";
 	shader_names->texture_names[TEXTURE_NORMAL] = "texture_normal";
 	shader_names->texture_names[TEXTURE_BENT_NORMAL] = "texture_bent_normal";
+	shader_names->texture_names[TEXTURE_SHEEN] = "texture_sheen";
+	shader_names->texture_names[TEXTURE_IRIDESCENCE] = "texture_iridescence";
+	shader_names->texture_names[TEXTURE_INTERIOR] = "texture_interior"; // Mariner G5a.
+	shader_names->texture_names[TEXTURE_INTERIOR_MASK] = "texture_interior_mask";
+	shader_names->texture_names[TEXTURE_PLANAR_REFLECTION] = "texture_planar_reflection"; // Mariner G6.
+	shader_names->texture_names[TEXTURE_DISPLACEMENT] = "texture_displacement"; // Mariner G7.
 	shader_names->texture_names[TEXTURE_RIM] = "texture_rim";
 	shader_names->texture_names[TEXTURE_CLEARCOAT] = "texture_clearcoat";
 	shader_names->texture_names[TEXTURE_FLOWMAP] = "texture_flowmap";
@@ -728,6 +769,16 @@ void BaseMaterial3D::_update_shader() {
 		case TEXTURE_FILTER_MAX:
 			break; // Internal value, skip.
 	}
+
+	// Mariner G5c: the box impostor's visual hull (the faces' data set by BoxImpostorBaker).
+	const bool impostor_hull = features[FEATURE_HEIGHT_MAPPING] && !flags[FLAG_UV1_USE_TRIPLANAR] && deep_parallax && heightmap_impostor && heightmap_impostor_faces.size() >= IMPOSTOR_FACE_DATA_SIZE;
+
+	// Mariner G7: the vertices move along their normals by the displacement map (not with the billboards, which replace
+	// the model-view matrix, nor with the triplanar mapping, which has no UV for the vertex).
+	const bool displacement = features[FEATURE_DISPLACEMENT] && billboard_mode == BILLBOARD_DISABLED && !flags[FLAG_UV1_USE_TRIPLANAR];
+
+	// Mariner G5a: the interior atlas is sampled by room, never repeated.
+	const String texfilter_interior_str = texfilter_str + ", repeat_disable";
 
 	if (flags[FLAG_USE_TEXTURE_REPEAT]) {
 		texfilter_str += ", repeat_enable";
@@ -1049,6 +1100,13 @@ uniform float refraction : hint_range(-1.0, 1.0, 0.001);
 uniform vec4 refraction_texture_channel;
 )",
 				texfilter_str);
+		if (refraction_physical) {
+			code += R"(uniform float refraction_ior : hint_range(1.0, 3.0, 0.01);
+uniform float refraction_thickness : hint_range(0.0, 1.0, 0.001);
+uniform vec4 refraction_absorption_color : source_color;
+uniform float refraction_absorption_distance : hint_range(0.001, 100.0, 0.001);
+)";
+		}
 	}
 
 	if (features[FEATURE_REFRACTION]) {
@@ -1085,6 +1143,78 @@ uniform sampler2D texture_rim : hint_default_white, %s;
 uniform float clearcoat : hint_range(0.0, 1.0, 0.01);
 uniform float clearcoat_roughness : hint_range(0.0, 1.0, 0.01);
 uniform sampler2D texture_clearcoat : hint_default_white, %s;
+)",
+				texfilter_str);
+	}
+	if (features[FEATURE_WETNESS]) {
+		code += R"(
+uniform float wetness_amount : hint_range(0.0, 1.0, 0.01);
+uniform float wetness_porosity : hint_range(0.0, 1.0, 0.01);
+uniform float wetness_puddles : hint_range(0.0, 1.0, 0.01);
+)";
+	}
+	if (features[FEATURE_SNOW]) {
+		code += R"(
+uniform float snow_amount : hint_range(0.0, 1.0, 0.01);
+uniform vec4 snow_color : source_color;
+uniform float snow_roughness : hint_range(0.0, 1.0, 0.01);
+uniform float snow_max_slope : hint_range(0.0, 90.0, 0.1);
+uniform float snow_relief : hint_range(0.0, 1.0, 0.01);
+)";
+	}
+	if (features[FEATURE_PLANAR_REFLECTION] && shading_mode != SHADING_MODE_UNSHADED) {
+		// Mariner G6: the scene's light (linear HDR) seen by the mirrored camera of a PlanarReflection3D.
+		code += R"(
+uniform sampler2D texture_planar_reflection : hint_default_black, filter_linear, repeat_disable;
+uniform float planar_reflection_amount : hint_range(0.0, 1.0, 0.01);
+uniform float planar_reflection_distortion : hint_range(0.0, 0.2, 0.001);
+)";
+	}
+	if (displacement) {
+		// Mariner G7: read in the vertex shader at a fixed mipmap (no screen derivatives there).
+		code += vformat(R"(
+uniform sampler2D texture_displacement : hint_default_black, filter_linear_mipmap, %s;
+uniform float displacement_scale;
+uniform float displacement_midlevel : hint_range(0.0, 1.0, 0.01);
+uniform float displacement_texture_lod : hint_range(0.0, 12.0, 0.1);
+varying vec3 displacement_obj;
+varying vec3 displacement_obj_normal;
+)",
+				flags[FLAG_USE_TEXTURE_REPEAT] ? "repeat_enable" : "repeat_disable");
+	}
+	if (features[FEATURE_INTERIOR]) {
+		code += vformat(R"(
+uniform sampler2D texture_interior : source_color, hint_default_black, %s;
+uniform sampler2D texture_interior_mask : hint_default_white, %s;
+uniform vec2 interior_rooms;
+uniform vec3 interior_room_size;
+uniform ivec2 interior_atlas_size;
+uniform float interior_back_wall : hint_range(0.05, 0.95, 0.01);
+uniform float interior_brightness : hint_range(0.0, 16.0, 0.01);
+uniform float interior_lights : hint_range(0.0, 16.0, 0.01);
+uniform float interior_lit_fraction : hint_range(0.0, 1.0, 0.01);
+uniform vec4 interior_light_color : source_color;
+uniform float interior_curtains : hint_range(0.0, 1.0, 0.01);
+uniform float interior_blinds : hint_range(0.0, 1.0, 0.01);
+uniform vec4 interior_curtain_color : source_color;
+)",
+				texfilter_interior_str, texfilter_str);
+	}
+	if (features[FEATURE_SHEEN]) {
+		code += vformat(R"(
+uniform vec4 sheen_color : source_color;
+uniform float sheen_roughness : hint_range(0.0, 1.0, 0.01);
+uniform sampler2D texture_sheen : source_color, hint_default_white, %s;
+)",
+				texfilter_str);
+	}
+	if (features[FEATURE_IRIDESCENCE]) {
+		code += vformat(R"(
+uniform float iridescence : hint_range(0.0, 1.0, 0.01);
+uniform float iridescence_ior : hint_range(1.0, 2.333, 0.01);
+uniform float iridescence_thickness_min : hint_range(0.0, 1200.0, 1.0);
+uniform float iridescence_thickness_max : hint_range(0.0, 1200.0, 1.0);
+uniform sampler2D texture_iridescence : hint_default_white, %s;
 )",
 				texfilter_str);
 	}
@@ -1147,7 +1277,18 @@ uniform int heightmap_min_layers : hint_range(1, 64);
 uniform int heightmap_max_layers : hint_range(1, 64);
 uniform vec2 heightmap_flip;
 )",
-				texfilter_height_str);
+				(deep_parallax && heightmap_impostor) ? String("filter_nearest_mipmap, repeat_disable") : texfilter_height_str); // Mariner G5b: sharp cliffs at the silhouettes.
+		if (deep_parallax && heightmap_impostor) {
+			code += "varying vec4 impostor_rect; // Mariner G5b: the face's rectangle in the atlas (CUSTOM0).\n";
+		}
+		if (impostor_hull) {
+			code += vformat(R"(uniform vec4 impostor_faces[%d]; // Mariner G5c.
+varying vec3 impostor_obj;
+varying vec3 impostor_obj_eye;
+varying vec3 impostor_obj_axis;
+)",
+					IMPOSTOR_FACE_DATA_SIZE);
+		}
 		if (heightmap_self_shadow) {
 			code += "uniform float heightmap_self_shadow_strength : hint_range(0.0, 1.0, 0.01);\n";
 		}
@@ -1189,6 +1330,18 @@ uniform vec3 uv2_offset;
 	// Generate vertex shader.
 	code += R"(
 void vertex() {)";
+
+	if (features[FEATURE_HEIGHT_MAPPING] && !flags[FLAG_UV1_USE_TRIPLANAR] && deep_parallax && heightmap_impostor) {
+		code += "\n	impostor_rect = CUSTOM0; // Mariner G5b.\n";
+	}
+	if (impostor_hull) {
+		// Mariner G5c: the ray in object space - from the camera (or along its axis for an orthographic one).
+		code += R"(	impostor_obj = VERTEX;
+	mat4 impostor_inv_model = inverse(MODEL_MATRIX);
+	impostor_obj_eye = (impostor_inv_model * vec4(CAMERA_POSITION_WORLD, 1.0)).xyz;
+	impostor_obj_axis = (impostor_inv_model * vec4(-INV_VIEW_MATRIX[2].xyz, 0.0)).xyz;
+)";
+	}
 
 	if (flags[FLAG_SRGB_VERTEX_COLOR]) {
 		code += R"(
@@ -1430,6 +1583,16 @@ void vertex() {)";
 )";
 	}
 
+	if (displacement) {
+		// Mariner G7: the undisplaced point and normal go to the fragment shader, which builds the relief's normal.
+		code += R"(
+	// Displacement: Enabled
+	displacement_obj = VERTEX;
+	displacement_obj_normal = NORMAL;
+	VERTEX += normalize(NORMAL) * ((textureLod(texture_displacement, UV, displacement_texture_lod).r - displacement_midlevel) * displacement_scale);
+)";
+	}
+
 	if (grow_enabled) {
 		code += R"(
 	// Grow: Enabled
@@ -1478,6 +1641,50 @@ vec4 triplanar_texture(sampler2D p_sampler, vec3 p_weights, vec3 p_triplanar_pos
 )";
 	}
 
+	if (impostor_hull) {
+		// Mariner G5c: a point is solid where it lies behind the surface every baked face sees (the visual hull of the
+		// faces' reliefs); its face is the one that sees it on its surface (facing the ray).
+		code += R"(
+vec2 impostor_face_uv(int p_face, vec3 p_point) {
+	return vec2(dot(p_point, impostor_faces[p_face * 4].xyz) + impostor_faces[p_face * 4].w, dot(p_point, impostor_faces[p_face * 4 + 1].xyz) + impostor_faces[p_face * 4 + 1].w);
+}
+
+float impostor_face_error(int p_face, vec3 p_point, vec2 p_dx, vec2 p_dy) {
+	float depth = dot(p_point, impostor_faces[p_face * 4 + 2].xyz) + impostor_faces[p_face * 4 + 2].w;
+)";
+		code += flags[FLAG_INVERT_HEIGHTMAP] ? "	float surface = textureGrad(texture_heightmap, impostor_face_uv(p_face, p_point), p_dx, p_dy).r;\n" : "	float surface = 1.0 - textureGrad(texture_heightmap, impostor_face_uv(p_face, p_point), p_dx, p_dy).r;\n";
+		code += R"(	return depth - surface;
+}
+
+bool impostor_solid(vec3 p_point, vec2 p_dx, vec2 p_dy) {
+	for (int f = 0; f < 6; f++) {
+		if (impostor_faces[f * 4 + 3].w != 0.0 && impostor_face_error(f, p_point, p_dx, p_dy) < 0.0) {
+			return false;
+		}
+	}
+	return true;
+}
+
+int impostor_seeing_face(vec3 p_point, vec3 p_dir, vec2 p_dx, vec2 p_dy) {
+	int best = 0;
+	float best_score = 1e20;
+	for (int f = 0; f < 6; f++) {
+		if (impostor_faces[f * 4 + 3].w == 0.0) {
+			continue;
+		}
+		// The face's outward normal is -impostor_faces[f * 4 + 2].xyz (the depth grows inward): a face the ray enters.
+		float facing = dot(-impostor_faces[f * 4 + 2].xyz, p_dir) < 0.0 ? 0.0 : 1.0;
+		float score = abs(impostor_face_error(f, p_point, p_dx, p_dy)) + facing;
+		if (score < best_score) {
+			best_score = score;
+			best = f;
+		}
+	}
+	return best;
+}
+)";
+	}
+
 	// Generate fragment shader.
 	code += R"(
 void fragment() {)";
@@ -1498,6 +1705,37 @@ void fragment() {)";
 )";
 	}
 
+	if (displacement && displacement_normal) {
+		// Mariner G7: the normal of the displaced surface, per pixel - the surface gradient of the height (Mikkelsen,
+		// "Bump Mapping Unparametrized Surfaces on the GPU") on the undisplaced surface, in object space. The height's
+		// slope is read over a texel or the pixel's footprint, whichever is larger; a coarse mesh still shades its relief.
+		code += R"(
+	// Displacement Normal: Enabled
+	{
+		vec3 disp_n = normalize(displacement_obj_normal);
+		vec3 disp_dp1 = dFdx(displacement_obj);
+		vec3 disp_dp2 = dFdy(displacement_obj);
+		vec2 disp_duv1 = dFdx(base_uv);
+		vec2 disp_duv2 = dFdy(base_uv);
+		vec3 disp_r1 = cross(disp_dp2, disp_n);
+		vec3 disp_r2 = cross(disp_n, disp_dp1);
+		float disp_det = dot(disp_dp1, disp_r1);
+		vec2 disp_step = max(1.0 / vec2(textureSize(texture_displacement, 0)), max(abs(disp_duv1), abs(disp_duv2)));
+		vec2 disp_slope = vec2(
+				texture(texture_displacement, base_uv + vec2(disp_step.x, 0.0)).r - texture(texture_displacement, base_uv - vec2(disp_step.x, 0.0)).r,
+				texture(texture_displacement, base_uv + vec2(0.0, disp_step.y)).r - texture(texture_displacement, base_uv - vec2(0.0, disp_step.y)).r) *
+				(displacement_scale * 0.5) / disp_step;
+		if (abs(disp_det) > 1e-24) {
+			// The gradients of U and V on the surface, times the height's slope along them.
+			vec3 disp_grad = (disp_slope.x * (disp_duv1.x * disp_r1 + disp_duv2.x * disp_r2) + disp_slope.y * (disp_duv1.y * disp_r1 + disp_duv2.y * disp_r2)) / disp_det;
+			vec3 disp_view_n = normalize(mat3(VIEW_MATRIX) * (MODEL_NORMAL_MATRIX * normalize(disp_n - disp_grad)));
+			// The side the renderer shades (the back faces of a double-sided material see the normal turned).
+			NORMAL = dot(disp_view_n, NORMAL) < 0.0 ? -disp_view_n : disp_view_n;
+		}
+	}
+)";
+	}
+
 	if (features[FEATURE_HEIGHT_MAPPING] && flags[FLAG_UV1_USE_TRIPLANAR]) {
 		// Display both resource name and albedo texture name.
 		// Materials are often built-in to scenes, so displaying the resource name alone may not be meaningful.
@@ -1512,8 +1750,78 @@ void fragment() {)";
 		}
 	}
 
-	// Heightmapping isn't supported at the same time as triplanar mapping.
-	if (features[FEATURE_HEIGHT_MAPPING] && !flags[FLAG_UV1_USE_TRIPLANAR]) {
+	// Mariner G5b: in impostor mode the textures are read with the gradients of the face's UV, not of the parallax
+	// offset UV, which jumps across the atlas at the silhouettes (the GPU would take the smallest mipmaps there).
+	const bool impostor_uv = features[FEATURE_HEIGHT_MAPPING] && !flags[FLAG_UV1_USE_TRIPLANAR] && deep_parallax && heightmap_impostor;
+	const int64_t height_code_start = code.length();
+	if (impostor_uv) {
+		code += "\n	vec2 impostor_dx = dFdx(base_uv);\n	vec2 impostor_dy = dFdy(base_uv);\n	bool impostor_miss = false;\n";
+	}
+
+	if (impostor_hull) {
+		// Mariner G5c: the view ray traced through the box in object space against all the faces' reliefs at once
+		// (steps over the ray's length in the box, then a binary search); the color, normal and depth of the face that
+		// sees the hit.
+		code += R"(
+	vec3 impostor_normal_obj = vec3(0.0, 1.0, 0.0);
+	{
+		// Height: Box impostor, visual hull (Mariner G5c)
+		vec3 hull_dir = normalize(PROJECTION_MATRIX[3][3] == 1.0 ? impostor_obj_axis : impostor_obj - impostor_obj_eye);
+		hull_dir = vec3(abs(hull_dir.x) < 1e-5 ? 1e-5 : hull_dir.x, abs(hull_dir.y) < 1e-5 ? 1e-5 : hull_dir.y, abs(hull_dir.z) < 1e-5 ? 1e-5 : hull_dir.z);
+		vec3 hull_far = mix(impostor_faces[24].xyz, impostor_faces[25].xyz, step(0.0, hull_dir));
+		vec3 hull_t3 = (hull_far - impostor_obj) / hull_dir;
+		float hull_exit = max(min(min(hull_t3.x, hull_t3.y), hull_t3.z), 0.0);
+		int hull_steps = max(heightmap_max_layers, 1);
+		float hull_dt = hull_exit / float(hull_steps);
+		float hull_t0 = 0.0;
+		float hull_t1 = 0.0;
+		bool hull_hit = false;
+		for (int i = 0; i <= hull_steps; i++) {
+			hull_t1 = float(i) * hull_dt;
+			if (impostor_solid(impostor_obj + hull_dir * hull_t1, impostor_dx, impostor_dy)) {
+				hull_hit = true;
+				break;
+			}
+			hull_t0 = hull_t1;
+		}
+		for (int i = 0; i < 6 && hull_hit; i++) {
+			float hull_mid = (hull_t0 + hull_t1) * 0.5;
+			if (impostor_solid(impostor_obj + hull_dir * hull_mid, impostor_dx, impostor_dy)) {
+				hull_t1 = hull_mid;
+			} else {
+				hull_t0 = hull_mid;
+			}
+		}
+		vec3 hull_point = impostor_obj + hull_dir * hull_t1;
+		int hull_face = impostor_seeing_face(hull_point, hull_dir, impostor_dx, impostor_dy);
+		base_uv = impostor_face_uv(hull_face, hull_point);
+		impostor_miss = !hull_hit;
+)";
+		if (features[FEATURE_NORMAL_MAPPING]) {
+			code += R"(		// The normal map in the seeing face's tangent frame, to object space.
+		vec2 hull_nm = textureGrad(texture_normal, base_uv, impostor_dx, impostor_dy).rg * 2.0 - 1.0;
+		vec3 hull_n = normalize(-impostor_faces[hull_face * 4 + 2].xyz);
+		vec3 hull_t = impostor_faces[hull_face * 4 + 3].xyz;
+		vec3 hull_b = normalize(cross(hull_n, hull_t)) * impostor_faces[hull_face * 4 + 3].w;
+		impostor_normal_obj = normalize(hull_t * hull_nm.x + hull_b * hull_nm.y + hull_n * sqrt(max(0.0, 1.0 - dot(hull_nm, hull_nm))));
+)";
+		} else {
+			code += "		impostor_normal_obj = normalize(-impostor_faces[hull_face * 4 + 2].xyz);\n";
+		}
+		if (heightmap_depth_offset) {
+			code += R"(		// The hit's depth (intersections, the sun's shadow maps) and the position its light is computed at.
+		vec3 hull_view = (VIEW_MATRIX * (MODEL_MATRIX * vec4(hull_point, 1.0))).xyz;
+		LIGHT_VERTEX = hull_view;
+		vec4 hull_clip = PROJECTION_MATRIX * vec4(hull_view, 1.0);
+		DEPTH = hull_clip.z / hull_clip.w;
+)";
+			if (OS::get_singleton()->get_current_rendering_method() == "gl_compatibility") {
+				code += "		DEPTH = DEPTH * 0.5 + 0.5; // Mariner G5e: OpenGL's clip space depth is -1 .. 1.\n";
+			}
+		}
+		code += "	}\n";
+	} else if (features[FEATURE_HEIGHT_MAPPING] && !flags[FLAG_UV1_USE_TRIPLANAR]) {
+		// Heightmapping isn't supported at the same time as triplanar mapping.
 		// Binormal is negative due to mikktspace. Flipping it "unflips" it.
 		code += R"(
 	{
@@ -1521,6 +1829,13 @@ void fragment() {)";
 		vec3 view_dir = normalize(normalize(-VERTEX + EYE_OFFSET) * mat3(TANGENT * heightmap_flip.x, -BINORMAL * heightmap_flip.y, NORMAL));
 		vec2 height_base_uv = base_uv; // Mariner E16: before the parallax offset.
 )";
+		const bool impostor = deep_parallax && heightmap_impostor;
+		if (impostor) {
+			// Mariner G5b: under an orthographic projection (the sun's shadow maps) every view ray is the camera's axis.
+			code += R"(		vec3 impostor_eye = PROJECTION_MATRIX[3][3] == 1.0 ? vec3(0.0, 0.0, 1.0) : normalize(-VERTEX + EYE_OFFSET);
+		view_dir = normalize(impostor_eye * mat3(TANGENT * heightmap_flip.x, -BINORMAL * heightmap_flip.y, NORMAL));
+)";
+		}
 
 		if (deep_parallax) {
 			// Multiply the heightmap scale by 0.01 to improve heightmap scale usability.
@@ -1530,7 +1845,12 @@ void fragment() {)";
 		float layer_depth = 1.0 / num_layers;
 		float current_layer_depth = 0.0;
 		vec2 p = view_dir.xy * heightmap_scale * 0.01;
-		vec2 delta = p / num_layers;
+)";
+			if (impostor) {
+				// Mariner G5b: the true ray (no offset limiting): at the bottom of the relief it has gone xy / z.
+				code += "		p = view_dir.xy / max(view_dir.z, 0.05) * heightmap_scale * 0.01;\n";
+			}
+			code += R"(		vec2 delta = p / num_layers;
 		vec2 ofs = base_uv;
 )";
 			if (flags[FLAG_INVERT_HEIGHTMAP]) {
@@ -1565,6 +1885,38 @@ void fragment() {)";
 		ofs = mix(ofs, prev_ofs, weight);
 		float hit_depth = mix(current_depth, current_depth - layer_depth, weight); // Mariner E16.
 )";
+			if (impostor) {
+				// Mariner G5b: the crossing found exactly by a binary search between the last point of the ray above the
+				// relief and the first below it (the relief is read texel by texel - no interpolation between layers, whose
+				// steps would show on a steep relief seen at grazing angles).
+				code += R"(		{
+			vec2 above_ofs = prev_ofs;
+			float above_depth = current_depth - layer_depth;
+			vec2 below_ofs = prev_ofs - delta;
+			float below_depth = current_depth;
+			for (int i = 0; i < 6; i++) {
+				vec2 mid_ofs = (above_ofs + below_ofs) * 0.5;
+				float mid_depth = (above_depth + below_depth) * 0.5;
+)";
+				code += flags[FLAG_INVERT_HEIGHTMAP] ? "				if (mid_depth >= texture(texture_heightmap, mid_ofs).r) {\n" : "				if (mid_depth >= 1.0 - texture(texture_heightmap, mid_ofs).r) {\n";
+				code += R"(					below_ofs = mid_ofs;
+					below_depth = mid_depth;
+				} else {
+					above_ofs = mid_ofs;
+					above_depth = mid_depth;
+				}
+			}
+			ofs = below_ofs;
+			hit_depth = below_depth;
+		}
+)";
+				// Mariner G5b: a ray that has left its face's rectangle went out of the box through another face, and one
+				// that reached the bottom of the relief (the impostor's empty texels) saw nothing: the silhouette comes from
+				// the relief, not from an alpha scissor (whose filtering would not match the relief's at the edges).
+				// Discarded at the end of the fragment function: derivatives after a discard (the relief's depth, the
+				// textures' mipmaps) are undefined in their quad.
+				code += "		impostor_miss = any(lessThan(ofs, impostor_rect.xy)) || any(greaterThan(ofs, impostor_rect.zw)) || hit_depth > 0.995;\n";
+			}
 
 		} else {
 			if (flags[FLAG_INVERT_HEIGHTMAP]) {
@@ -1616,10 +1968,20 @@ void fragment() {)";
 		{
 			float world_per_uv = sqrt(length(dFdx(VERTEX)) * length(dFdy(VERTEX)) / max(length(dFdx(height_base_uv)) * length(dFdy(height_base_uv)), 1e-12));
 			vec3 relief_vertex = VERTEX - normalize(-VERTEX + EYE_OFFSET) * (hit_depth * abs(heightmap_scale) * 0.01 * world_per_uv);
+)";
+			if (impostor) {
+				// Mariner G5b: along the true ray, as deep below the face as the hit.
+				code += "			relief_vertex = VERTEX - impostor_eye * (hit_depth * abs(heightmap_scale) * 0.01 * world_per_uv / max(view_dir.z, 0.05));\n";
+			}
+			code += R"(
 			LIGHT_VERTEX = relief_vertex;
 			vec4 relief_clip = PROJECTION_MATRIX * vec4(relief_vertex, 1.0);
 			DEPTH = relief_clip.z / relief_clip.w;
-		}
+)";
+			if (OS::get_singleton()->get_current_rendering_method() == "gl_compatibility") {
+				code += "			DEPTH = DEPTH * 0.5 + 0.5; // Mariner G5e: OpenGL's clip space depth is -1 .. 1.\n";
+			}
+			code += R"(		}
 )";
 		}
 
@@ -1629,6 +1991,14 @@ void fragment() {)";
 		}
 
 		code += "	}\n";
+	}
+
+	if (impostor_uv) {
+		String height_code = code.substr(height_code_start);
+		for (const char *uv : { "ofs", "prev_ofs", "mid_ofs", "shadow_uv", "base_uv" }) {
+			height_code = height_code.replace(vformat("texture(texture_heightmap, %s)", uv), vformat("textureGrad(texture_heightmap, %s, impostor_dx, impostor_dy)", uv));
+		}
+		code = code.substr(0, height_code_start) + height_code;
 	}
 
 	if (flags[FLAG_USE_POINT_SIZE]) {
@@ -1642,7 +2012,7 @@ void fragment() {)";
 	vec4 albedo_tex = triplanar_texture(texture_albedo, uv1_power_normal, uv1_triplanar_pos);
 )";
 		} else {
-			code += R"(
+			code += impostor_uv ? "\n	vec4 albedo_tex = textureGrad(texture_albedo, base_uv, impostor_dx, impostor_dy);\n" : R"(
 	vec4 albedo_tex = texture(texture_albedo, base_uv);
 )";
 		}
@@ -1764,16 +2134,20 @@ void fragment() {)";
 )";
 	}
 
-	if (features[FEATURE_NORMAL_MAPPING]) {
+	if (features[FEATURE_NORMAL_MAPPING] && !impostor_hull) {
 		code += R"(
 	// Normal Map: Enabled
 )";
 		if (flags[FLAG_UV1_USE_TRIPLANAR]) {
 			code += "	NORMAL_MAP = triplanar_texture(texture_normal, uv1_power_normal, uv1_triplanar_pos).rgb;\n";
 		} else {
-			code += "	NORMAL_MAP = texture(texture_normal, base_uv).rgb;\n";
+			code += impostor_uv ? "	NORMAL_MAP = textureGrad(texture_normal, base_uv, impostor_dx, impostor_dy).rgb;\n" : "	NORMAL_MAP = texture(texture_normal, base_uv).rgb;\n";
 		}
 		code += "	NORMAL_MAP_DEPTH = normal_scale;\n";
+	}
+	if (impostor_hull) {
+		// Mariner G5c: the hit's normal (the seeing face's normal map, in object space), not the drawn face's.
+		code += "	NORMAL = normalize((VIEW_MATRIX * (MODEL_MATRIX * vec4(impostor_normal_obj, 0.0))).xyz);\n";
 	}
 
 	if (features[FEATURE_BENT_NORMAL_MAPPING]) {
@@ -1834,12 +2208,46 @@ void fragment() {)";
 	vec3 ref_normal = NORMAL;
 )";
 		}
-		if (flags[FLAG_UV1_USE_TRIPLANAR]) {
-			code += "	vec2 ref_ofs = SCREEN_UV - ref_normal.xy * dot(triplanar_texture(texture_refraction, uv1_power_normal, uv1_triplanar_pos), refraction_texture_channel) * refraction;\n";
+		if (refraction_physical) {
+			// Mariner F6: refraction by the index of refraction through a slab of the given thickness (0: a thin pane),
+			// absorption by distance inside (Beer-Lambert, as KHR_materials_volume), Fresnel of the interface, tint by the
+			// albedo, blur by the roughness. Ideas after Filament's screen-space refraction; own code.
+			code += R"(
+	float ref_amount = 1.0 - albedo.a * albedo_tex.a;
+	vec3 ref_view = normalize(-VERTEX);
+	vec3 ref_dir = refract(-ref_view, ref_normal, 1.0 / refraction_ior);
+	float ref_cos = max(dot(-ref_normal, ref_dir), 0.05);
+	float ref_path = refraction_thickness / ref_cos;
+	vec3 ref_exit = VERTEX + ref_dir * ref_path;
+	vec4 ref_clip = PROJECTION_MATRIX * vec4(ref_exit, 1.0);
+	vec2 ref_ofs = clamp(ref_clip.xy / ref_clip.w * 0.5 + 0.5, vec2(0.0), vec2(1.0));
+
+	float refraction_depth_tex = textureLod(depth_texture, ref_ofs, 0.0).r;
+	vec4 ndc = OUTPUT_IS_SRGB ? vec4(vec3(ref_ofs, refraction_depth_tex) * 2.0 - 1.0, 1.0) : vec4(ref_ofs * 2.0 - 1.0, refraction_depth_tex, 1.0);
+	vec4 refraction_view_pos = INV_PROJECTION_MATRIX * ndc;
+	refraction_view_pos.xyz /= refraction_view_pos.w;
+	// Something in front of the surface at the refracted point: use the point behind the pixel instead.
+	ref_ofs = mix(SCREEN_UV, ref_ofs, smoothstep(0.0, 0.05, VERTEX.z - refraction_view_pos.z));
+
+	vec3 ref_sigma = -log(max(refraction_absorption_color.rgb, vec3(1e-4))) / max(refraction_absorption_distance, 1e-4);
+	vec3 ref_transmittance = exp(-ref_sigma * ref_path);
+	float ref_f0 = (refraction_ior - 1.0) / (refraction_ior + 1.0);
+	ref_f0 *= ref_f0;
+	float ref_fresnel = ref_f0 + (1.0 - ref_f0) * pow(1.0 - clamp(dot(ref_normal, ref_view), 0.0, 1.0), 5.0);
+	EMISSION += textureLod(screen_texture, ref_ofs, ROUGHNESS * 8.0).rgb * ref_transmittance * ALBEDO * (1.0 - ref_fresnel) * ref_amount * EXPOSURE;
+	ALBEDO *= 1.0 - ref_amount;
+	// The specular reflection of the interface follows the index of refraction (F0 = 0.16 * specular^2).
+	SPECULAR = mix(SPECULAR, clamp(sqrt(ref_f0 / 0.16), 0.0, 1.0), ref_amount);
+	// Force transparency on the material (required for refraction).
+	ALPHA = 1.0;
+)";
 		} else {
-			code += "	vec2 ref_ofs = SCREEN_UV - ref_normal.xy * dot(texture(texture_refraction, base_uv), refraction_texture_channel) * refraction;\n";
-		}
-		code += R"(
+			if (flags[FLAG_UV1_USE_TRIPLANAR]) {
+				code += "	vec2 ref_ofs = SCREEN_UV - ref_normal.xy * dot(triplanar_texture(texture_refraction, uv1_power_normal, uv1_triplanar_pos), refraction_texture_channel) * refraction;\n";
+			} else {
+				code += "	vec2 ref_ofs = SCREEN_UV - ref_normal.xy * dot(texture(texture_refraction, base_uv), refraction_texture_channel) * refraction;\n";
+			}
+			code += R"(
 	float ref_amount = 1.0 - albedo.a * albedo_tex.a;
 
 	float refraction_depth_tex = textureLod(depth_texture, ref_ofs, 0.0).r;
@@ -1854,6 +2262,7 @@ void fragment() {)";
 	// Force transparency on the material (required for refraction).
 	ALPHA = 1.0;
 )";
+		}
 
 	} else if (transparency != TRANSPARENCY_DISABLED || flags[FLAG_USE_SHADOW_TO_OPACITY] || (distance_fade == DISTANCE_FADE_PIXEL_ALPHA) || proximity_fade_enabled) {
 		code += "	ALPHA *= albedo.a * albedo_tex.a;\n";
@@ -1939,6 +2348,31 @@ void fragment() {)";
 		}
 		code += R"(	CLEARCOAT = clearcoat * clearcoat_tex.x;
 	CLEARCOAT_ROUGHNESS = clearcoat_roughness * clearcoat_tex.y;
+)";
+	}
+
+	if (features[FEATURE_SHEEN]) {
+		code += "\n	// Sheen: Enabled (Mariner M6)\n";
+		if (flags[FLAG_UV1_USE_TRIPLANAR]) {
+			code += "	vec4 sheen_tex = triplanar_texture(texture_sheen, uv1_power_normal, uv1_triplanar_pos);\n";
+		} else {
+			code += "	vec4 sheen_tex = texture(texture_sheen, base_uv);\n";
+		}
+		code += R"(	SHEEN = sheen_color.rgb * sheen_tex.rgb;
+	SHEEN_ROUGHNESS = sheen_roughness * sheen_tex.a;
+)";
+	}
+
+	if (features[FEATURE_IRIDESCENCE]) {
+		code += "\n	// Iridescence: Enabled (Mariner F5)\n";
+		if (flags[FLAG_UV1_USE_TRIPLANAR]) {
+			code += "	vec2 iridescence_tex = triplanar_texture(texture_iridescence, uv1_power_normal, uv1_triplanar_pos).rg;\n";
+		} else {
+			code += "	vec2 iridescence_tex = texture(texture_iridescence, base_uv).rg;\n";
+		}
+		code += R"(	IRIDESCENCE = iridescence * iridescence_tex.r;
+	IRIDESCENCE_IOR = iridescence_ior;
+	IRIDESCENCE_THICKNESS = mix(iridescence_thickness_min, iridescence_thickness_max, iridescence_tex.g);
 )";
 	}
 
@@ -2080,10 +2514,211 @@ void fragment() {)";
 				break; // Internal value, skip.
 		}
 
-		code += R"(	vec3 detail_norm = mix(NORMAL_MAP, detail_norm_tex.rgb, detail_tex.a);
-	NORMAL_MAP = mix(NORMAL_MAP, detail_norm, detail_mask_tex.r);
+		if (detail_normal_rnm) {
+			// Mariner M4: reoriented normal mapping (Barre-Brisebois and Hill 2012): the detail normal is rotated onto the
+			// base normal instead of being averaged with it, so the base relief keeps its depth under the detail.
+			code += R"(	vec3 rnm_t = vec3(NORMAL_MAP.xy * 2.0 - 1.0, 0.0);
+	rnm_t.z = sqrt(max(0.0, 1.0 - dot(rnm_t.xy, rnm_t.xy))) + 1.0;
+	vec3 rnm_u = vec3(detail_norm_tex.xy * 2.0 - 1.0, 0.0);
+	rnm_u.z = sqrt(max(0.0, 1.0 - dot(rnm_u.xy, rnm_u.xy)));
+	rnm_u.xy = -rnm_u.xy;
+	vec3 rnm = normalize(rnm_t * dot(rnm_t, rnm_u) / rnm_t.z - rnm_u);
+	vec3 detail_norm = mix(NORMAL_MAP, rnm * 0.5 + 0.5, detail_tex.a);
+)";
+		} else {
+			code += "	vec3 detail_norm = mix(NORMAL_MAP, detail_norm_tex.rgb, detail_tex.a);\n";
+		}
+		code += R"(	NORMAL_MAP = mix(NORMAL_MAP, detail_norm, detail_mask_tex.r);
 	ALBEDO.rgb = mix(ALBEDO.rgb, detail, detail_mask_tex.r);
 )";
+	}
+
+	if (features[FEATURE_INTERIOR] && !flags[FLAG_UV1_USE_TRIPLANAR]) {
+		// Mariner G5a: fake interiors (after the published technique of interior mapping, van Dongen 2008, with one
+		// image per room as in later games; own implementation). The view ray enters a box room behind every window
+		// cell of the UV grid and is intersected with its walls, floor, ceiling and back wall; the hit point is looked up
+		// in an image of the room as seen from the window (a perspective view whose back wall takes interior_back_wall
+		// of the frame). A random room of the atlas, mirrored for every other window, lit or not, per window.
+		code += R"(
+	// Interior: Enabled (Mariner G5a)
+	{
+)";
+		code += impostor_uv ? "		float interior_glass = textureGrad(texture_interior_mask, base_uv, impostor_dx, impostor_dy).r;\n" : "		float interior_glass = texture(texture_interior_mask, base_uv).r;\n";
+		code += R"(
+		// The view direction in the UV frame (x along U, y along V, z out of the surface), as for the height map.
+		vec3 interior_view = normalize(normalize(-VERTEX + EYE_OFFSET) * mat3(TANGENT, -BINORMAL, NORMAL));
+		vec2 interior_cell_uv = base_uv * interior_rooms;
+		vec2 interior_cell = floor(interior_cell_uv);
+		vec3 interior_p = vec3(interior_cell_uv - interior_cell, 0.0);
+		// The ray into the room, in room units (the box is 0 .. 1 on every axis; z is the depth).
+		vec3 interior_dir = vec3(-interior_view.xy, max(interior_view.z, 0.001)) / max(interior_room_size, vec3(0.01));
+		vec3 interior_t3 = (step(0.0, interior_dir) - interior_p) / interior_dir;
+		float interior_t = min(min(interior_t3.x, interior_t3.y), interior_t3.z);
+		vec3 interior_hit = clamp(interior_p + interior_dir * interior_t, 0.0, 1.0);
+		// A random number per window (and per instance, so that buildings sharing the material differ).
+		ivec2 interior_node = ivec2(floor(NODE_POSITION_WORLD.xz));
+		uint interior_h = uint(int(interior_cell.x) + 4096 * int(interior_cell.y)) ^ (uint(interior_node.x) * 2654435761u) ^ (uint(interior_node.y) * 2246822519u);
+		interior_h = interior_h * 747796405u + 2891336453u;
+		interior_h = ((interior_h >> ((interior_h >> 28u) + 4u)) ^ interior_h) * 277803737u;
+		interior_h = (interior_h >> 22u) ^ interior_h;
+		float interior_r1 = float(interior_h & 65535u) / 65536.0;
+		float interior_r2 = float((interior_h >> 16u) & 32767u) / 32768.0;
+		// The hit point as seen from the window in the room's image.
+		float interior_scale = 1.0 / (1.0 + interior_hit.z * (1.0 / interior_back_wall - 1.0));
+		vec2 interior_c = interior_hit.xy - 0.5;
+		interior_c.x = (interior_h & 2147483648u) != 0u ? -interior_c.x : interior_c.x;
+		vec2 interior_room_uv = 0.5 + interior_c * interior_scale;
+		// The room's tile in the atlas, kept half a texel away from its neighbours.
+		ivec2 interior_atlas = max(interior_atlas_size, ivec2(1));
+		int interior_index = min(int(interior_r1 * float(interior_atlas.x * interior_atlas.y)), interior_atlas.x * interior_atlas.y - 1);
+		vec2 interior_tile = vec2(float(interior_index % interior_atlas.x), float(interior_index / interior_atlas.x));
+		vec2 interior_tile_size = 1.0 / vec2(interior_atlas);
+		vec2 interior_margin = 0.5 / (vec2(textureSize(texture_interior, 0)) * interior_tile_size);
+		interior_room_uv = clamp(interior_room_uv, interior_margin, 1.0 - interior_margin);
+		// Gradients of the window grid (not of the room lookup, which jumps between walls and windows).
+		vec2 interior_grad_x = dFdx(interior_cell_uv) * interior_tile_size * interior_scale;
+		vec2 interior_grad_y = dFdy(interior_cell_uv) * interior_tile_size * interior_scale;
+		vec3 interior_room = textureGrad(texture_interior, (interior_tile + interior_room_uv) * interior_tile_size, interior_grad_x, interior_grad_y).rgb;
+		float interior_lit = interior_r2 < interior_lit_fraction ? 1.0 : 0.0;
+		vec3 interior_light = interior_room * (interior_brightness + interior_lit * interior_lights * interior_light_color.rgb);
+		// Mariner G5d: curtains or blinds in some windows, 15 cm behind the glass: drawn to a random width (curtains,
+		// folded, from both sides) or lowered to a random height, the slats more or less closed (blinds). Lit from the room
+		// behind them when its lamps are on.
+		uint interior_h2 = interior_h * 747796405u + 2891336453u;
+		interior_h2 = ((interior_h2 >> ((interior_h2 >> 28u) + 4u)) ^ interior_h2) * 277803737u;
+		interior_h2 = (interior_h2 >> 22u) ^ interior_h2;
+		float interior_r3 = float(interior_h2 & 65535u) / 65536.0;
+		float interior_r4 = float((interior_h2 >> 16u) & 32767u) / 32768.0;
+		if (interior_r3 < interior_curtains + interior_blinds) {
+			vec2 interior_cp = interior_p.xy + interior_dir.xy * ((0.15 / max(interior_room_size.z, 0.01)) / interior_dir.z);
+			float interior_cover;
+			float interior_shade;
+			if (interior_r3 < interior_curtains) {
+				float interior_half = 0.5 * (0.25 + 0.75 * interior_r4); // Each side covers this much of the width (drawn open: 12.5 %).
+				float interior_side = min(interior_cp.x, 1.0 - interior_cp.x);
+				interior_cover = 1.0 - smoothstep(interior_half - 0.01, interior_half + 0.01, interior_side);
+				interior_shade = 0.82 + 0.18 * sin(interior_cp.x * 70.0 + interior_r4 * 20.0);
+			} else {
+				float interior_lowered = 0.25 + 0.75 * interior_r4; // From the top of the window (V grows down).
+				float interior_slat = fract(interior_cp.y * 14.0);
+				interior_cover = (1.0 - smoothstep(interior_lowered - 0.01, interior_lowered + 0.01, interior_cp.y)) * step(interior_slat, mix(0.55, 0.95, (interior_r3 - interior_curtains) / max(interior_blinds, 0.001)));
+				interior_shade = 0.75 + 0.25 * interior_slat;
+			}
+			interior_cover *= step(0.0, interior_cp.x) * step(interior_cp.x, 1.0) * step(0.0, interior_cp.y) * step(interior_cp.y, 1.0);
+			vec3 interior_curtain = interior_curtain_color.rgb * interior_shade * (interior_brightness * 0.6 + interior_lit * interior_lights * 0.5 * interior_light_color.rgb);
+			interior_light = mix(interior_light, interior_curtain, interior_cover);
+		}
+)";
+		if (shading_mode == SHADING_MODE_UNSHADED) {
+			code += "		ALBEDO = mix(ALBEDO, interior_light, interior_glass);\n";
+		} else {
+			code += R"(		// The glass: dark and smooth, it reflects the world; the room shows through it, less at grazing angles.
+		float interior_fresnel = 0.04 + 0.96 * pow(1.0 - clamp(interior_view.z, 0.0, 1.0), 5.0);
+		ALBEDO = mix(ALBEDO, vec3(0.0), interior_glass);
+		ROUGHNESS = mix(ROUGHNESS, 0.05, interior_glass);
+		METALLIC = mix(METALLIC, 0.0, interior_glass);
+		EMISSION += interior_light * (interior_glass * (1.0 - interior_fresnel));
+)";
+		}
+		code += "	}\n";
+	}
+
+	if (features[FEATURE_WETNESS] && shading_mode != SHADING_MODE_UNSHADED) {
+		// Mariner G4: wet surfaces (after the published model of porosity and puddles, e.g. Lagarde's "Water drop"
+		// articles; own implementation).
+		code += R"(
+	// Wetness: Enabled (Mariner G4)
+	{
+		// The world's wetness, not under cover (no rain there).
+		float wet = clamp(WETNESS * wetness_amount * (1.0 - OVERHEAD_COVER), 0.0, 1.0);
+		float facing_up = clamp((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).y, 0.0, 1.0);
+		// Porous surfaces soak water up and darken; a film of water on top makes them smoother, less on steep faces (it
+		// runs off) and on porous ones (they drink it).
+		ALBEDO *= mix(1.0, 0.45, wet * wetness_porosity);
+		float wet_film = wet * mix(0.5, 1.0, facing_up) * (1.0 - 0.5 * wetness_porosity);
+		ROUGHNESS = mix(ROUGHNESS, 0.06, wet_film);
+)";
+		if (features[FEATURE_HEIGHT_MAPPING] && !flags[FLAG_UV1_USE_TRIPLANAR]) {
+			code += flags[FLAG_INVERT_HEIGHTMAP] ? "		float wet_height = 1.0 - texture(texture_heightmap, base_uv).r;\n" : "		float wet_height = texture(texture_heightmap, base_uv).r;\n";
+			code += R"(		// Puddles on flat ground where the height map is below the water level (rising with the wetness).
+		float wet_level = wetness_puddles * wet;
+		float puddle = (1.0 - smoothstep(wet_level - 0.05, wet_level, wet_height)) * smoothstep(0.85, 0.97, facing_up) * step(0.001, wet_level);
+		ALBEDO *= mix(1.0, 0.85, puddle);
+		ROUGHNESS = mix(ROUGHNESS, 0.02, puddle);
+		METALLIC = mix(METALLIC, 0.0, puddle);
+)";
+			if (features[FEATURE_NORMAL_MAPPING]) {
+				code += "		NORMAL_MAP = mix(NORMAL_MAP, vec3(0.5, 0.5, 1.0), puddle);\n";
+			}
+		}
+		code += "	}\n";
+	}
+
+	if (features[FEATURE_SNOW]) {
+		// Mariner G4b: snow on what faces up - the normal with the normal map's detail (the up-facing sides of bricks
+		// and planks hold it first), up to the steepest slope it rests on; with a height map, the low places fill
+		// first. Under cover (OVERHEAD_COVER) none. Snow is white, rough, not metallic and smooths the detail.
+		code += R"(
+	// Snow: Enabled (Mariner G4b)
+	{
+		float snow_level = clamp(SNOW * snow_amount * (1.0 - OVERHEAD_COVER), 0.0, 1.0);
+		vec3 snow_n = NORMAL;
+)";
+		if (features[FEATURE_NORMAL_MAPPING] && !impostor_hull) {
+			code += R"(		vec3 snow_nm = NORMAL_MAP * 2.0 - 1.0;
+		snow_nm.z = sqrt(max(0.0, 1.0 - dot(snow_nm.xy, snow_nm.xy)));
+		snow_n = normalize(mix(NORMAL, TANGENT * snow_nm.x + BINORMAL * snow_nm.y + NORMAL * snow_nm.z, NORMAL_MAP_DEPTH));
+)";
+		}
+		code += R"(		float snow_up = (INV_VIEW_MATRIX * vec4(snow_n, 0.0)).y;
+		float snow_steepest = cos(radians(snow_max_slope));
+		float snow_hold = smoothstep(snow_steepest, mix(snow_steepest, 1.0, 0.35), snow_up);
+		float snow_depth = snow_level * snow_hold;
+)";
+		if (features[FEATURE_HEIGHT_MAPPING] && !flags[FLAG_UV1_USE_TRIPLANAR] && !impostor_hull) {
+			code += flags[FLAG_INVERT_HEIGHTMAP] ? "		float snow_height = 1.0 - texture(texture_heightmap, base_uv).r;\n" : "		float snow_height = texture(texture_heightmap, base_uv).r;\n";
+			code += "		snow_depth += (0.5 - snow_height) * snow_relief * snow_level * snow_hold;\n";
+		}
+		code += R"(		float snow_cover = smoothstep(0.05, 0.35, snow_depth);
+		ALBEDO = mix(ALBEDO, snow_color.rgb, snow_cover);
+		ROUGHNESS = mix(ROUGHNESS, snow_roughness, snow_cover);
+		METALLIC = mix(METALLIC, 0.0, snow_cover);
+)";
+		if (features[FEATURE_NORMAL_MAPPING] && !impostor_hull) {
+			code += "		NORMAL_MAP = mix(NORMAL_MAP, vec3(0.5, 0.5, 1.0), snow_cover * 0.7);\n";
+		}
+		code += "	}\n";
+	}
+
+	if (features[FEATURE_PLANAR_REFLECTION] && shading_mode != SHADING_MODE_UNSHADED) {
+		// Mariner G6: the reflection camera's image is mirrored along X (its basis kept right-handed), so the mirror's
+		// point of the screen is at (1 - u, v). Tilted by the normal map, blurred by the roughness (8 taps on a disc).
+		code += R"(
+	// Planar Reflection: Enabled (Mariner G6)
+	{
+		vec2 pr_uv = vec2(1.0 - SCREEN_UV.x, SCREEN_UV.y);
+)";
+		if (features[FEATURE_NORMAL_MAPPING]) {
+			code += "		pr_uv += vec2(1.0, -1.0) * (NORMAL_MAP.xy * 2.0 - 1.0) * NORMAL_MAP_DEPTH * planar_reflection_distortion;\n";
+		}
+		code += R"(		float pr_radius = ROUGHNESS * ROUGHNESS * 0.08;
+		vec3 pr_color = texture(texture_planar_reflection, pr_uv).rgb;
+		if (pr_radius > 0.0005) {
+			vec2 pr_aspect = vec2(1.0, VIEWPORT_SIZE.x / VIEWPORT_SIZE.y);
+			for (int i = 0; i < 8; i++) {
+				float pr_angle = float(i) * 2.39996;
+				float pr_r = sqrt((float(i) + 0.5) / 8.0) * pr_radius;
+				pr_color += texture(texture_planar_reflection, pr_uv + vec2(cos(pr_angle), sin(pr_angle)) * pr_r * pr_aspect).rgb;
+			}
+			pr_color /= 9.0;
+		}
+		REFLECTION = vec4(pr_color, planar_reflection_amount);
+	}
+)";
+	}
+
+	if (impostor_uv) {
+		code += "\n	// Box impostor (Mariner G5b): the ray left the face or reached the bottom of the relief.\n	if (impostor_miss) {\n		discard;\n	}\n";
 	}
 
 	code += "}\n";
@@ -2678,11 +3313,18 @@ void BaseMaterial3D::_validate_property(PropertyInfo &p_property) const {
 		p_property.usage = PROPERTY_USAGE_NONE;
 	}
 
-	if ((p_property.name == "heightmap_min_layers" || p_property.name == "heightmap_max_layers") && !deep_parallax) {
+	if ((p_property.name == "heightmap_min_layers" || p_property.name == "heightmap_max_layers" || p_property.name == "heightmap_impostor" || p_property.name == "heightmap_impostor_faces") && !deep_parallax) {
 		p_property.usage = PROPERTY_USAGE_NONE;
 	}
 
 	if (p_property.name == "heightmap_self_shadow_strength" && !heightmap_self_shadow) {
+		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
+	}
+
+	if ((p_property.name == "refraction_ior" || p_property.name == "refraction_thickness" || p_property.name.begins_with("refraction_absorption")) && !refraction_physical) {
+		p_property.usage = PROPERTY_USAGE_NO_EDITOR; // Mariner F6.
+	}
+	if ((p_property.name == "refraction_scale" || p_property.name == "refraction_texture" || p_property.name == "refraction_texture_channel") && refraction_physical) {
 		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 	}
 
@@ -2760,6 +3402,10 @@ void BaseMaterial3D::_validate_property(PropertyInfo &p_property) const {
 
 		if (p_property.name.begins_with("clearcoat")) {
 			p_property.usage = PROPERTY_USAGE_NONE;
+		}
+
+		if (p_property.name.begins_with("sheen") || p_property.name.begins_with("iridescence") || p_property.name.begins_with("wetness")) {
+			p_property.usage = PROPERTY_USAGE_NONE; // Mariner M6, F5, G4 (snow stays: an unshaded surface is white with it too).
 		}
 
 		if (p_property.name.begins_with("normal")) {
@@ -2901,6 +3547,350 @@ float BaseMaterial3D::get_heightmap_self_shadow_strength() const {
 	return heightmap_self_shadow_strength;
 }
 
+// Mariner M6, F5, F6, M4.
+
+void BaseMaterial3D::set_sheen_color(const Color &p_value) {
+	sheen_color = p_value;
+	_material_set_param(shader_names->sheen_color, sheen_color);
+}
+
+// Mariner G4.
+void BaseMaterial3D::set_wetness_amount(float p_value) {
+	wetness_amount = CLAMP(p_value, 0.0f, 1.0f);
+	_material_set_param(shader_names->wetness_amount, wetness_amount);
+}
+
+float BaseMaterial3D::get_wetness_amount() const {
+	return wetness_amount;
+}
+
+void BaseMaterial3D::set_wetness_porosity(float p_value) {
+	wetness_porosity = CLAMP(p_value, 0.0f, 1.0f);
+	_material_set_param(shader_names->wetness_porosity, wetness_porosity);
+}
+
+float BaseMaterial3D::get_wetness_porosity() const {
+	return wetness_porosity;
+}
+
+void BaseMaterial3D::set_wetness_puddles(float p_value) {
+	wetness_puddles = CLAMP(p_value, 0.0f, 1.0f);
+	_material_set_param(shader_names->wetness_puddles, wetness_puddles);
+}
+
+float BaseMaterial3D::get_wetness_puddles() const {
+	return wetness_puddles;
+}
+
+void BaseMaterial3D::set_snow_amount(float p_value) {
+	snow_amount = CLAMP(p_value, 0.0f, 1.0f);
+	_material_set_param(shader_names->snow_amount, snow_amount);
+}
+
+float BaseMaterial3D::get_snow_amount() const {
+	return snow_amount;
+}
+
+void BaseMaterial3D::set_snow_color(const Color &p_color) {
+	snow_color = p_color;
+	_material_set_param(shader_names->snow_color, snow_color);
+}
+
+Color BaseMaterial3D::get_snow_color() const {
+	return snow_color;
+}
+
+void BaseMaterial3D::set_snow_roughness(float p_value) {
+	snow_roughness = CLAMP(p_value, 0.0f, 1.0f);
+	_material_set_param(shader_names->snow_roughness, snow_roughness);
+}
+
+float BaseMaterial3D::get_snow_roughness() const {
+	return snow_roughness;
+}
+
+void BaseMaterial3D::set_snow_max_slope(float p_degrees) {
+	snow_max_slope = CLAMP(p_degrees, 0.0f, 90.0f);
+	_material_set_param(shader_names->snow_max_slope, snow_max_slope);
+}
+
+float BaseMaterial3D::get_snow_max_slope() const {
+	return snow_max_slope;
+}
+
+void BaseMaterial3D::set_snow_relief(float p_value) {
+	snow_relief = CLAMP(p_value, 0.0f, 1.0f);
+	_material_set_param(shader_names->snow_relief, snow_relief);
+}
+
+float BaseMaterial3D::get_snow_relief() const {
+	return snow_relief;
+}
+
+// Mariner G5a.
+void BaseMaterial3D::set_interior_rooms(const Vector2 &p_value) {
+	interior_rooms = p_value.maxf(0.001);
+	_material_set_param(shader_names->interior_rooms, interior_rooms);
+}
+
+Vector2 BaseMaterial3D::get_interior_rooms() const {
+	return interior_rooms;
+}
+
+void BaseMaterial3D::set_interior_room_size(const Vector3 &p_value) {
+	interior_room_size = p_value.maxf(0.01);
+	_material_set_param(shader_names->interior_room_size, interior_room_size);
+}
+
+Vector3 BaseMaterial3D::get_interior_room_size() const {
+	return interior_room_size;
+}
+
+void BaseMaterial3D::set_interior_atlas_size(const Vector2i &p_value) {
+	interior_atlas_size = p_value.maxi(1);
+	_material_set_param(shader_names->interior_atlas_size, interior_atlas_size);
+}
+
+Vector2i BaseMaterial3D::get_interior_atlas_size() const {
+	return interior_atlas_size;
+}
+
+void BaseMaterial3D::set_interior_back_wall(float p_value) {
+	interior_back_wall = CLAMP(p_value, 0.05f, 0.95f);
+	_material_set_param(shader_names->interior_back_wall, interior_back_wall);
+}
+
+float BaseMaterial3D::get_interior_back_wall() const {
+	return interior_back_wall;
+}
+
+void BaseMaterial3D::set_interior_brightness(float p_value) {
+	interior_brightness = MAX(p_value, 0.0f);
+	_material_set_param(shader_names->interior_brightness, interior_brightness);
+}
+
+float BaseMaterial3D::get_interior_brightness() const {
+	return interior_brightness;
+}
+
+void BaseMaterial3D::set_interior_lights(float p_value) {
+	interior_lights = MAX(p_value, 0.0f);
+	_material_set_param(shader_names->interior_lights, interior_lights);
+}
+
+float BaseMaterial3D::get_interior_lights() const {
+	return interior_lights;
+}
+
+void BaseMaterial3D::set_interior_lit_fraction(float p_value) {
+	interior_lit_fraction = CLAMP(p_value, 0.0f, 1.0f);
+	_material_set_param(shader_names->interior_lit_fraction, interior_lit_fraction);
+}
+
+float BaseMaterial3D::get_interior_lit_fraction() const {
+	return interior_lit_fraction;
+}
+
+void BaseMaterial3D::set_interior_curtains(float p_value) {
+	interior_curtains = CLAMP(p_value, 0.0f, 1.0f);
+	_material_set_param(shader_names->interior_curtains, interior_curtains);
+}
+
+float BaseMaterial3D::get_interior_curtains() const {
+	return interior_curtains;
+}
+
+void BaseMaterial3D::set_interior_blinds(float p_value) {
+	interior_blinds = CLAMP(p_value, 0.0f, 1.0f);
+	_material_set_param(shader_names->interior_blinds, interior_blinds);
+}
+
+float BaseMaterial3D::get_interior_blinds() const {
+	return interior_blinds;
+}
+
+void BaseMaterial3D::set_interior_curtain_color(const Color &p_value) {
+	interior_curtain_color = p_value;
+	_material_set_param(shader_names->interior_curtain_color, interior_curtain_color);
+}
+
+Color BaseMaterial3D::get_interior_curtain_color() const {
+	return interior_curtain_color;
+}
+
+void BaseMaterial3D::set_interior_light_color(const Color &p_value) {
+	interior_light_color = p_value;
+	_material_set_param(shader_names->interior_light_color, interior_light_color);
+}
+
+Color BaseMaterial3D::get_interior_light_color() const {
+	return interior_light_color;
+}
+
+Color BaseMaterial3D::get_sheen_color() const {
+	return sheen_color;
+}
+
+void BaseMaterial3D::set_sheen_roughness(float p_value) {
+	sheen_roughness = CLAMP(p_value, float(0), float(1));
+	_material_set_param(shader_names->sheen_roughness, sheen_roughness);
+}
+
+float BaseMaterial3D::get_sheen_roughness() const {
+	return sheen_roughness;
+}
+
+void BaseMaterial3D::set_iridescence(float p_value) {
+	iridescence = CLAMP(p_value, float(0), float(1));
+	_material_set_param(shader_names->iridescence, iridescence);
+}
+
+float BaseMaterial3D::get_iridescence() const {
+	return iridescence;
+}
+
+void BaseMaterial3D::set_iridescence_ior(float p_value) {
+	iridescence_ior = CLAMP(p_value, float(1.0), float(2.333));
+	_material_set_param(shader_names->iridescence_ior, iridescence_ior);
+}
+
+float BaseMaterial3D::get_iridescence_ior() const {
+	return iridescence_ior;
+}
+
+void BaseMaterial3D::set_iridescence_thickness_min(float p_value) {
+	iridescence_thickness_min = CLAMP(p_value, float(0), float(1200));
+	_material_set_param(shader_names->iridescence_thickness_min, iridescence_thickness_min);
+}
+
+float BaseMaterial3D::get_iridescence_thickness_min() const {
+	return iridescence_thickness_min;
+}
+
+void BaseMaterial3D::set_iridescence_thickness_max(float p_value) {
+	iridescence_thickness_max = CLAMP(p_value, float(0), float(1200));
+	_material_set_param(shader_names->iridescence_thickness_max, iridescence_thickness_max);
+}
+
+float BaseMaterial3D::get_iridescence_thickness_max() const {
+	return iridescence_thickness_max;
+}
+
+void BaseMaterial3D::set_refraction_ior(float p_value) {
+	refraction_ior = CLAMP(p_value, float(1.0), float(3.0));
+	_material_set_param(shader_names->refraction_ior, refraction_ior);
+}
+
+float BaseMaterial3D::get_refraction_ior() const {
+	return refraction_ior;
+}
+
+void BaseMaterial3D::set_refraction_thickness(float p_value) {
+	refraction_thickness = CLAMP(p_value, float(0), float(1000));
+	_material_set_param(shader_names->refraction_thickness, refraction_thickness);
+}
+
+float BaseMaterial3D::get_refraction_thickness() const {
+	return refraction_thickness;
+}
+
+void BaseMaterial3D::set_refraction_absorption_color(const Color &p_value) {
+	refraction_absorption_color = p_value;
+	_material_set_param(shader_names->refraction_absorption_color, refraction_absorption_color);
+}
+
+Color BaseMaterial3D::get_refraction_absorption_color() const {
+	return refraction_absorption_color;
+}
+
+void BaseMaterial3D::set_refraction_absorption_distance(float p_value) {
+	refraction_absorption_distance = CLAMP(p_value, float(0.001), float(100000));
+	_material_set_param(shader_names->refraction_absorption_distance, refraction_absorption_distance);
+}
+
+float BaseMaterial3D::get_refraction_absorption_distance() const {
+	return refraction_absorption_distance;
+}
+
+void BaseMaterial3D::set_refraction_physical(bool p_enable) {
+	refraction_physical = p_enable;
+	_queue_shader_change();
+	notify_property_list_changed();
+}
+
+bool BaseMaterial3D::is_refraction_physical() const {
+	return refraction_physical;
+}
+
+void BaseMaterial3D::set_displacement_scale(float p_value) {
+	displacement_scale = p_value;
+	_material_set_param(shader_names->displacement_scale, displacement_scale);
+}
+
+float BaseMaterial3D::get_displacement_scale() const {
+	return displacement_scale;
+}
+
+void BaseMaterial3D::set_displacement_midlevel(float p_value) {
+	displacement_midlevel = CLAMP(p_value, 0.0f, 1.0f);
+	_material_set_param(shader_names->displacement_midlevel, displacement_midlevel);
+}
+
+float BaseMaterial3D::get_displacement_midlevel() const {
+	return displacement_midlevel;
+}
+
+void BaseMaterial3D::set_displacement_texture_lod(float p_value) {
+	displacement_texture_lod = MAX(p_value, 0.0f);
+	_material_set_param(shader_names->displacement_texture_lod, displacement_texture_lod);
+}
+
+float BaseMaterial3D::get_displacement_texture_lod() const {
+	return displacement_texture_lod;
+}
+
+void BaseMaterial3D::set_displacement_normal(bool p_enable) {
+	displacement_normal = p_enable;
+	_queue_shader_change();
+}
+
+bool BaseMaterial3D::is_displacement_normal_enabled() const {
+	return displacement_normal;
+}
+
+void BaseMaterial3D::set_detail_normal_rnm(bool p_enable) {
+	detail_normal_rnm = p_enable;
+	_queue_shader_change();
+	notify_property_list_changed();
+}
+
+bool BaseMaterial3D::is_detail_normal_rnm() const {
+	return detail_normal_rnm;
+}
+
+// Mariner M8: F0 of pure metals in linear Rec. 709, from measured spectral optical constants (as tabulated in
+// "Real-Time Rendering", 4th ed., table 9.2). Returned in sRGB, as albedo_color takes it (metallic = 1). Steel is
+// close to iron; oxidized or painted metal is not a metal for shading.
+Color BaseMaterial3D::get_metal_albedo(Metal p_metal) {
+	static const Color f0[METAL_MAX] = {
+		Color(0.913, 0.922, 0.924), // Aluminum
+		Color(0.910, 0.778, 0.423), // Brass
+		Color(0.549, 0.556, 0.554), // Chromium
+		Color(0.955, 0.638, 0.538), // Copper
+		Color(1.000, 0.782, 0.344), // Gold
+		Color(0.562, 0.565, 0.578), // Iron
+		Color(0.781, 0.780, 0.778), // Mercury
+		Color(0.660, 0.609, 0.526), // Nickel
+		Color(0.733, 0.697, 0.652), // Palladium
+		Color(0.673, 0.637, 0.585), // Platinum
+		Color(0.972, 0.960, 0.915), // Silver
+		Color(0.542, 0.497, 0.449), // Titanium
+		Color(0.664, 0.824, 0.850), // Zinc
+	};
+	ERR_FAIL_INDEX_V(p_metal, METAL_MAX, Color(1, 1, 1));
+	return f0[p_metal].linear_to_srgb();
+}
+
 void BaseMaterial3D::set_heightmap_depth_offset(bool p_enable) {
 	heightmap_depth_offset = p_enable;
 	_queue_shader_change();
@@ -2908,6 +3898,51 @@ void BaseMaterial3D::set_heightmap_depth_offset(bool p_enable) {
 
 bool BaseMaterial3D::is_heightmap_depth_offset_enabled() const {
 	return heightmap_depth_offset;
+}
+
+// Mariner G5b.
+void BaseMaterial3D::set_heightmap_impostor(bool p_enable) {
+	heightmap_impostor = p_enable;
+	_queue_shader_change();
+}
+
+bool BaseMaterial3D::is_heightmap_impostor_enabled() const {
+	return heightmap_impostor;
+}
+
+// Mariner G5c.
+void BaseMaterial3D::set_heightmap_impostor_faces(const PackedVector4Array &p_faces) {
+	const bool hull_changed = (heightmap_impostor_faces.size() >= IMPOSTOR_FACE_DATA_SIZE) != (p_faces.size() >= IMPOSTOR_FACE_DATA_SIZE);
+	heightmap_impostor_faces = p_faces;
+	if (p_faces.size() >= IMPOSTOR_FACE_DATA_SIZE) {
+		_material_set_param(shader_names->impostor_faces, p_faces.slice(0, IMPOSTOR_FACE_DATA_SIZE));
+	}
+	if (hull_changed) {
+		_queue_shader_change();
+	}
+}
+
+PackedVector4Array BaseMaterial3D::get_heightmap_impostor_faces() const {
+	return heightmap_impostor_faces;
+}
+
+// Mariner G6.
+void BaseMaterial3D::set_planar_reflection_amount(float p_value) {
+	planar_reflection_amount = CLAMP(p_value, 0.0f, 1.0f);
+	_material_set_param(shader_names->planar_reflection_amount, planar_reflection_amount);
+}
+
+float BaseMaterial3D::get_planar_reflection_amount() const {
+	return planar_reflection_amount;
+}
+
+void BaseMaterial3D::set_planar_reflection_distortion(float p_value) {
+	planar_reflection_distortion = MAX(p_value, 0.0f);
+	_material_set_param(shader_names->planar_reflection_distortion, planar_reflection_distortion);
+}
+
+float BaseMaterial3D::get_planar_reflection_distortion() const {
+	return planar_reflection_distortion;
 }
 
 void BaseMaterial3D::set_heightmap_deep_parallax(bool p_enable) {
@@ -3552,8 +4587,88 @@ void BaseMaterial3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_heightmap_self_shadow_enabled"), &BaseMaterial3D::is_heightmap_self_shadow_enabled);
 	ClassDB::bind_method(D_METHOD("set_heightmap_self_shadow_strength", "strength"), &BaseMaterial3D::set_heightmap_self_shadow_strength);
 	ClassDB::bind_method(D_METHOD("get_heightmap_self_shadow_strength"), &BaseMaterial3D::get_heightmap_self_shadow_strength);
+	ClassDB::bind_static_method("BaseMaterial3D", D_METHOD("get_metal_albedo", "metal"), &BaseMaterial3D::get_metal_albedo); // Mariner M8.
+	// Mariner M6, F5, F6, M4.
+	ClassDB::bind_method(D_METHOD("set_wetness_amount", "value"), &BaseMaterial3D::set_wetness_amount); // Mariner G4.
+	ClassDB::bind_method(D_METHOD("get_wetness_amount"), &BaseMaterial3D::get_wetness_amount);
+	ClassDB::bind_method(D_METHOD("set_wetness_porosity", "value"), &BaseMaterial3D::set_wetness_porosity);
+	ClassDB::bind_method(D_METHOD("get_wetness_porosity"), &BaseMaterial3D::get_wetness_porosity);
+	ClassDB::bind_method(D_METHOD("set_wetness_puddles", "value"), &BaseMaterial3D::set_wetness_puddles);
+	ClassDB::bind_method(D_METHOD("get_wetness_puddles"), &BaseMaterial3D::get_wetness_puddles);
+	ClassDB::bind_method(D_METHOD("set_snow_amount", "value"), &BaseMaterial3D::set_snow_amount); // Mariner G4b.
+	ClassDB::bind_method(D_METHOD("get_snow_amount"), &BaseMaterial3D::get_snow_amount);
+	ClassDB::bind_method(D_METHOD("set_snow_color", "color"), &BaseMaterial3D::set_snow_color);
+	ClassDB::bind_method(D_METHOD("get_snow_color"), &BaseMaterial3D::get_snow_color);
+	ClassDB::bind_method(D_METHOD("set_snow_roughness", "value"), &BaseMaterial3D::set_snow_roughness);
+	ClassDB::bind_method(D_METHOD("get_snow_roughness"), &BaseMaterial3D::get_snow_roughness);
+	ClassDB::bind_method(D_METHOD("set_snow_max_slope", "degrees"), &BaseMaterial3D::set_snow_max_slope);
+	ClassDB::bind_method(D_METHOD("get_snow_max_slope"), &BaseMaterial3D::get_snow_max_slope);
+	ClassDB::bind_method(D_METHOD("set_snow_relief", "value"), &BaseMaterial3D::set_snow_relief);
+	ClassDB::bind_method(D_METHOD("get_snow_relief"), &BaseMaterial3D::get_snow_relief);
+	ClassDB::bind_method(D_METHOD("set_interior_rooms", "value"), &BaseMaterial3D::set_interior_rooms); // Mariner G5a.
+	ClassDB::bind_method(D_METHOD("get_interior_rooms"), &BaseMaterial3D::get_interior_rooms);
+	ClassDB::bind_method(D_METHOD("set_interior_room_size", "value"), &BaseMaterial3D::set_interior_room_size);
+	ClassDB::bind_method(D_METHOD("get_interior_room_size"), &BaseMaterial3D::get_interior_room_size);
+	ClassDB::bind_method(D_METHOD("set_interior_atlas_size", "value"), &BaseMaterial3D::set_interior_atlas_size);
+	ClassDB::bind_method(D_METHOD("get_interior_atlas_size"), &BaseMaterial3D::get_interior_atlas_size);
+	ClassDB::bind_method(D_METHOD("set_interior_back_wall", "value"), &BaseMaterial3D::set_interior_back_wall);
+	ClassDB::bind_method(D_METHOD("get_interior_back_wall"), &BaseMaterial3D::get_interior_back_wall);
+	ClassDB::bind_method(D_METHOD("set_interior_brightness", "value"), &BaseMaterial3D::set_interior_brightness);
+	ClassDB::bind_method(D_METHOD("get_interior_brightness"), &BaseMaterial3D::get_interior_brightness);
+	ClassDB::bind_method(D_METHOD("set_interior_lights", "value"), &BaseMaterial3D::set_interior_lights);
+	ClassDB::bind_method(D_METHOD("get_interior_lights"), &BaseMaterial3D::get_interior_lights);
+	ClassDB::bind_method(D_METHOD("set_interior_lit_fraction", "value"), &BaseMaterial3D::set_interior_lit_fraction);
+	ClassDB::bind_method(D_METHOD("get_interior_lit_fraction"), &BaseMaterial3D::get_interior_lit_fraction);
+	ClassDB::bind_method(D_METHOD("set_interior_light_color", "value"), &BaseMaterial3D::set_interior_light_color);
+	ClassDB::bind_method(D_METHOD("get_interior_light_color"), &BaseMaterial3D::get_interior_light_color);
+	ClassDB::bind_method(D_METHOD("set_interior_curtains", "value"), &BaseMaterial3D::set_interior_curtains); // Mariner G5d.
+	ClassDB::bind_method(D_METHOD("get_interior_curtains"), &BaseMaterial3D::get_interior_curtains);
+	ClassDB::bind_method(D_METHOD("set_interior_blinds", "value"), &BaseMaterial3D::set_interior_blinds);
+	ClassDB::bind_method(D_METHOD("get_interior_blinds"), &BaseMaterial3D::get_interior_blinds);
+	ClassDB::bind_method(D_METHOD("set_interior_curtain_color", "value"), &BaseMaterial3D::set_interior_curtain_color);
+	ClassDB::bind_method(D_METHOD("get_interior_curtain_color"), &BaseMaterial3D::get_interior_curtain_color);
+	ClassDB::bind_method(D_METHOD("set_sheen_color", "value"), &BaseMaterial3D::set_sheen_color);
+	ClassDB::bind_method(D_METHOD("get_sheen_color"), &BaseMaterial3D::get_sheen_color);
+	ClassDB::bind_method(D_METHOD("set_sheen_roughness", "value"), &BaseMaterial3D::set_sheen_roughness);
+	ClassDB::bind_method(D_METHOD("get_sheen_roughness"), &BaseMaterial3D::get_sheen_roughness);
+	ClassDB::bind_method(D_METHOD("set_iridescence", "value"), &BaseMaterial3D::set_iridescence);
+	ClassDB::bind_method(D_METHOD("get_iridescence"), &BaseMaterial3D::get_iridescence);
+	ClassDB::bind_method(D_METHOD("set_iridescence_ior", "value"), &BaseMaterial3D::set_iridescence_ior);
+	ClassDB::bind_method(D_METHOD("get_iridescence_ior"), &BaseMaterial3D::get_iridescence_ior);
+	ClassDB::bind_method(D_METHOD("set_iridescence_thickness_min", "value"), &BaseMaterial3D::set_iridescence_thickness_min);
+	ClassDB::bind_method(D_METHOD("get_iridescence_thickness_min"), &BaseMaterial3D::get_iridescence_thickness_min);
+	ClassDB::bind_method(D_METHOD("set_iridescence_thickness_max", "value"), &BaseMaterial3D::set_iridescence_thickness_max);
+	ClassDB::bind_method(D_METHOD("get_iridescence_thickness_max"), &BaseMaterial3D::get_iridescence_thickness_max);
+	ClassDB::bind_method(D_METHOD("set_refraction_ior", "value"), &BaseMaterial3D::set_refraction_ior);
+	ClassDB::bind_method(D_METHOD("get_refraction_ior"), &BaseMaterial3D::get_refraction_ior);
+	ClassDB::bind_method(D_METHOD("set_refraction_thickness", "value"), &BaseMaterial3D::set_refraction_thickness);
+	ClassDB::bind_method(D_METHOD("get_refraction_thickness"), &BaseMaterial3D::get_refraction_thickness);
+	ClassDB::bind_method(D_METHOD("set_refraction_absorption_color", "value"), &BaseMaterial3D::set_refraction_absorption_color);
+	ClassDB::bind_method(D_METHOD("get_refraction_absorption_color"), &BaseMaterial3D::get_refraction_absorption_color);
+	ClassDB::bind_method(D_METHOD("set_refraction_absorption_distance", "value"), &BaseMaterial3D::set_refraction_absorption_distance);
+	ClassDB::bind_method(D_METHOD("get_refraction_absorption_distance"), &BaseMaterial3D::get_refraction_absorption_distance);
+	ClassDB::bind_method(D_METHOD("set_refraction_physical", "enable"), &BaseMaterial3D::set_refraction_physical);
+	ClassDB::bind_method(D_METHOD("is_refraction_physical"), &BaseMaterial3D::is_refraction_physical);
+	ClassDB::bind_method(D_METHOD("set_detail_normal_rnm", "enable"), &BaseMaterial3D::set_detail_normal_rnm);
+	ClassDB::bind_method(D_METHOD("is_detail_normal_rnm"), &BaseMaterial3D::is_detail_normal_rnm);
 	ClassDB::bind_method(D_METHOD("set_heightmap_depth_offset", "enable"), &BaseMaterial3D::set_heightmap_depth_offset);
 	ClassDB::bind_method(D_METHOD("is_heightmap_depth_offset_enabled"), &BaseMaterial3D::is_heightmap_depth_offset_enabled);
+	ClassDB::bind_method(D_METHOD("set_heightmap_impostor", "enable"), &BaseMaterial3D::set_heightmap_impostor); // Mariner G5b.
+	ClassDB::bind_method(D_METHOD("is_heightmap_impostor_enabled"), &BaseMaterial3D::is_heightmap_impostor_enabled);
+	ClassDB::bind_method(D_METHOD("set_heightmap_impostor_faces", "faces"), &BaseMaterial3D::set_heightmap_impostor_faces); // Mariner G5c.
+	ClassDB::bind_method(D_METHOD("get_heightmap_impostor_faces"), &BaseMaterial3D::get_heightmap_impostor_faces);
+	ClassDB::bind_method(D_METHOD("set_planar_reflection_amount", "value"), &BaseMaterial3D::set_planar_reflection_amount); // Mariner G6.
+	ClassDB::bind_method(D_METHOD("get_planar_reflection_amount"), &BaseMaterial3D::get_planar_reflection_amount);
+	ClassDB::bind_method(D_METHOD("set_planar_reflection_distortion", "value"), &BaseMaterial3D::set_planar_reflection_distortion);
+	ClassDB::bind_method(D_METHOD("get_planar_reflection_distortion"), &BaseMaterial3D::get_planar_reflection_distortion);
+	ClassDB::bind_method(D_METHOD("set_displacement_scale", "value"), &BaseMaterial3D::set_displacement_scale); // Mariner G7.
+	ClassDB::bind_method(D_METHOD("get_displacement_scale"), &BaseMaterial3D::get_displacement_scale);
+	ClassDB::bind_method(D_METHOD("set_displacement_midlevel", "value"), &BaseMaterial3D::set_displacement_midlevel);
+	ClassDB::bind_method(D_METHOD("get_displacement_midlevel"), &BaseMaterial3D::get_displacement_midlevel);
+	ClassDB::bind_method(D_METHOD("set_displacement_texture_lod", "value"), &BaseMaterial3D::set_displacement_texture_lod);
+	ClassDB::bind_method(D_METHOD("get_displacement_texture_lod"), &BaseMaterial3D::get_displacement_texture_lod);
+	ClassDB::bind_method(D_METHOD("set_displacement_normal", "enable"), &BaseMaterial3D::set_displacement_normal);
+	ClassDB::bind_method(D_METHOD("is_displacement_normal_enabled"), &BaseMaterial3D::is_displacement_normal_enabled);
 	ClassDB::bind_method(D_METHOD("set_heightmap_deep_parallax", "enable"), &BaseMaterial3D::set_heightmap_deep_parallax);
 	ClassDB::bind_method(D_METHOD("is_heightmap_deep_parallax_enabled"), &BaseMaterial3D::is_heightmap_deep_parallax_enabled);
 
@@ -3719,6 +4834,69 @@ void BaseMaterial3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "clearcoat_roughness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_clearcoat_roughness", "get_clearcoat_roughness");
 	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "clearcoat_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_CLEARCOAT);
 
+	// Mariner M6.
+	// Mariner G4.
+	ADD_GROUP("Wetness", "wetness_");
+	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "wetness_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_feature", "get_feature", FEATURE_WETNESS);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wetness_amount", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_wetness_amount", "get_wetness_amount");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wetness_porosity", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_wetness_porosity", "get_wetness_porosity");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wetness_puddles", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_wetness_puddles", "get_wetness_puddles");
+
+	ADD_GROUP("Snow", "snow_"); // Mariner G4b.
+	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "snow_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_feature", "get_feature", FEATURE_SNOW);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "snow_amount", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_snow_amount", "get_snow_amount");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "snow_color", PROPERTY_HINT_COLOR_NO_ALPHA), "set_snow_color", "get_snow_color");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "snow_roughness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_snow_roughness", "get_snow_roughness");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "snow_max_slope", PROPERTY_HINT_RANGE, "0,90,0.1,degrees"), "set_snow_max_slope", "get_snow_max_slope");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "snow_relief", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_snow_relief", "get_snow_relief");
+
+	// Mariner G5a.
+	ADD_GROUP("Interior", "interior_");
+	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "interior_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_feature", "get_feature", FEATURE_INTERIOR);
+	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "interior_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_INTERIOR);
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2I, "interior_atlas_size", PROPERTY_HINT_RANGE, "1,64,1"), "set_interior_atlas_size", "get_interior_atlas_size");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "interior_back_wall", PROPERTY_HINT_RANGE, "0.05,0.95,0.01"), "set_interior_back_wall", "get_interior_back_wall");
+	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "interior_mask_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_INTERIOR_MASK);
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "interior_rooms", PROPERTY_HINT_RANGE, "0.001,1024,0.001,or_greater"), "set_interior_rooms", "get_interior_rooms");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "interior_room_size", PROPERTY_HINT_RANGE, "0.01,100,0.01,or_greater,suffix:m"), "set_interior_room_size", "get_interior_room_size");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "interior_brightness", PROPERTY_HINT_RANGE, "0,16,0.01,or_greater"), "set_interior_brightness", "get_interior_brightness");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "interior_lights", PROPERTY_HINT_RANGE, "0,16,0.01,or_greater"), "set_interior_lights", "get_interior_lights");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "interior_lit_fraction", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_interior_lit_fraction", "get_interior_lit_fraction");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "interior_light_color", PROPERTY_HINT_COLOR_NO_ALPHA), "set_interior_light_color", "get_interior_light_color");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "interior_curtains", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_interior_curtains", "get_interior_curtains"); // Mariner G5d.
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "interior_blinds", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_interior_blinds", "get_interior_blinds");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "interior_curtain_color", PROPERTY_HINT_COLOR_NO_ALPHA), "set_interior_curtain_color", "get_interior_curtain_color");
+
+	// Mariner G6.
+	ADD_GROUP("Planar Reflection", "planar_reflection_");
+	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "planar_reflection_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_feature", "get_feature", FEATURE_PLANAR_REFLECTION);
+	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "planar_reflection_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_PLANAR_REFLECTION);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "planar_reflection_amount", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_planar_reflection_amount", "get_planar_reflection_amount");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "planar_reflection_distortion", PROPERTY_HINT_RANGE, "0,0.2,0.001"), "set_planar_reflection_distortion", "get_planar_reflection_distortion");
+
+	ADD_GROUP("Displacement", "displacement_"); // Mariner G7.
+	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "displacement_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_feature", "get_feature", FEATURE_DISPLACEMENT);
+	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "displacement_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_DISPLACEMENT);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "displacement_scale", PROPERTY_HINT_RANGE, "-1,1,0.001,or_less,or_greater,suffix:m"), "set_displacement_scale", "get_displacement_scale");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "displacement_midlevel", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_displacement_midlevel", "get_displacement_midlevel");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "displacement_texture_lod", PROPERTY_HINT_RANGE, "0,12,0.1"), "set_displacement_texture_lod", "get_displacement_texture_lod");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "displacement_normal"), "set_displacement_normal", "is_displacement_normal_enabled");
+
+	ADD_GROUP("Sheen", "sheen_");
+	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "sheen_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_feature", "get_feature", FEATURE_SHEEN);
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "sheen_color", PROPERTY_HINT_COLOR_NO_ALPHA), "set_sheen_color", "get_sheen_color");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "sheen_roughness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_sheen_roughness", "get_sheen_roughness");
+	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "sheen_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_SHEEN);
+
+	// Mariner F5.
+	ADD_GROUP("Iridescence", "iridescence_");
+	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "iridescence_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_feature", "get_feature", FEATURE_IRIDESCENCE);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "iridescence", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_iridescence", "get_iridescence");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "iridescence_ior", PROPERTY_HINT_RANGE, "1,2.333,0.01"), "set_iridescence_ior", "get_iridescence_ior");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "iridescence_thickness_min", PROPERTY_HINT_RANGE, "0,1200,1,suffix:nm"), "set_iridescence_thickness_min", "get_iridescence_thickness_min");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "iridescence_thickness_max", PROPERTY_HINT_RANGE, "0,1200,1,suffix:nm"), "set_iridescence_thickness_max", "get_iridescence_thickness_max");
+	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "iridescence_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_IRIDESCENCE);
+
 	ADD_GROUP("Anisotropy", "anisotropy_");
 	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "anisotropy_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_feature", "get_feature", FEATURE_ANISOTROPY);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "anisotropy", PROPERTY_HINT_RANGE, "-1,1,0.01"), "set_anisotropy", "get_anisotropy");
@@ -3733,7 +4911,7 @@ void BaseMaterial3D::_bind_methods() {
 
 	ADD_GROUP("Height", "heightmap_");
 	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "heightmap_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_feature", "get_feature", FEATURE_HEIGHT_MAPPING);
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "heightmap_scale", PROPERTY_HINT_RANGE, "-16,16,0.001"), "set_heightmap_scale", "get_heightmap_scale");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "heightmap_scale", PROPERTY_HINT_RANGE, "-16,16,0.001,or_less,or_greater"), "set_heightmap_scale", "get_heightmap_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "heightmap_deep_parallax"), "set_heightmap_deep_parallax", "is_heightmap_deep_parallax_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "heightmap_min_layers", PROPERTY_HINT_RANGE, "1,64,1"), "set_heightmap_deep_parallax_min_layers", "get_heightmap_deep_parallax_min_layers");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "heightmap_max_layers", PROPERTY_HINT_RANGE, "1,64,1"), "set_heightmap_deep_parallax_max_layers", "get_heightmap_deep_parallax_max_layers");
@@ -3742,6 +4920,8 @@ void BaseMaterial3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "heightmap_self_shadow"), "set_heightmap_self_shadow", "is_heightmap_self_shadow_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "heightmap_self_shadow_strength", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_heightmap_self_shadow_strength", "get_heightmap_self_shadow_strength");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "heightmap_depth_offset"), "set_heightmap_depth_offset", "is_heightmap_depth_offset_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "heightmap_impostor"), "set_heightmap_impostor", "is_heightmap_impostor_enabled"); // Mariner G5b.
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR4_ARRAY, "heightmap_impostor_faces", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY), "set_heightmap_impostor_faces", "get_heightmap_impostor_faces"); // Mariner G5c.
 	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "heightmap_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_HEIGHTMAP);
 	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "heightmap_flip_texture"), "set_flag", "get_flag", FLAG_INVERT_HEIGHTMAP);
 
@@ -3768,6 +4948,12 @@ void BaseMaterial3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "refraction_scale", PROPERTY_HINT_RANGE, "-1,1,0.01"), "set_refraction", "get_refraction");
 	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "refraction_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_REFRACTION);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "refraction_texture_channel", PROPERTY_HINT_ENUM, "Red,Green,Blue,Alpha,Gray"), "set_refraction_texture_channel", "get_refraction_texture_channel");
+	// Mariner F6.
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "refraction_physical"), "set_refraction_physical", "is_refraction_physical");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "refraction_ior", PROPERTY_HINT_RANGE, "1,3,0.01"), "set_refraction_ior", "get_refraction_ior");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "refraction_thickness", PROPERTY_HINT_RANGE, "0,1,0.001,or_greater,suffix:m"), "set_refraction_thickness", "get_refraction_thickness");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "refraction_absorption_color", PROPERTY_HINT_COLOR_NO_ALPHA), "set_refraction_absorption_color", "get_refraction_absorption_color");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "refraction_absorption_distance", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:m"), "set_refraction_absorption_distance", "get_refraction_absorption_distance");
 
 	ADD_GROUP("Detail", "detail_");
 	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "detail_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_feature", "get_feature", FEATURE_DETAIL);
@@ -3776,6 +4962,7 @@ void BaseMaterial3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "detail_uv_layer", PROPERTY_HINT_ENUM, "UV1,UV2"), "set_detail_uv", "get_detail_uv");
 	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "detail_albedo", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_DETAIL_ALBEDO);
 	ADD_PROPERTYI(PropertyInfo(Variant::OBJECT, "detail_normal", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture", TEXTURE_DETAIL_NORMAL);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "detail_normal_rnm"), "set_detail_normal_rnm", "is_detail_normal_rnm"); // Mariner M4.
 
 	ADD_GROUP("UV1", "uv1_");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "uv1_scale", PROPERTY_HINT_LINK), "set_uv1_scale", "get_uv1_scale");
@@ -3850,6 +5037,12 @@ void BaseMaterial3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(TEXTURE_EMISSION);
 	BIND_ENUM_CONSTANT(TEXTURE_NORMAL);
 	BIND_ENUM_CONSTANT(TEXTURE_BENT_NORMAL);
+	BIND_ENUM_CONSTANT(TEXTURE_SHEEN);
+	BIND_ENUM_CONSTANT(TEXTURE_IRIDESCENCE);
+	BIND_ENUM_CONSTANT(TEXTURE_INTERIOR); // Mariner G5a.
+	BIND_ENUM_CONSTANT(TEXTURE_INTERIOR_MASK);
+	BIND_ENUM_CONSTANT(TEXTURE_PLANAR_REFLECTION); // Mariner G6.
+	BIND_ENUM_CONSTANT(TEXTURE_DISPLACEMENT); // Mariner G7.
 	BIND_ENUM_CONSTANT(TEXTURE_RIM);
 	BIND_ENUM_CONSTANT(TEXTURE_CLEARCOAT);
 	BIND_ENUM_CONSTANT(TEXTURE_FLOWMAP);
@@ -3901,7 +5094,29 @@ void BaseMaterial3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(FEATURE_REFRACTION);
 	BIND_ENUM_CONSTANT(FEATURE_DETAIL);
 	BIND_ENUM_CONSTANT(FEATURE_BENT_NORMAL_MAPPING);
+	BIND_ENUM_CONSTANT(FEATURE_SHEEN);
+	BIND_ENUM_CONSTANT(FEATURE_IRIDESCENCE);
+	BIND_ENUM_CONSTANT(FEATURE_WETNESS); // Mariner G4.
+	BIND_ENUM_CONSTANT(FEATURE_INTERIOR); // Mariner G5a.
+	BIND_ENUM_CONSTANT(FEATURE_PLANAR_REFLECTION); // Mariner G6.
+	BIND_ENUM_CONSTANT(FEATURE_DISPLACEMENT); // Mariner G7.
+	BIND_ENUM_CONSTANT(FEATURE_SNOW); // Mariner G4b.
 	BIND_ENUM_CONSTANT(FEATURE_MAX);
+
+	BIND_ENUM_CONSTANT(METAL_ALUMINUM);
+	BIND_ENUM_CONSTANT(METAL_BRASS);
+	BIND_ENUM_CONSTANT(METAL_CHROMIUM);
+	BIND_ENUM_CONSTANT(METAL_COPPER);
+	BIND_ENUM_CONSTANT(METAL_GOLD);
+	BIND_ENUM_CONSTANT(METAL_IRON);
+	BIND_ENUM_CONSTANT(METAL_MERCURY);
+	BIND_ENUM_CONSTANT(METAL_NICKEL);
+	BIND_ENUM_CONSTANT(METAL_PALLADIUM);
+	BIND_ENUM_CONSTANT(METAL_PLATINUM);
+	BIND_ENUM_CONSTANT(METAL_SILVER);
+	BIND_ENUM_CONSTANT(METAL_TITANIUM);
+	BIND_ENUM_CONSTANT(METAL_ZINC);
+	BIND_ENUM_CONSTANT(METAL_MAX);
 
 	BIND_ENUM_CONSTANT(BLEND_MODE_MIX);
 	BIND_ENUM_CONSTANT(BLEND_MODE_ADD);
@@ -4020,6 +5235,41 @@ BaseMaterial3D::BaseMaterial3D(bool p_orm) :
 	set_transmittance_depth(0.1);
 	set_transmittance_boost(0.0);
 	set_refraction(0.05);
+	// Mariner M6, F5, F6.
+	set_wetness_amount(1.0); // Mariner G4.
+	set_wetness_porosity(0.5);
+	set_wetness_puddles(0.0);
+	set_snow_amount(1.0); // Mariner G4b.
+	set_snow_color(Color(0.9, 0.92, 0.95));
+	set_snow_roughness(0.8);
+	set_snow_max_slope(55.0);
+	set_snow_relief(0.5);
+	set_interior_rooms(Vector2(1, 1)); // Mariner G5a.
+	set_interior_room_size(Vector3(4, 3, 4));
+	set_interior_atlas_size(Vector2i(1, 1));
+	set_interior_back_wall(0.5);
+	set_interior_brightness(1.0);
+	set_interior_lights(0.0);
+	set_interior_lit_fraction(0.3);
+	set_interior_light_color(Color(1.0, 0.8, 0.55));
+	set_interior_curtains(0.0); // Mariner G5d.
+	set_interior_blinds(0.0);
+	set_interior_curtain_color(Color(0.75, 0.7, 0.6));
+	set_planar_reflection_amount(1.0); // Mariner G6.
+	set_planar_reflection_distortion(0.03);
+	set_displacement_scale(0.1); // Mariner G7.
+	set_displacement_midlevel(0.0);
+	set_displacement_texture_lod(0.0);
+	set_sheen_color(Color(1, 1, 1));
+	set_sheen_roughness(0.5);
+	set_iridescence(1.0);
+	set_iridescence_ior(1.3);
+	set_iridescence_thickness_min(100.0);
+	set_iridescence_thickness_max(400.0);
+	set_refraction_ior(1.5);
+	set_refraction_thickness(0.05);
+	set_refraction_absorption_color(Color(1, 1, 1));
+	set_refraction_absorption_distance(1.0);
 	set_point_size(1);
 	set_uv1_offset(Vector3(0, 0, 0));
 	set_uv1_scale(Vector3(1, 1, 1));

@@ -237,9 +237,10 @@ void RendererCompositorRD::fsr3_frame_generation_capture(DisplayServerEnums::Win
 	// Mariner E24b. Same moment as frame_generation_capture_hudless() (E3): the 3D image of the frame is final, its
 	// 2D canvases are not drawn yet. Keeps the HUD-less copy and the upscaler's surfaces of this frame.
 	RenderingDevice *rd = RD::get_singleton();
-	if (rd->get_device_api_name() != "Vulkan") {
-		// Presenting the extra image is implemented in the Vulkan driver only (for now).
-		WARN_PRINT_ONCE("AMD FSR 3 frame generation needs the Vulkan rendering driver (rendering/rendering_device/driver). Frame generation is off.");
+	const String api = rd->get_device_api_name();
+	if (api != "Vulkan" && api != "D3D12") {
+		// Presenting the extra image is implemented in the Vulkan and Direct3D 12 drivers (Mariner E24c: D3D12).
+		WARN_PRINT_ONCE("AMD FSR 3 frame generation needs the Vulkan or Direct3D 12 rendering driver. Frame generation is off.");
 		return;
 	}
 	Ref<RenderSceneBuffersRD> rb = p_render_buffers;

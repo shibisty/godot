@@ -2887,7 +2887,7 @@
 			[b]Note:[/b] This property is only read when the project starts. To set TAA at runtime, set [member Viewport.use_taa] on the root [Viewport] instead, or use [method RenderingServer.viewport_set_use_taa].
 		</member>
 		<member name="rendering/anti_aliasing/screen_space_roughness_limiter/amount" type="float" setter="" getter="" default="0.25">
-			[b]Note:[/b] This property is only read when the project starts. To control the screen-space roughness limiter at runtime, call [method RenderingServer.screen_space_roughness_limiter_set_active] instead.
+			[b]Note:[/b] This property is only read when the project starts. To control the screen-space roughness limiter at runtime, call [method RenderingServer.screen_space_roughness_limiter_set_active] instead. Mariner F4: under a temporal upscaler (FSR 2, FSR 3.1, DLSS, MetalFX temporal) the normal variance is measured in output pixels (internal / output size), since the upscaler resolves the image at the output resolution.
 		</member>
 		<member name="rendering/anti_aliasing/screen_space_roughness_limiter/enabled" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], enables a spatial filter to limit roughness in areas with high-frequency detail. This can help reduce specular aliasing to an extent, though not as much as enabling [member rendering/anti_aliasing/quality/use_taa]. This filter has a small performance cost, so consider disabling it if it doesn't benefit your scene noticeably.
@@ -2902,6 +2902,11 @@
 		</member>
 		<member name="rendering/camera/depth_of_field/depth_of_field_bokeh_shape" type="int" setter="" getter="" default="1">
 			Sets the depth of field shape. Can be Box, Hexagon, or Circle. Box is the fastest. Circle is the most realistic, but also the most expensive to compute.
+		</member>
+		<member name="rendering/camera/depth_of_field/depth_of_field_mode" type="int" setter="" getter="" default="1">
+			How depth of field is rendered in the Forward+ renderer with one view (Mobile, Compatibility and stereo views always use the bokeh blur).
+			[b]Bokeh (Classic)[/b]: Godot's separate blurs of the near and far fields.
+			[b]Gather[/b]: gathers samples in the aperture shape around each pixel at half resolution, in two layers: the background (far and in focus), where a sample counts by the smaller of its own and the pixel's circle of confusion, so the blurred background does not bleed over sharper nearer objects (no halos around objects in focus); and the foreground (near), which blurs over what is behind it with partial transparency at its edge, showing the gathered background. Bright highlights become discs of the aperture shape. The circle of confusion, [member rendering/camera/depth_of_field/depth_of_field_bokeh_shape], [member rendering/camera/depth_of_field/depth_of_field_bokeh_quality] (number of sample rings) and [member rendering/camera/depth_of_field/depth_of_field_use_jitter] (rings turned every frame, for temporal antialiasing) apply to both. Mariner engine patch F2.
 		</member>
 		<member name="rendering/camera/depth_of_field/depth_of_field_use_jitter" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], jitters DOF samples to make effect slightly blurrier and hide lines created from low sample rates. This can result in a slightly grainy appearance when used with a low number of samples.
@@ -3163,6 +3168,9 @@
 		<member name="rendering/lights_and_shadows/directional_shadow/cache_light_angle_threshold" type="float" setter="" getter="" default="0.1">
 			With the directional shadow cache, the shadow follows the light direction only once it turned by more than this angle (degrees), so that a slowly moving sun does not redraw the cache every frame. The shadow direction lags the light by at most this angle.
 		</member>
+		<member name="rendering/lights_and_shadows/directional_shadow/cache_scrolling" type="bool" setter="" getter="" default="true">
+			Mariner E10c. With the directional shadow cache, a cascade that moved with the camera is scrolled instead of redrawn: the cached depth where the old and new cascades overlap is shifted to the new position (and moved along the light by the change of the near plane), and only the static casters reaching into the uncovered strips are drawn. Casters that change, appear, disappear or become static where the cascades overlap still redraw the cascade. The result is the same as redrawing.
+		</member>
 		<member name="rendering/lights_and_shadows/directional_shadow/cache_static_after_frames" type="int" setter="" getter="" default="30">
 			With the directional shadow cache, an instance in [constant GeometryInstance3D.SHADOW_CACHE_MODE_AUTO] is cached after its transform and base stayed unchanged for this many frames.
 		</member>
@@ -3291,7 +3299,7 @@
 			[MultiMesh]es with up to this many triangles (all instances) are merged into one BLAS, rebuilt or refit when the instance data changes. Larger ones (and compressed meshes) use one TLAS instance per [MultiMesh] instance (the instance data is read back to the CPU once).
 		</member>
 		<member name="rendering/raytracing/scene_acceleration_structures" type="bool" setter="" getter="" default="false">
-			If [code]true[/code], mesh, [MultiMesh] and skinned mesh buffers are created so that the Forward+ renderer can build raytracing scenes ([member Viewport.raytracing_scene_enabled]). Only has an effect on Vulkan devices with ray query or ray tracing pipeline support.
+			If [code]true[/code], mesh, [MultiMesh] and skinned mesh buffers are created so that the Forward+ renderer can build raytracing scenes ([member Viewport.raytracing_scene_enabled]). Only has an effect on Vulkan and Direct3D 12 devices with ray query or ray tracing pipeline support.
 		</member>
 		<member name="rendering/reflections/reflection_atlas/reflection_count" type="int" setter="" getter="" default="64">
 			Number of cubemaps to store in the reflection atlas. The number of [ReflectionProbe]s in a scene will be limited by this amount. A higher number requires more VRAM.
@@ -3347,6 +3355,7 @@
 		<member name="rendering/rendering_device/d3d12/max_resource_descriptors" type="int" setter="" getter="" default="65536">
 			The number of entries in the resource descriptor heap the Direct3D 12 rendering driver uses for most rendering operations.
 			Depending on the complexity of scenes, this value may be lowered or may need to be raised.
+			[b]Note:[/b] With [member rendering/raytracing/scene_acceleration_structures] enabled, at least 1000000 entries are used (Mariner E5d: the raytracing scene's arrays of geometry buffers and textures).
 		</member>
 		<member name="rendering/rendering_device/d3d12/max_sampler_descriptors" type="int" setter="" getter="" default="1024">
 			The number of entries in the sampler descriptor heap the Direct3D 12 rendering driver uses for most rendering operations.

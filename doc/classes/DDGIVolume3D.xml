@@ -5,7 +5,7 @@
 	</brief_description>
 	<description>
 		A grid of dynamic diffuse GI probes ([member Environment.ddgi_enabled]) in the frame of this node: the probes move and turn with it, so the indirect light in its rooms stays valid while it sails, rolls and pitches, instead of being recomputed by the world grid around the camera. Inside its box (with a fade over the outermost probe cell) it is sampled over the world grid. Make the box a probe spacing larger than the rooms on each side.
-		Needs the same as [member Environment.ddgi_enabled] (Forward+ on Vulkan with ray query, raytracing scene of the viewport). One per [World3D]; the probes are traced against the whole raytracing scene (the ship's own geometry, the sun, the sea and the world outside). Mariner engine patch E12.
+		Needs the same as [member Environment.ddgi_enabled] (Forward+ on Vulkan or Direct3D 12 with ray query, raytracing scene of the viewport). One per [World3D]; the probes are traced against the whole raytracing scene (the ship's own geometry, the sun, the sea and the world outside). Mariner engine patch E12.
 	</description>
 	<tutorials>
 	</tutorials>

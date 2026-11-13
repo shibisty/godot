@@ -65,6 +65,7 @@ public:
 	virtual uint32_t light_get_shadow_caster_mask(RID p_light) const = 0;
 	// Mariner E20: direct light of the light from ReSTIR DI with ray traced shadows (Forward+ with raytracing).
 	virtual void light_set_restir(RID p_light, bool p_enable) {}
+	virtual void light_set_clip_volume(RID p_light, bool p_enable, const Vector3 &p_offset, const Vector3 &p_size) {} // Mariner G3.
 	virtual bool light_is_restir(RID p_light) const { return false; }
 	virtual void light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) = 0;
 	virtual void light_set_max_sdfgi_cascade(RID p_light, uint32_t p_cascade) = 0;

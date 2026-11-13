@@ -284,8 +284,8 @@ FSR3UpscalerEffect::FSR3UpscalerEffect() {
 	FFX3Effect effect;
 	effect.passes = device->passes;
 	effect.pass_count = FFX_FSR3UPSCALER_PASS_COUNT;
-	effect.samplers.push_back({ 1000, false }); // s_PointClamp
-	effect.samplers.push_back({ 1001, true }); // s_LinearClamp
+	effect.samplers.push_back({ 900, false }); // s_PointClamp (below 1000: the D3D12 register encoding).
+	effect.samplers.push_back({ 901, true }); // s_LinearClamp
 	effect.select_variant = fsr3_select_variant;
 	device->base.effects[FFX_EFFECT_FSR3UPSCALER] = effect;
 }

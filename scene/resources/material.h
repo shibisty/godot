@@ -164,6 +164,12 @@ public:
 		TEXTURE_DETAIL_NORMAL,
 		TEXTURE_ORM,
 		TEXTURE_BENT_NORMAL,
+		TEXTURE_SHEEN, // Mariner M6.
+		TEXTURE_IRIDESCENCE, // Mariner F5.
+		TEXTURE_INTERIOR, // Mariner G5a.
+		TEXTURE_INTERIOR_MASK,
+		TEXTURE_PLANAR_REFLECTION, // Mariner G6.
+		TEXTURE_DISPLACEMENT, // Mariner G7.
 		TEXTURE_MAX
 	};
 
@@ -206,6 +212,24 @@ public:
 		SHADING_MODE_MAX
 	};
 
+	// Mariner M8: measured reflectance at normal incidence (F0) of pure metals, see get_metal_albedo().
+	enum Metal {
+		METAL_ALUMINUM,
+		METAL_BRASS,
+		METAL_CHROMIUM,
+		METAL_COPPER,
+		METAL_GOLD,
+		METAL_IRON,
+		METAL_MERCURY,
+		METAL_NICKEL,
+		METAL_PALLADIUM,
+		METAL_PLATINUM,
+		METAL_SILVER,
+		METAL_TITANIUM,
+		METAL_ZINC,
+		METAL_MAX
+	};
+
 	enum Feature {
 		FEATURE_EMISSION,
 		FEATURE_NORMAL_MAPPING,
@@ -220,6 +244,13 @@ public:
 		FEATURE_REFRACTION,
 		FEATURE_DETAIL,
 		FEATURE_BENT_NORMAL_MAPPING,
+		FEATURE_SHEEN, // Mariner M6.
+		FEATURE_IRIDESCENCE, // Mariner F5.
+		FEATURE_WETNESS, // Mariner G4.
+		FEATURE_INTERIOR, // Mariner G5a.
+		FEATURE_PLANAR_REFLECTION, // Mariner G6.
+		FEATURE_DISPLACEMENT, // Mariner G7.
+		FEATURE_SNOW, // Mariner G4b.
 		FEATURE_MAX
 	};
 
@@ -388,6 +419,11 @@ private:
 		uint64_t orm : 1;
 		uint64_t heightmap_self_shadow : 1; // Mariner E16.
 		uint64_t heightmap_depth_offset : 1;
+		uint64_t heightmap_impostor : 1; // Mariner G5b.
+		uint64_t heightmap_impostor_hull : 1; // Mariner G5c.
+		uint64_t refraction_physical : 1; // Mariner F6.
+		uint64_t displacement_normal : 1; // Mariner G7.
+		uint64_t detail_normal_rnm : 1; // Mariner M4.
 
 		// flag bitfield
 		uint32_t feature_mask;
@@ -444,6 +480,11 @@ private:
 		mk.orm = orm;
 		mk.heightmap_self_shadow = heightmap_self_shadow;
 		mk.heightmap_depth_offset = heightmap_depth_offset;
+		mk.heightmap_impostor = heightmap_impostor;
+		mk.heightmap_impostor_hull = heightmap_impostor_faces.size() >= IMPOSTOR_FACE_DATA_SIZE;
+		mk.refraction_physical = refraction_physical;
+		mk.displacement_normal = displacement_normal;
+		mk.detail_normal_rnm = detail_normal_rnm;
 
 		mk.stencil_mode = stencil_mode;
 		mk.stencil_flags = stencil_flags;
@@ -497,6 +538,42 @@ private:
 		StringName heightmap_max_layers;
 		StringName heightmap_flip;
 		StringName heightmap_self_shadow_strength; // Mariner E16.
+		// Mariner M6, F5, F6.
+		StringName sheen_color;
+		StringName sheen_roughness;
+		StringName wetness_amount; // Mariner G4.
+		StringName wetness_porosity;
+		StringName wetness_puddles;
+		StringName snow_amount; // Mariner G4b.
+		StringName snow_color;
+		StringName snow_roughness;
+		StringName snow_max_slope;
+		StringName snow_relief;
+		StringName impostor_faces; // Mariner G5c.
+		StringName planar_reflection_amount; // Mariner G6.
+		StringName planar_reflection_distortion;
+		StringName displacement_scale; // Mariner G7.
+		StringName displacement_midlevel;
+		StringName displacement_texture_lod;
+		StringName interior_rooms; // Mariner G5a.
+		StringName interior_room_size;
+		StringName interior_atlas_size;
+		StringName interior_back_wall;
+		StringName interior_brightness;
+		StringName interior_lights;
+		StringName interior_lit_fraction;
+		StringName interior_light_color;
+		StringName interior_curtains; // Mariner G5d.
+		StringName interior_blinds;
+		StringName interior_curtain_color;
+		StringName iridescence;
+		StringName iridescence_ior;
+		StringName iridescence_thickness_min;
+		StringName iridescence_thickness_max;
+		StringName refraction_ior;
+		StringName refraction_thickness;
+		StringName refraction_absorption_color;
+		StringName refraction_absorption_distance;
 		StringName uv1_blend_sharpness;
 		StringName uv2_blend_sharpness;
 		StringName grow;
@@ -595,6 +672,46 @@ private:
 	bool heightmap_self_shadow = false;
 	float heightmap_self_shadow_strength = 1.0;
 	bool heightmap_depth_offset = false;
+	bool heightmap_impostor = false; // Mariner G5b.
+	PackedVector4Array heightmap_impostor_faces; // Mariner G5c.
+	float planar_reflection_amount = 1.0; // Mariner G6.
+	float planar_reflection_distortion = 0.03;
+	float displacement_scale = 0.1; // Mariner G7.
+	float displacement_midlevel = 0.0;
+	float displacement_texture_lod = 0.0;
+	bool displacement_normal = true;
+	// Mariner M6, F5, F6, M4.
+	Color sheen_color = Color(1, 1, 1);
+	float sheen_roughness = 0.5;
+	float wetness_amount = 1.0; // Mariner G4.
+	float wetness_porosity = 0.5;
+	float wetness_puddles = 0.0;
+	float snow_amount = 1.0; // Mariner G4b.
+	Color snow_color = Color(0.9, 0.92, 0.95);
+	float snow_roughness = 0.8;
+	float snow_max_slope = 55.0;
+	float snow_relief = 0.5;
+	Vector2 interior_rooms = Vector2(1, 1); // Mariner G5a.
+	Vector3 interior_room_size = Vector3(4, 3, 4);
+	Vector2i interior_atlas_size = Vector2i(1, 1);
+	float interior_back_wall = 0.5;
+	float interior_brightness = 1.0;
+	float interior_lights = 0.0;
+	float interior_lit_fraction = 0.3;
+	Color interior_light_color = Color(1.0, 0.8, 0.55);
+	float interior_curtains = 0.0; // Mariner G5d.
+	float interior_blinds = 0.0;
+	Color interior_curtain_color = Color(0.75, 0.7, 0.6);
+	float iridescence = 1.0;
+	float iridescence_ior = 1.3;
+	float iridescence_thickness_min = 100.0;
+	float iridescence_thickness_max = 400.0;
+	float refraction_ior = 1.5;
+	float refraction_thickness = 0.05;
+	Color refraction_absorption_color = Color(1, 1, 1);
+	float refraction_absorption_distance = 1.0;
+	bool refraction_physical = false;
+	bool detail_normal_rnm = false;
 
 	bool proximity_fade_enabled = false;
 	float proximity_fade_distance = 0.0f;
@@ -713,10 +830,104 @@ public:
 
 	void set_heightmap_self_shadow(bool p_enable);
 	bool is_heightmap_self_shadow_enabled() const;
+	static Color get_metal_albedo(Metal p_metal); // Mariner M8.
 	void set_heightmap_self_shadow_strength(float p_strength);
+	// Mariner M6, F5, F6, M4.
+	void set_sheen_color(const Color &p_value);
+	Color get_sheen_color() const;
+	void set_sheen_roughness(float p_value);
+	float get_sheen_roughness() const;
+
+	// Mariner G4: how the material gets wet with Environment.wetness (WETNESS) outside cover (OVERHEAD_COVER).
+	void set_wetness_amount(float p_value);
+	float get_wetness_amount() const;
+	void set_wetness_porosity(float p_value);
+	float get_wetness_porosity() const;
+	void set_wetness_puddles(float p_value);
+	float get_wetness_puddles() const;
+
+	// Mariner G4b: how snow lies on the material with Environment.snow (SNOW) outside cover (OVERHEAD_COVER).
+	void set_snow_amount(float p_value);
+	float get_snow_amount() const;
+	void set_snow_color(const Color &p_color);
+	Color get_snow_color() const;
+	void set_snow_roughness(float p_value);
+	float get_snow_roughness() const;
+	void set_snow_max_slope(float p_degrees);
+	float get_snow_max_slope() const;
+	void set_snow_relief(float p_value);
+	float get_snow_relief() const;
+
+	// Mariner G5a: fake interiors behind the windows (interior mapping): rooms of an atlas seen through the glass.
+	void set_interior_rooms(const Vector2 &p_value);
+	Vector2 get_interior_rooms() const;
+	void set_interior_room_size(const Vector3 &p_value);
+	Vector3 get_interior_room_size() const;
+	void set_interior_atlas_size(const Vector2i &p_value);
+	Vector2i get_interior_atlas_size() const;
+	void set_interior_back_wall(float p_value);
+	float get_interior_back_wall() const;
+	void set_interior_brightness(float p_value);
+	float get_interior_brightness() const;
+	void set_interior_lights(float p_value);
+	float get_interior_lights() const;
+	void set_interior_lit_fraction(float p_value);
+	float get_interior_lit_fraction() const;
+	void set_interior_curtains(float p_value); // Mariner G5d.
+	float get_interior_curtains() const;
+	void set_interior_blinds(float p_value);
+	float get_interior_blinds() const;
+	void set_interior_curtain_color(const Color &p_value);
+	Color get_interior_curtain_color() const;
+	void set_interior_light_color(const Color &p_value);
+	Color get_interior_light_color() const;
+	void set_iridescence(float p_value);
+	float get_iridescence() const;
+	void set_iridescence_ior(float p_value);
+	float get_iridescence_ior() const;
+	void set_iridescence_thickness_min(float p_value);
+	float get_iridescence_thickness_min() const;
+	void set_iridescence_thickness_max(float p_value);
+	float get_iridescence_thickness_max() const;
+	void set_refraction_ior(float p_value);
+	float get_refraction_ior() const;
+	void set_refraction_thickness(float p_value);
+	float get_refraction_thickness() const;
+	void set_refraction_absorption_color(const Color &p_value);
+	Color get_refraction_absorption_color() const;
+	void set_refraction_absorption_distance(float p_value);
+	float get_refraction_absorption_distance() const;
+	void set_refraction_physical(bool p_enable);
+	bool is_refraction_physical() const;
+	void set_detail_normal_rnm(bool p_enable);
+	bool is_detail_normal_rnm() const;
 	float get_heightmap_self_shadow_strength() const;
 	void set_heightmap_depth_offset(bool p_enable);
 	bool is_heightmap_depth_offset_enabled() const;
+	// Mariner G5b: deep parallax of box impostor faces - the true view ray, clipped to the face's rectangle (CUSTOM0).
+	void set_heightmap_impostor(bool p_enable);
+	bool is_heightmap_impostor_enabled() const;
+	// Mariner G5c: the box impostor's faces for the visual hull (BoxImpostorBaker): 4 vectors per face (+X, -X, +Z, -Z,
+	// +Y, -Y: U, V and depth from object space, the face's tangent and sign or 0 if not baked), then the box's min and
+	// max. With them the view ray is traced through all the faces' reliefs at once.
+	static constexpr int IMPOSTOR_FACE_DATA_SIZE = 26;
+	void set_heightmap_impostor_faces(const PackedVector4Array &p_faces);
+	PackedVector4Array get_heightmap_impostor_faces() const;
+
+	// Mariner G6: the planar reflection of a PlanarReflection3D (its texture is set by the node).
+	void set_planar_reflection_amount(float p_value);
+	float get_planar_reflection_amount() const;
+	void set_planar_reflection_distortion(float p_value);
+	float get_planar_reflection_distortion() const;
+
+	void set_displacement_scale(float p_value); // Mariner G7.
+	float get_displacement_scale() const;
+	void set_displacement_midlevel(float p_value);
+	float get_displacement_midlevel() const;
+	void set_displacement_texture_lod(float p_value);
+	float get_displacement_texture_lod() const;
+	void set_displacement_normal(bool p_enable);
+	bool is_displacement_normal_enabled() const;
 
 	void set_subsurface_scattering_strength(float p_subsurface_scattering_strength);
 	float get_subsurface_scattering_strength() const;
@@ -910,6 +1121,7 @@ VARIANT_ENUM_CAST(BaseMaterial3D::Transparency)
 VARIANT_ENUM_CAST(BaseMaterial3D::AlphaAntiAliasing)
 VARIANT_ENUM_CAST(BaseMaterial3D::DetailUV)
 VARIANT_ENUM_CAST(BaseMaterial3D::Feature)
+VARIANT_ENUM_CAST(BaseMaterial3D::Metal)
 VARIANT_ENUM_CAST(BaseMaterial3D::BlendMode)
 VARIANT_ENUM_CAST(BaseMaterial3D::DepthDrawMode)
 VARIANT_ENUM_CAST(BaseMaterial3D::DepthTest)

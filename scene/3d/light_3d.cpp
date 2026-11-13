@@ -159,6 +159,40 @@ uint32_t Light3D::get_shadow_caster_mask() const {
 	return shadow_caster_mask;
 }
 
+// Mariner G3.
+void Light3D::_update_clip_volume() {
+	RS::get_singleton()->light_set_clip_volume(light, clip_volume_enabled, clip_volume_offset, clip_volume_size);
+	update_gizmos();
+}
+
+void Light3D::set_clip_volume_enabled(bool p_enable) {
+	clip_volume_enabled = p_enable;
+	_update_clip_volume();
+	notify_property_list_changed();
+}
+
+bool Light3D::is_clip_volume_enabled() const {
+	return clip_volume_enabled;
+}
+
+void Light3D::set_clip_volume_offset(const Vector3 &p_offset) {
+	clip_volume_offset = p_offset;
+	_update_clip_volume();
+}
+
+Vector3 Light3D::get_clip_volume_offset() const {
+	return clip_volume_offset;
+}
+
+void Light3D::set_clip_volume_size(const Vector3 &p_size) {
+	clip_volume_size = p_size.maxf(0.001);
+	_update_clip_volume();
+}
+
+Vector3 Light3D::get_clip_volume_size() const {
+	return clip_volume_size;
+}
+
 void Light3D::set_restir(bool p_enable) {
 	restir = p_enable;
 	RS::get_singleton()->light_set_restir(light, restir);
@@ -353,6 +387,9 @@ void Light3D::_validate_property(PropertyInfo &p_property) const {
 		p_property.usage = PROPERTY_USAGE_NONE;
 	} else if (get_light_type() == RSE::LIGHT_AREA && p_property.name == "light_projector") {
 		p_property.usage = PROPERTY_USAGE_NONE;
+	} else if (get_light_type() == RSE::LIGHT_DIRECTIONAL && p_property.name.begins_with("clip_volume_")) {
+		// Mariner G3: positional lights only.
+		p_property.usage = PROPERTY_USAGE_NONE;
 	} else if (get_light_type() != RSE::LIGHT_OMNI && get_light_type() != RSE::LIGHT_SPOT && p_property.name == "light_restir") {
 		p_property.usage = PROPERTY_USAGE_NONE; // Mariner E20: omni and spot lights only.
 	}
@@ -424,6 +461,19 @@ void Light3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "light_bake_mode", PROPERTY_HINT_ENUM, "Disabled,Static,Dynamic"), "set_bake_mode", "get_bake_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "light_cull_mask", PROPERTY_HINT_LAYERS_3D_RENDER), "set_cull_mask", "get_cull_mask");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "light_restir"), "set_restir", "is_restir");
+
+	// Mariner G3.
+	ClassDB::bind_method(D_METHOD("set_clip_volume_enabled", "enable"), &Light3D::set_clip_volume_enabled);
+	ClassDB::bind_method(D_METHOD("is_clip_volume_enabled"), &Light3D::is_clip_volume_enabled);
+	ClassDB::bind_method(D_METHOD("set_clip_volume_offset", "offset"), &Light3D::set_clip_volume_offset);
+	ClassDB::bind_method(D_METHOD("get_clip_volume_offset"), &Light3D::get_clip_volume_offset);
+	ClassDB::bind_method(D_METHOD("set_clip_volume_size", "size"), &Light3D::set_clip_volume_size);
+	ClassDB::bind_method(D_METHOD("get_clip_volume_size"), &Light3D::get_clip_volume_size);
+	ADD_GROUP("Clip Volume", "clip_volume_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "clip_volume_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_clip_volume_enabled", "is_clip_volume_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "clip_volume_offset", PROPERTY_HINT_NONE, "suffix:m"), "set_clip_volume_offset", "get_clip_volume_offset");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "clip_volume_size", PROPERTY_HINT_RANGE, "0.001,1024,0.001,or_greater,suffix:m"), "set_clip_volume_size", "get_clip_volume_size");
+	ADD_GROUP("", "");
 
 	ADD_GROUP("Shadow", "shadow_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "shadow_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_shadow", "has_shadow");

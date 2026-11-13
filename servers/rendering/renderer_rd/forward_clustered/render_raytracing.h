@@ -55,10 +55,17 @@ class RenderForwardClustered;
 // Per TLAS instance geometry data. Must match the GLSL `RTInstanceData` (std430, 128 bytes) documented in
 // RenderSceneBuffersRD.get_raytracing_instance_buffer().
 struct alignas(16) RT_InstanceData {
-	uint64_t vertex_address; // Positions (float3, or unorm16x4 when compressed), then normal/tangent block.
-	uint64_t attribute_address; // Interleaved color / uv / uv2 / custom attributes.
-	uint64_t index_address; // 0 when not indexed.
-	uint64_t multimesh_address; // Per-instance data of a MultiMesh (transform 12 floats [+ color 4] [+ custom 4]), 0 if none.
+	// Mariner E5d: buffers are indices into the geometry buffer array (RenderSceneBuffersRD::
+	// get_raytracing_geometry_buffers_uniform(), 0 = none) and word offsets into them - not device addresses (D3D12 shaders
+	// have no pointers).
+	uint32_t vertex_buffer; // Positions (float3, or unorm16x4 when compressed), then normal/tangent block.
+	uint32_t vertex_offset;
+	uint32_t attribute_buffer; // Interleaved color / uv / uv2 / custom attributes.
+	uint32_t attribute_offset;
+	uint32_t index_buffer; // 0 when not indexed.
+	uint32_t index_offset;
+	uint32_t multimesh_buffer; // Per-instance data of a MultiMesh (transform 12 floats [+ color 4] [+ custom 4]), 0 if none.
+	uint32_t multimesh_offset;
 	uint32_t vertex_count;
 	uint32_t position_stride;
 	uint32_t normal_byte_offset; // Offset of the normal/tangent block in the vertex buffer, RT_OFFSET_NONE if none.
@@ -109,7 +116,8 @@ enum {
 	RT_CACHE_CHUNK_SIZE = 256,
 	RT_CACHE_CHUNK_SHIFT = 8,
 	RT_CACHE_CHUNK_MASK = 255,
-	RT_MAX_TEXTURES = 16384, // Vulkan driver MAX_UNBOUNDED_DESCRIPTOR_COUNT.
+	RT_MAX_TEXTURES = 16384, // Runtime-sized arrays: MAX_UNBOUNDED_DESCRIPTOR_COUNT (Vulkan), UNBOUNDED_DESCRIPTOR_COUNT (D3D12).
+	RT_MAX_GEOMETRY_BUFFERS = 4096, // Mariner E5d: pathtracer_scene_inc.glsl RT_MAX_GEOMETRY_BUFFERS (slot 0: none).
 };
 
 enum {
@@ -253,6 +261,21 @@ class RenderRaytracing {
 		uint32_t add(RID p_texture);
 	} texture_registry;
 
+	// Mariner E5d: the meshes' (and merged MultiMeshes') buffers the shaders read, in the geometry buffer array. Slot
+	// 0 is a small dummy buffer (= none).
+	struct BufferRegistry {
+		LocalVector<RID> buffers;
+		HashMap<RID, uint32_t> buffer_to_index;
+		LocalVector<uint32_t> free_indices;
+		uint64_t version = 1;
+		RID dummy;
+
+		void initialize();
+		void finalize();
+		void scrub_invalid();
+		uint32_t add(RID p_buffer);
+	} buffer_registry;
+
 	bool initialized = false;
 
 	Vector<SurfaceCacheEntry *> surface_chunks;
@@ -289,6 +312,11 @@ class RenderRaytracing {
 
 public:
 	static bool is_supported();
+
+	// Mariner E5d: defines of the shaders that read the scene (pathtracer_scene_inc.glsl). On D3D12 a shader indexes
+	// the arrays of buffers and textures in a loop over the wave's indices (RT_NONUNIFORM_WATERFALL): nir_to_dxil marks
+	// no resource handle non-uniform, and a non-uniform index into an unmarked handle is undefined in DXIL.
+	static String get_scene_shader_defines();
 
 	// Mariner E5c: per-pixel detail of a dielectric material (RT_MAT_FLAG_WAVE_DETAIL / RT_MAT_FLAG_FOAM_PATTERN):
 	// packs the texture indices (0 = none) and scales into the fields a dielectric does not use. Wave detail needs

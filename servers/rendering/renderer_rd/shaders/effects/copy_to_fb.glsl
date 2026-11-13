@@ -122,7 +122,13 @@ vec3 srgb_to_linear(vec3 color) {
 void main() {
 #if defined(MODE_COPY_DEPTH)
 	// R32F -> depth attachment (Mariner E5c: path tracer depth for the transparent pass and effects).
-	gl_FragDepth = textureLod(source_depth, uv_interp, 0.0).r;
+	float depth = textureLod(source_depth, uv_interp, 0.0).r;
+	// Mariner E10c: a cached shadow cascade shifted along the light - the depth moved by an offset (color.x), the
+	// cleared depth (0, no caster) kept (color.y).
+	if (params.color.y > 0.5 && depth != 0.0) {
+		depth = clamp(depth + params.color.x, 0.0, 1.0);
+	}
+	gl_FragDepth = depth;
 #elif defined(MODE_SET_COLOR)
 	frag_color = params.color;
 #else

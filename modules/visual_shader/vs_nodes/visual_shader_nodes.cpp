@@ -8586,3 +8586,161 @@ void VisualShaderNodeReroute::_bind_methods() {
 VisualShaderNodeReroute::VisualShaderNodeReroute() {
 	set_input_port_default_value(0, 0.0);
 }
+
+////////////// Displace (Mariner G7)
+
+String VisualShaderNodeDisplace::get_caption() const {
+	return "Displace";
+}
+
+int VisualShaderNodeDisplace::get_input_port_count() const {
+	return 5;
+}
+
+VisualShaderNodeDisplace::PortType VisualShaderNodeDisplace::get_input_port_type(int p_port) const {
+	switch (p_port) {
+		case 0:
+			return PORT_TYPE_SAMPLER;
+		case 1:
+			return PORT_TYPE_VECTOR_2D;
+		default:
+			return PORT_TYPE_SCALAR;
+	}
+}
+
+String VisualShaderNodeDisplace::get_input_port_name(int p_port) const {
+	switch (p_port) {
+		case 0:
+			return "height_map";
+		case 1:
+			return "uv";
+		case 2:
+			return "scale";
+		case 3:
+			return "midlevel";
+		case 4:
+			return "lod";
+	}
+	return "";
+}
+
+bool VisualShaderNodeDisplace::is_input_port_default(int p_port, Shader::Mode p_mode) const {
+	return p_port == 1; // UV.
+}
+
+int VisualShaderNodeDisplace::get_output_port_count() const {
+	return 1;
+}
+
+VisualShaderNodeDisplace::PortType VisualShaderNodeDisplace::get_output_port_type(int p_port) const {
+	return PORT_TYPE_VECTOR_3D;
+}
+
+String VisualShaderNodeDisplace::get_output_port_name(int p_port) const {
+	return "vertex";
+}
+
+bool VisualShaderNodeDisplace::has_output_port_preview(int p_port) const {
+	return false;
+}
+
+String VisualShaderNodeDisplace::generate_code(Shader::Mode p_mode, VisualShader::Type p_type, int p_id, const String *p_input_vars, const String *p_output_vars, bool p_for_preview) const {
+	if (p_input_vars[0].is_empty()) {
+		return vformat("	%s = VERTEX;\n", p_output_vars[0]); // No height map connected.
+	}
+	const String uv = p_input_vars[1].is_empty() ? String("UV") : p_input_vars[1];
+	return vformat("	%s = VERTEX + normalize(NORMAL) * ((textureLod(%s, %s, %s).r - %s) * %s);\n", p_output_vars[0], p_input_vars[0], uv, p_input_vars[4], p_input_vars[3], p_input_vars[2]);
+}
+
+VisualShaderNodeDisplace::VisualShaderNodeDisplace() {
+	set_input_port_default_value(2, 0.1);
+	set_input_port_default_value(3, 0.0);
+	set_input_port_default_value(4, 0.0);
+	simple_decl = false;
+}
+
+////////////// HeightNormal (Mariner G7)
+
+String VisualShaderNodeHeightNormal::get_caption() const {
+	return "HeightNormal";
+}
+
+int VisualShaderNodeHeightNormal::get_input_port_count() const {
+	return 3;
+}
+
+VisualShaderNodeHeightNormal::PortType VisualShaderNodeHeightNormal::get_input_port_type(int p_port) const {
+	switch (p_port) {
+		case 0:
+			return PORT_TYPE_SAMPLER;
+		case 1:
+			return PORT_TYPE_VECTOR_2D;
+		default:
+			return PORT_TYPE_SCALAR;
+	}
+}
+
+String VisualShaderNodeHeightNormal::get_input_port_name(int p_port) const {
+	switch (p_port) {
+		case 0:
+			return "height_map";
+		case 1:
+			return "uv";
+		case 2:
+			return "scale";
+	}
+	return "";
+}
+
+bool VisualShaderNodeHeightNormal::is_input_port_default(int p_port, Shader::Mode p_mode) const {
+	return p_port == 1; // UV.
+}
+
+int VisualShaderNodeHeightNormal::get_output_port_count() const {
+	return 1;
+}
+
+VisualShaderNodeHeightNormal::PortType VisualShaderNodeHeightNormal::get_output_port_type(int p_port) const {
+	return PORT_TYPE_VECTOR_3D;
+}
+
+String VisualShaderNodeHeightNormal::get_output_port_name(int p_port) const {
+	return "normal";
+}
+
+bool VisualShaderNodeHeightNormal::has_output_port_preview(int p_port) const {
+	return false;
+}
+
+String VisualShaderNodeHeightNormal::generate_code(Shader::Mode p_mode, VisualShader::Type p_type, int p_id, const String *p_input_vars, const String *p_output_vars, bool p_for_preview) const {
+	if (p_input_vars[0].is_empty()) {
+		return vformat("	%s = NORMAL;\n", p_output_vars[0]); // No height map connected.
+	}
+	// The surface gradient of the height (Mikkelsen) on the drawn surface, in view space; the height's slope over a
+	// texel or the pixel's footprint, whichever is larger. The front side's normal, turned back for the back faces.
+	const String uv = p_input_vars[1].is_empty() ? String("UV") : p_input_vars[1];
+	const String tex = p_input_vars[0];
+	String code;
+	code += "	{\n";
+	code += vformat("		vec2 __uv = %s;\n", uv);
+	code += "		float __side = FRONT_FACING ? 1.0 : -1.0;\n";
+	code += "		vec3 __n = NORMAL * __side;\n";
+	code += "		vec3 __dp1 = dFdx(VERTEX);\n";
+	code += "		vec3 __dp2 = dFdy(VERTEX);\n";
+	code += "		vec2 __duv1 = dFdx(__uv);\n";
+	code += "		vec2 __duv2 = dFdy(__uv);\n";
+	code += "		vec3 __r1 = cross(__dp2, __n);\n";
+	code += "		vec3 __r2 = cross(__n, __dp1);\n";
+	code += "		float __det = dot(__dp1, __r1);\n";
+	code += vformat("		vec2 __step = max(1.0 / vec2(textureSize(%s, 0)), max(abs(__duv1), abs(__duv2)));\n", tex);
+	code += vformat("		vec2 __slope = vec2(texture(%s, __uv + vec2(__step.x, 0.0)).r - texture(%s, __uv - vec2(__step.x, 0.0)).r, texture(%s, __uv + vec2(0.0, __step.y)).r - texture(%s, __uv - vec2(0.0, __step.y)).r) * (%s * 0.5) / __step;\n", tex, tex, tex, tex, p_input_vars[2]);
+	code += "		vec3 __grad = abs(__det) > 1e-24 ? (__slope.x * (__duv1.x * __r1 + __duv2.x * __r2) + __slope.y * (__duv1.y * __r1 + __duv2.y * __r2)) / __det : vec3(0.0);\n";
+	code += vformat("		%s = normalize(__n - __grad) * __side;\n", p_output_vars[0]);
+	code += "	}\n";
+	return code;
+}
+
+VisualShaderNodeHeightNormal::VisualShaderNodeHeightNormal() {
+	set_input_port_default_value(2, 0.1);
+	simple_decl = false;
+}

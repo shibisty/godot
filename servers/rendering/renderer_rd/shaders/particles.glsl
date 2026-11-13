@@ -45,6 +45,7 @@ struct Attractor {
 #define COLLIDER_TYPE_HEIGHT_FIELD 3
 #define COLLIDER_TYPE_2D_SDF 4
 #define COLLIDER_TYPE_SCREEN_DEPTH 5 // Mariner E22: transform = world -> clip of the view, extents = camera position.
+#define COLLIDER_TYPE_OVERHEAD_MAP 6 // Mariner G1c: transform[0] = box minimum, size; transform[1].x = height.
 
 struct Collider {
 	mat4 transform;
@@ -166,6 +167,7 @@ dst_particles;
 layout(set = 2, binding = 0) uniform texture3D sdf_vec_textures[MAX_3D_TEXTURES];
 layout(set = 2, binding = 1) uniform texture2D height_field_texture;
 layout(set = 2, binding = 2) uniform texture2D screen_collision_texture; // Mariner E22: xyz world normal, w view distance.
+layout(set = 2, binding = 3) uniform texture2D overhead_collision_texture; // Mariner G1c: normalized heights (r, at mipmap 0).
 
 /* SET 3: MATERIAL */
 
@@ -690,6 +692,39 @@ void main() {
 						col = true;
 						normal = n;
 						depth = max(along_ray * abs(dot(ray / max(ray_length, 1e-6), n)), EPSILON);
+					} break;
+					case COLLIDER_TYPE_OVERHEAD_MAP: {
+						// Mariner G1c: the top of the scene from above around the camera (Environment.overhead_map_*):
+						// rain and snow land on roofs, decks and the ground outside the view too. A particle that went
+						// below the surface by less than its own travel and a band is pushed back up along the
+						// surface normal (a particle under a roof, a deck or a bridge is far below the top: untouched).
+						vec4 box = FRAME.colliders[i].transform[0]; // xyz minimum, w size.
+						float box_height = FRAME.colliders[i].transform[1].x;
+						vec3 pos = PARTICLE.xform[3].xyz;
+						vec2 uv = (pos.xz - box.xz) / box.w;
+						if (any(lessThanEqual(uv, vec2(0.0))) || any(greaterThanEqual(uv, vec2(1.0)))) {
+							continue;
+						}
+						float texel = 1.0 / float(textureSize(sampler2D(overhead_collision_texture, SAMPLER_LINEAR_CLAMP), 0).x);
+						float h = box.y + textureLod(sampler2D(overhead_collision_texture, SAMPLER_LINEAR_CLAMP), uv, 0.0).r * box_height;
+						if (h <= box.y + texel * box.w * 0.01) {
+							continue; // Nothing drawn here.
+						}
+						float penetration = h - (pos.y - particle_size);
+						float band = max(particle_size * 0.75, 0.18);
+						float thickness = length(PARTICLE.velocity) * FRAME.delta + band + 0.35;
+						if (penetration <= 0.0 || penetration >= thickness) {
+							continue;
+						}
+						float hx0 = textureLod(sampler2D(overhead_collision_texture, SAMPLER_LINEAR_CLAMP), uv - vec2(texel, 0.0), 0.0).r;
+						float hx1 = textureLod(sampler2D(overhead_collision_texture, SAMPLER_LINEAR_CLAMP), uv + vec2(texel, 0.0), 0.0).r;
+						float hz0 = textureLod(sampler2D(overhead_collision_texture, SAMPLER_LINEAR_CLAMP), uv - vec2(0.0, texel), 0.0).r;
+						float hz1 = textureLod(sampler2D(overhead_collision_texture, SAMPLER_LINEAR_CLAMP), uv + vec2(0.0, texel), 0.0).r;
+						float run = 2.0 * texel * box.w;
+						vec3 n = normalize(vec3(-(hx1 - hx0) * box_height / run, 1.0, -(hz1 - hz0) * box_height / run));
+						col = true;
+						normal = n;
+						depth = max(penetration * n.y, EPSILON);
 					} break;
 				}
 

@@ -1258,6 +1258,38 @@ void RendererEnvironmentStorage::environment_set_color_grading(RID p_env, bool p
 	cg.gamut_mapping = p_gamut_mapping;
 }
 
+// Mariner F3b.
+void RendererEnvironmentStorage::environment_set_color_grading_night_vision(RID p_env, float p_amount, const Color &p_tint, float p_start, float p_end) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	ColorGrading &cg = env->color_grading;
+	cg.night_vision = CLAMP(p_amount, 0.0f, 1.0f);
+	cg.night_vision_tint = p_tint;
+	cg.night_vision_start = MAX(p_start, 1e-8f);
+	cg.night_vision_end = MAX(p_end, 1e-9f);
+}
+
+// Mariner F3c.
+void RendererEnvironmentStorage::environment_set_color_grading_channel_mixer(RID p_env, const Vector3 &p_red, const Vector3 &p_green, const Vector3 &p_blue) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	ColorGrading &cg = env->color_grading;
+	cg.mixer_red = p_red;
+	cg.mixer_green = p_green;
+	cg.mixer_blue = p_blue;
+}
+
+void RendererEnvironmentStorage::environment_set_color_grading_curves(RID p_env, float p_contrast, float p_vibrance, const Vector3 &p_shadow_gamma, const Vector3 &p_mid_point, const Vector3 &p_highlight_scale) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	ColorGrading &cg = env->color_grading;
+	cg.contrast = MAX(p_contrast, 0.0f);
+	cg.vibrance = MAX(p_vibrance, 0.0f);
+	cg.curves_shadow_gamma = p_shadow_gamma.maxf(0.01);
+	cg.curves_mid_point = p_mid_point.maxf(1e-4);
+	cg.curves_highlight_scale = p_highlight_scale.maxf(0.0);
+}
+
 RendererEnvironmentStorage::ColorGrading RendererEnvironmentStorage::environment_get_color_grading(RID p_env) const {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, ColorGrading());
@@ -1269,4 +1301,63 @@ float RendererEnvironmentStorage::environment_get_ssao_gtao_thickness(RID p_env)
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, 0.5);
 	return env->ssao_gtao_thickness;
+}
+
+// Overhead map (Mariner G1a).
+
+void RendererEnvironmentStorage::overhead_map_region(const Vector3 &p_camera, float p_size, float p_height, int p_resolution, Vector3 &r_min, Vector3 &r_max) {
+	const float texel = p_size / float(MAX(p_resolution, 1));
+	const float cx = Math::round(p_camera.x / texel) * texel;
+	const float cz = Math::round(p_camera.z / texel) * texel;
+	const float top = Math::ceil(p_camera.y + p_height * 0.5f);
+	r_min = Vector3(cx - p_size * 0.5f, top - p_height, cz - p_size * 0.5f);
+	r_max = Vector3(cx + p_size * 0.5f, top, cz + p_size * 0.5f);
+}
+
+void RendererEnvironmentStorage::environment_set_overhead_map(RID p_env, bool p_enable, float p_size, float p_height, int p_resolution, uint32_t p_cull_mask, float p_sky_occlusion, float p_sky_occlusion_radius, float p_bias) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	OverheadMapSettings &o = env->overhead_map;
+	o.enabled = p_enable;
+	o.size = CLAMP(p_size, 16.0f, 8192.0f);
+	o.height = CLAMP(p_height, 4.0f, 4096.0f);
+	o.resolution = CLAMP(int(Math::next_power_of_2(uint32_t(MAX(p_resolution, 1)))), 128, 4096);
+	o.cull_mask = p_cull_mask;
+	o.sky_occlusion = CLAMP(p_sky_occlusion, 0.0f, 1.0f);
+	o.sky_occlusion_radius = CLAMP(p_sky_occlusion_radius, 0.5f, o.size * 0.5f);
+	o.bias = CLAMP(p_bias, 0.0f, 16.0f);
+}
+
+RendererEnvironmentStorage::OverheadMapSettings RendererEnvironmentStorage::environment_get_overhead_map(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, OverheadMapSettings());
+	return env->overhead_map;
+}
+
+// Wetness of the world (Mariner G4).
+
+void RendererEnvironmentStorage::environment_set_wetness(RID p_env, float p_wetness) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->wetness = CLAMP(p_wetness, 0.0f, 1.0f);
+}
+
+float RendererEnvironmentStorage::environment_get_wetness(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0.0f);
+	return env->wetness;
+}
+
+// Snow on the world (Mariner G4b).
+
+void RendererEnvironmentStorage::environment_set_snow(RID p_env, float p_snow) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->snow = CLAMP(p_snow, 0.0f, 1.0f);
+}
+
+float RendererEnvironmentStorage::environment_get_snow(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0.0f);
+	return env->snow;
 }

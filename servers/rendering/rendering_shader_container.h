@@ -42,7 +42,7 @@ class RenderingShaderContainer : public RefCounted {
 
 public:
 	static const uint32_t CONTAINER_MAGIC_NUMBER = 0x43535247;
-	static const uint32_t CONTAINER_VERSION = 2;
+	static const uint32_t CONTAINER_VERSION = 3; // Mariner E5d: ReflectionBindingData::array_count.
 
 protected:
 	using RDC = RenderingDeviceCommons;
@@ -76,6 +76,7 @@ protected:
 		uint32_t stages = 0;
 		uint32_t length = 0; // Size of arrays (in total elements), or UBOs (in bytes * total elements).
 		uint32_t writable = 0;
+		uint32_t array_count = 1; // Mariner E5d: arrays of storage buffers.
 
 		bool operator<(const ReflectionBindingData &p_other) const {
 			return binding < p_other.binding;
@@ -181,6 +182,7 @@ protected:
 
 		uint32_t length = 0; // Size of arrays (in total elements), or ubos (in bytes * total elements).
 		bool writable = false;
+		uint32_t array_count = 1; // Mariner E5d: arrays of storage buffers.
 
 		bool operator<(const ReflectUniform &p_other) const {
 			if (binding != p_other.binding) {

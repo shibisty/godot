@@ -2546,7 +2546,7 @@ void RenderingServer::_bind_methods() {
 	/* MULTIMESH API */
 
 	ClassDB::bind_method(D_METHOD("multimesh_create"), &RenderingServer::multimesh_create);
-	ClassDB::bind_method(D_METHOD("multimesh_allocate_data", "multimesh", "instances", "transform_format", "color_format", "custom_data_format", "use_indirect"), &RenderingServer::multimesh_allocate_data, DEFVAL(false), DEFVAL(false), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("multimesh_allocate_data", "multimesh", "instances", "transform_format", "color_format", "custom_data_format", "use_indirect", "custom_data2_format"), &RenderingServer::multimesh_allocate_data, DEFVAL(false), DEFVAL(false), DEFVAL(false), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("multimesh_get_instance_count", "multimesh"), &RenderingServer::multimesh_get_instance_count);
 	ClassDB::bind_method(D_METHOD("multimesh_set_mesh", "multimesh", "mesh"), &RenderingServer::multimesh_set_mesh);
 	ClassDB::bind_method(D_METHOD("multimesh_instance_set_transform", "multimesh", "index", "transform"), &RenderingServer::multimesh_instance_set_transform);
@@ -2561,6 +2561,9 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("multimesh_instance_get_transform_2d", "multimesh", "index"), &RenderingServer::multimesh_instance_get_transform_2d);
 	ClassDB::bind_method(D_METHOD("multimesh_instance_get_color", "multimesh", "index"), &RenderingServer::multimesh_instance_get_color);
 	ClassDB::bind_method(D_METHOD("multimesh_instance_get_custom_data", "multimesh", "index"), &RenderingServer::multimesh_instance_get_custom_data);
+	ClassDB::bind_method(D_METHOD("multimesh_instance_set_custom_data2", "multimesh", "index", "custom_data"), &RenderingServer::multimesh_instance_set_custom_data2); // Mariner E14c.
+	ClassDB::bind_method(D_METHOD("multimesh_instance_get_custom_data2", "multimesh", "index"), &RenderingServer::multimesh_instance_get_custom_data2);
+	ClassDB::bind_method(D_METHOD("multimesh_uses_custom_data2", "multimesh"), &RenderingServer::multimesh_uses_custom_data2);
 	ClassDB::bind_method(D_METHOD("multimesh_set_visible_instances", "multimesh", "visible"), &RenderingServer::multimesh_set_visible_instances);
 	ClassDB::bind_method(D_METHOD("multimesh_get_visible_instances", "multimesh"), &RenderingServer::multimesh_get_visible_instances);
 	ClassDB::bind_method(D_METHOD("multimesh_set_buffer", "multimesh", "buffer"), &RenderingServer::multimesh_set_buffer);
@@ -2611,6 +2614,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("light_set_reverse_cull_face_mode", "light", "enabled"), &RenderingServer::light_set_reverse_cull_face_mode);
 	ClassDB::bind_method(D_METHOD("light_set_shadow_caster_mask", "light", "mask"), &RenderingServer::light_set_shadow_caster_mask);
 	ClassDB::bind_method(D_METHOD("light_set_restir", "light", "enable"), &RenderingServer::light_set_restir);
+	ClassDB::bind_method(D_METHOD("light_set_clip_volume", "light", "enable", "offset", "size"), &RenderingServer::light_set_clip_volume); // Mariner G3.
 	ClassDB::bind_method(D_METHOD("light_set_bake_mode", "light", "bake_mode"), &RenderingServer::light_set_bake_mode);
 	ClassDB::bind_method(D_METHOD("light_set_max_sdfgi_cascade", "light", "cascade"), &RenderingServer::light_set_max_sdfgi_cascade);
 
@@ -2815,6 +2819,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("particles_set_fractional_delta", "particles", "enable"), &RenderingServer::particles_set_fractional_delta);
 	ClassDB::bind_method(D_METHOD("particles_set_collision_base_size", "particles", "size"), &RenderingServer::particles_set_collision_base_size);
 	ClassDB::bind_method(D_METHOD("particles_set_screen_space_collision", "particles", "enable"), &RenderingServer::particles_set_screen_space_collision);
+	ClassDB::bind_method(D_METHOD("particles_set_overhead_map_collision", "particles", "enable"), &RenderingServer::particles_set_overhead_map_collision); // Mariner G1c.
 	ClassDB::bind_method(D_METHOD("particles_set_transform_align", "particles", "align"), &RenderingServer::particles_set_transform_align);
 	ClassDB::bind_method(D_METHOD("particles_set_transform_align_channel_filter", "particles", "channel_filter"), &RenderingServer::particles_set_transform_align_channel_filter);
 	ClassDB::bind_method(D_METHOD("particles_set_transform_align_axis", "particles", "rotation_axis"), &RenderingServer::particles_set_transform_align_axis);
@@ -2932,6 +2937,8 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("camera_set_camera_attributes", "camera", "effects"), &RenderingServer::camera_set_camera_attributes);
 	ClassDB::bind_method(D_METHOD("camera_set_compositor", "camera", "compositor"), &RenderingServer::camera_set_compositor);
 	ClassDB::bind_method(D_METHOD("camera_set_use_vertical_aspect", "camera", "enable"), &RenderingServer::camera_set_use_vertical_aspect);
+	ClassDB::bind_method(D_METHOD("camera_set_clip_plane", "camera", "enable", "plane"), &RenderingServer::camera_set_clip_plane); // Mariner G6.
+	ClassDB::bind_method(D_METHOD("camera_set_raw_output", "camera", "enable"), &RenderingServer::camera_set_raw_output);
 
 	/* VIEWPORT */
 
@@ -3177,8 +3184,14 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_update", "env", "probes_per_frame", "relocation"), &RenderingServer::environment_set_ddgi_update);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_channels", "env", "sky_energy", "lights_energy"), &RenderingServer::environment_set_ddgi_channels);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_sea", "env", "enable", "level", "color"), &RenderingServer::environment_set_ddgi_sea);
+	ClassDB::bind_method(D_METHOD("environment_set_overhead_map", "env", "enable", "size", "height", "resolution", "cull_mask", "sky_occlusion", "sky_occlusion_radius", "bias"), &RenderingServer::environment_set_overhead_map); // Mariner G1a.
+	ClassDB::bind_method(D_METHOD("environment_set_wetness", "env", "wetness"), &RenderingServer::environment_set_wetness); // Mariner G4.
+	ClassDB::bind_method(D_METHOD("environment_set_snow", "env", "snow"), &RenderingServer::environment_set_snow); // Mariner G4b.
 	ClassDB::bind_method(D_METHOD("environment_set_ssao_gtao", "env", "enable", "bent_normals", "thickness"), &RenderingServer::environment_set_ssao_gtao, DEFVAL(0.5));
 	ClassDB::bind_method(D_METHOD("environment_set_color_grading", "env", "enable", "temperature", "tint", "shadows", "midtones", "highlights", "tonal_ranges", "slope", "offset", "power", "saturation", "gamut_mapping"), &RenderingServer::environment_set_color_grading);
+	ClassDB::bind_method(D_METHOD("environment_set_color_grading_night_vision", "env", "amount", "tint", "start", "end"), &RenderingServer::environment_set_color_grading_night_vision);
+	ClassDB::bind_method(D_METHOD("environment_set_color_grading_channel_mixer", "env", "red", "green", "blue"), &RenderingServer::environment_set_color_grading_channel_mixer);
+	ClassDB::bind_method(D_METHOD("environment_set_color_grading_curves", "env", "contrast", "vibrance", "shadow_gamma", "mid_point", "highlight_scale"), &RenderingServer::environment_set_color_grading_curves);
 	ClassDB::bind_method(D_METHOD("environment_set_restir", "env", "enable", "candidates", "spatial_samples", "temporal", "denoise"), &RenderingServer::environment_set_restir);
 	ClassDB::bind_method(D_METHOD("pathtracing_is_supported"), &RenderingServer::pathtracing_is_supported);
 	ClassDB::bind_method(D_METHOD("directional_shadow_cache_set_enabled", "enabled"), &RenderingServer::directional_shadow_cache_set_enabled);
@@ -3307,6 +3320,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_dof_blur", "camera_attributes", "far_enable", "far_distance", "far_transition", "near_enable", "near_distance", "near_transition", "amount"), &RenderingServer::camera_attributes_set_dof_blur);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_exposure", "camera_attributes", "multiplier", "normalization"), &RenderingServer::camera_attributes_set_exposure);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure", "camera_attributes", "enable", "min_sensitivity", "max_sensitivity", "speed", "scale"), &RenderingServer::camera_attributes_set_auto_exposure);
+	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_histogram", "camera_attributes", "histogram", "low_percentile", "high_percentile", "center_weight", "speed_dark"), &RenderingServer::camera_attributes_set_auto_exposure_histogram); // Mariner G2.
 
 	BIND_ENUM_CONSTANT(RSE::DOF_BOKEH_BOX);
 	BIND_ENUM_CONSTANT(RSE::DOF_BOKEH_HEXAGON);
@@ -3817,6 +3831,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/cache", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/cache_static_after_frames", PROPERTY_HINT_RANGE, "1,600,1"), 30);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/lights_and_shadows/directional_shadow/cache_light_angle_threshold", PROPERTY_HINT_RANGE, "0,5,0.01,degrees"), 0.1);
+	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/cache_scrolling", true); // Mariner E10c.
 	// Mariner E11: screen space contact shadows (Forward+).
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/contact_shadows/steps", PROPERTY_HINT_RANGE, "4,64,1"), 16);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/lights_and_shadows/contact_shadows/thickness", PROPERTY_HINT_RANGE, "0.001,0.2,0.001"), 0.02);
@@ -3871,6 +3886,8 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/camera/depth_of_field/depth_of_field_bokeh_shape", PROPERTY_HINT_ENUM, "Box (Fast),Hexagon (Average),Circle (Slowest)"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/camera/depth_of_field/depth_of_field_bokeh_quality", PROPERTY_HINT_ENUM, "Very Low (Fastest),Low (Fast),Medium (Average),High (Slow)"), 1);
 	GLOBAL_DEF("rendering/camera/depth_of_field/depth_of_field_use_jitter", false);
+	// Mariner F2: gathered depth of field (two layers, CoC tiles; Forward+, one view) or the classic bokeh.
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/camera/depth_of_field/depth_of_field_mode", PROPERTY_HINT_ENUM, "Bokeh (Classic),Gather"), 1);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssao/quality", PROPERTY_HINT_ENUM, "Very Low (Fast),Low (Fast),Medium (Average),High (Slow),Ultra (Custom)"), 2);
 	GLOBAL_DEF("rendering/environment/ssao/half_size", true);
@@ -3924,7 +3941,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/scaling_3d/dynamic_resolution/min_scale", PROPERTY_HINT_RANGE, "0.25,1.0,0.01"), 0.5);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/scaling_3d/fsr_sharpness", PROPERTY_HINT_RANGE, "0,2,0.01"), 0.2f);
 
-	// Raytracing scene (TLAS of the visible scene for compositor effects, Forward+ on Vulkan with ray query support).
+	// Raytracing scene (TLAS of the visible scene for compositor effects, Forward+ on Vulkan or Direct3D 12 with ray query support).
 	GLOBAL_DEF_RST("rendering/raytracing/scene_acceleration_structures", false);
 	GLOBAL_DEF("rendering/raytracing/include_indirect_multimesh", false); // Mariner E12 DG2.
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/raytracing/multimesh_merged_blas_max_triangles", PROPERTY_HINT_RANGE, "0,16777216,1"), 1048576);

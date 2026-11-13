@@ -203,6 +203,7 @@ uint multimesh_stride() {
 	uint stride = sc_multimesh_format_2d() ? 2 : 3;
 	stride += sc_multimesh_has_color() ? 1 : 0;
 	stride += sc_multimesh_has_custom_data() ? 1 : 0;
+	stride += sc_multimesh_has_custom_data2() ? 1 : 0; // Mariner E14c.
 	return stride;
 }
 
@@ -277,6 +278,7 @@ void vertex_shader(in vec3 vertex,
 		in uint scene_directional_light_count,
 		out vec4 screen_position_output) {
 	vec4 instance_custom = vec4(0.0);
+	vec4 instance_custom2 = vec4(0.0); // Mariner E14c.
 #if defined(COLOR_USED)
 	vec4 color_highp = color_attrib;
 #endif
@@ -369,6 +371,9 @@ void vertex_shader(in vec3 vertex,
 
 		if (sc_multimesh_has_custom_data()) {
 			instance_custom = transforms.data[offset];
+		}
+		if (sc_multimesh_has_custom_data2()) {
+			instance_custom2 = transforms.data[offset + 1]; // Mariner E14c.
 		}
 
 #endif
@@ -642,6 +647,11 @@ void vertex_shader(in vec3 vertex,
 #else
 	gl_Position = projection_matrix * vec4(vertex_interp, 1.0);
 #endif // OVERRIDE_POSITION
+
+#ifdef USE_CLIP_PLANE
+	// Mariner G6: the camera's clip plane (planar reflections: what is behind the mirror).
+	gl_ClipDistance[0] = dot(vec4(vertex_interp, 1.0), scene_data.clip_plane);
+#endif
 
 #if defined(Z_CLIP_SCALE_USED) && !defined(SHADOW_PASS)
 	gl_Position.z = mix(gl_Position.w, gl_Position.z, z_clip_scale);
@@ -1028,6 +1038,16 @@ layout(location = 0) out vec4 frag_color;
 
 #include "../scene_forward_aa_inc.glsl"
 
+// Mariner M6, F5: written by the material in every pass, read by the lights (scene_forward_lights_inc.glsl).
+#ifdef LIGHT_SHEEN_USED
+vec3 sheen_color = vec3(0.0);
+float sheen_roughness = 0.5;
+#endif
+#ifdef LIGHT_IRIDESCENCE_USED
+float iridescence = 0.0;
+#endif
+#define MARINER_MATERIAL_GLOBALS
+
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED) // && !defined(USE_VERTEX_LIGHTING)
 
 // Default to SPECULAR_SCHLICK_GGX.
@@ -1139,6 +1159,9 @@ void main() {
 #endif
 	vec3 albedo_highp = vec3(1.0);
 	vec3 backlight_highp = vec3(0.0);
+	// Mariner G1b: SKY_OCCLUSION / OVERHEAD_COVER exist for compatibility (no overhead map in this renderer).
+	float sky_occlusion_builtin = 1.0;
+	float overhead_cover_builtin = 0.0;
 	// Mariner E16: MAIN_LIGHT_DIRECTION / MAIN_LIGHT_SHADOW of the fragment function: the first directional light.
 	vec3 main_light_direction = scene_data.directional_light_count > 0 ? directional_lights.data[0].direction : vec3(0.0, 0.0, 1.0);
 	float main_light_shadow = 1.0;
@@ -1153,6 +1176,10 @@ void main() {
 	float rim_tint_highp = 0.0;
 	float clearcoat_highp = 0.0;
 	float clearcoat_roughness_highp = 0.0;
+#ifdef LIGHT_IRIDESCENCE_USED
+	float iridescence_ior = 1.3; // Mariner F5.
+	float iridescence_thickness = 400.0;
+#endif
 	float anisotropy_highp = 0.0;
 	vec2 anisotropy_flow_highp = vec2(1.0, 0.0);
 #ifdef PREMUL_ALPHA_USED
@@ -1161,6 +1188,9 @@ void main() {
 	vec4 fog_highp = vec4(0.0);
 #if defined(CUSTOM_RADIANCE_USED)
 	vec4 custom_radiance_highp = vec4(0.0);
+#endif
+#if defined(CUSTOM_REFLECTION_USED)
+	vec4 custom_reflection_highp = vec4(0.0); // Mariner G6.
 #endif
 #if defined(CUSTOM_IRRADIANCE_USED)
 	vec4 custom_irradiance_highp = vec4(0.0);
@@ -1291,8 +1321,8 @@ void main() {
 	hvec2 anisotropy_flow = hvec2(anisotropy_flow_highp);
 	half ao = half(ao_highp);
 	half ao_light_affect = half(ao_light_affect_highp);
-#ifdef MICRO_SHADOWING
-	micro_shadow_ao = ao; // Mariner M2.
+#if defined(MICRO_SHADOWING) && !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
+	micro_shadow_ao = ao; // Mariner M2 (the lights exist only in shaded colour passes).
 #endif
 	half alpha = half(alpha_highp);
 	half normal_map_depth = half(normal_map_depth_highp);
@@ -1876,15 +1906,27 @@ void main() {
 	indirect_specular_light *= specular_occlusion;
 #endif // BENT_NORMAL_MAP_USED
 #endif // USE_SPECULAR_OCCLUSION
+#ifdef LIGHT_SHEEN_USED
+	sheen_ambient = vec3(ambient_light); // Mariner M6.
+#endif
 	ambient_light *= albedo.rgb;
 
 #endif // !AMBIENT_LIGHT_DISABLED
+
+#if defined(CUSTOM_REFLECTION_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+	// Mariner G6: the material's own reflection (a planar reflection) over the probes' and the sky's.
+	indirect_specular_light = mix(indirect_specular_light, hvec3(custom_reflection_highp.rgb), half(clamp(custom_reflection_highp.a, 0.0, 1.0)));
+#endif
 
 	// convert ao to direct light ao
 	ao = mix(half(1.0), ao, ao_light_affect);
 
 	//this saves some VGPRs
 	hvec3 f0 = F0(metallic, specular, albedo);
+
+#ifdef LIGHT_IRIDESCENCE_USED
+	iridescence_fresnel = iridescence_fresnel_eval(iridescence_ior, clamp(dot(vec3(normal), vec3(view)), 0.0001, 1.0), iridescence_thickness, vec3(f0)); // Mariner F5.
+#endif
 
 #ifdef LIGHT_CLEARCOAT_USED
 	// The base layer's f0 is computed assuming an interface from air to an IOR
@@ -1912,7 +1954,11 @@ void main() {
 		half a004 = min(r.x * r.x, exp2(half(-9.28) * ndotv)) * r.x + r.y;
 		hvec2 env = hvec2(-1.04, 1.04) * a004 + r.zw;
 
+#ifdef LIGHT_IRIDESCENCE_USED
+		indirect_specular_light *= mix(env.x * f0 + env.y * clamp(half(50.0) * f0.g, metallic, half(1.0)), hvec3(iridescence_fresnel) * (env.x + env.y), half(iridescence)); // Mariner F5.
+#else
 		indirect_specular_light *= env.x * f0 + env.y * clamp(half(50.0) * f0.g, metallic, half(1.0));
+#endif
 
 #ifdef LIGHT_CLEARCOAT_USED
 		half geo_NdotV = max(dot(geo_normal, view), half(0.0001)); // We want to use geometric normal, not normal_map
@@ -2338,6 +2384,21 @@ void main() {
 	// apply metallic
 	diffuse_light *= half(1.0) - metallic;
 	ambient_light *= half(1.0) - metallic;
+
+#if defined(LIGHT_SHEEN_USED) && !defined(MODE_UNSHADED)
+	{
+		// Mariner M6: as Forward+, with a fit of the cloth directional albedo instead of the DFG table (error < 0.16).
+		float sheen_nov = clamp(dot(vec3(normal), vec3(view)), 0.0001, 1.0);
+		float sheen_e = min(1.0, (1.5034 - 1.0391 * sheen_roughness) * exp(-(12.483 / (sheen_roughness + 0.9523) - 5.2267) * sheen_nov));
+		half sheen_scaling = half(clamp(1.0 - max(sheen_color.r, max(sheen_color.g, sheen_color.b)) * sheen_e, 0.0, 1.0));
+		diffuse_light *= sheen_scaling;
+		ambient_light *= sheen_scaling;
+		direct_specular_light *= sheen_scaling;
+		indirect_specular_light *= sheen_scaling;
+		direct_specular_light += hvec3(sheen_light) * ao;
+		indirect_specular_light += hvec3(sheen_ambient * sheen_color * sheen_e);
+	}
+#endif
 
 #ifdef MODE_MULTIPLE_RENDER_TARGETS
 

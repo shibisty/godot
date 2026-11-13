@@ -418,6 +418,10 @@ public:
 	void srgb_to_linear();
 	void linear_to_srgb();
 	void normal_map_to_xy();
+	// Mariner M5: height of the relief a tangent-space normal map describes (in texels, times p_depth; Poisson
+	// integration of its slopes), and the cavity occlusion of that relief (horizons over p_radius texels).
+	Ref<Image> normal_map_to_height(float p_depth = 1.0, bool p_invert_green = false) const;
+	Ref<Image> normal_map_to_cavity(float p_depth = 1.0, int p_radius = 16, bool p_invert_green = false) const;
 	Ref<Image> rgbe_to_srgb();
 	Ref<Image> get_image_from_mipmap(int p_mipmap) const;
 	void bump_map_to_normal_map(float bump_scale = 1.0);

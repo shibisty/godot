@@ -48,6 +48,12 @@ private:
 		float auto_exposure_adjust_speed = 1.0;
 		float auto_exposure_scale = 1.0;
 		uint64_t auto_exposure_version = 0;
+		// Mariner G2: exposure from a histogram of the log luminance.
+		bool auto_exposure_histogram = false;
+		float auto_exposure_low_percentile = 0.5; // The darker part of the frame left out (fraction of the weight).
+		float auto_exposure_high_percentile = 0.98; // The brighter part above it left out.
+		float auto_exposure_center_weight = 0.5; // 0: the whole frame alike, 1: a Gaussian around the center.
+		float auto_exposure_speed_dark = 0.25; // Adaptation to a darker scene (auto_exposure_adjust_speed: to a brighter).
 
 		bool dof_blur_far_enabled = false;
 		float dof_blur_far_distance = 10;
@@ -173,6 +179,16 @@ public:
 	float camera_attributes_get_auto_exposure_adjust_speed(RID p_camera_attributes);
 	float camera_attributes_get_auto_exposure_scale(RID p_camera_attributes);
 	uint64_t camera_attributes_get_auto_exposure_version(RID p_camera_attributes);
+	// Mariner G2.
+	struct AutoExposureHistogram {
+		bool enabled = false;
+		float low_percentile = 0.5;
+		float high_percentile = 0.98;
+		float center_weight = 0.5;
+		float speed_dark = 0.25;
+	};
+	void camera_attributes_set_auto_exposure_histogram(RID p_camera_attributes, bool p_histogram, float p_low_percentile, float p_high_percentile, float p_center_weight, float p_speed_dark);
+	AutoExposureHistogram camera_attributes_get_auto_exposure_histogram(RID p_camera_attributes);
 
 	_FORCE_INLINE_ bool camera_attributes_uses_auto_exposure(RID p_camera_attributes) {
 		CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);

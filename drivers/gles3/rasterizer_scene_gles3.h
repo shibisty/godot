@@ -107,6 +107,10 @@ struct RenderDataGLES3 {
 	Projection cam_projection;
 	bool cam_orthogonal = false;
 	uint32_t camera_visible_layers = 0xFFFFFFFF;
+	// Mariner G6: RS.camera_set_clip_plane() (world space; desktop OpenGL only) and RS.camera_set_raw_output().
+	bool use_clip_plane = false;
+	Plane clip_plane;
+	bool raw_output = false;
 
 	// For billboards to cast correct shadows.
 	Transform3D main_cam_transform;
@@ -451,6 +455,9 @@ private:
 			float luminance_multiplier;
 			uint32_t camera_visible_layers;
 			bool pancake_shadows;
+
+			float clip_plane[4]; // Mariner G6: clip space; (0, 0, 0, 1) - none.
+			float weather[4]; // Mariner G4 / G4b: x the wetness, y the snow; zw reserved.
 		};
 		static_assert(sizeof(UBO) % 16 == 0, "Scene UBO size must be a multiple of 16 bytes");
 		static_assert(sizeof(UBO) < 16384, "Scene UBO size must be 16384 bytes or smaller");

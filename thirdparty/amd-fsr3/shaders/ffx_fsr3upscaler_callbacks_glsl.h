@@ -282,8 +282,8 @@ FfxUInt32x2 SPD_RenderSize()
 }
 #endif // #if defined(FSR3UPSCALER_BIND_CB_SPD)
 
-layout (set = 0, binding = 1000) uniform sampler s_PointClamp;
-layout (set = 0, binding = 1001) uniform sampler s_LinearClamp;
+layout (set = 0, binding = 900) uniform sampler s_PointClamp;
+layout (set = 0, binding = 901) uniform sampler s_LinearClamp;
 
 #if defined(FSR3UPSCALER_BIND_SRV_SPD_MIPS)
 layout (set = 0, binding = FSR3UPSCALER_BIND_SRV_SPD_MIPS) uniform texture2D  r_spd_mips;

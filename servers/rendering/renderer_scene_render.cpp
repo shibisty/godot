@@ -777,6 +777,18 @@ void RendererSceneRender::environment_set_color_grading(RID p_env, bool p_enable
 	environment_storage.environment_set_color_grading(p_env, p_enable, p_temperature, p_tint, p_shadows, p_midtones, p_highlights, p_tonal_ranges, p_slope, p_offset, p_power, p_saturation, p_gamut_mapping);
 }
 
+void RendererSceneRender::environment_set_color_grading_night_vision(RID p_env, float p_amount, const Color &p_tint, float p_start, float p_end) {
+	environment_storage.environment_set_color_grading_night_vision(p_env, p_amount, p_tint, p_start, p_end);
+}
+
+void RendererSceneRender::environment_set_color_grading_channel_mixer(RID p_env, const Vector3 &p_red, const Vector3 &p_green, const Vector3 &p_blue) {
+	environment_storage.environment_set_color_grading_channel_mixer(p_env, p_red, p_green, p_blue);
+}
+
+void RendererSceneRender::environment_set_color_grading_curves(RID p_env, float p_contrast, float p_vibrance, const Vector3 &p_shadow_gamma, const Vector3 &p_mid_point, const Vector3 &p_highlight_scale) {
+	environment_storage.environment_set_color_grading_curves(p_env, p_contrast, p_vibrance, p_shadow_gamma, p_mid_point, p_highlight_scale);
+}
+
 RendererEnvironmentStorage::ColorGrading RendererSceneRender::environment_get_color_grading(RID p_env) const {
 	return environment_storage.environment_get_color_grading(p_env);
 }
@@ -787,6 +799,33 @@ float RendererSceneRender::environment_get_ssao_gtao_thickness(RID p_env) const 
 
 void RendererSceneRender::environment_set_ddgi_sea(RID p_env, bool p_enable, float p_level, const Color &p_color) {
 	environment_storage.environment_set_ddgi_sea(p_env, p_enable, p_level, p_color);
+}
+
+// Mariner G1a.
+void RendererSceneRender::environment_set_overhead_map(RID p_env, bool p_enable, float p_size, float p_height, int p_resolution, uint32_t p_cull_mask, float p_sky_occlusion, float p_sky_occlusion_radius, float p_bias) {
+	environment_storage.environment_set_overhead_map(p_env, p_enable, p_size, p_height, p_resolution, p_cull_mask, p_sky_occlusion, p_sky_occlusion_radius, p_bias);
+}
+
+RendererEnvironmentStorage::OverheadMapSettings RendererSceneRender::environment_get_overhead_map(RID p_env) const {
+	return environment_storage.environment_get_overhead_map(p_env);
+}
+
+// Mariner G4.
+void RendererSceneRender::environment_set_wetness(RID p_env, float p_wetness) {
+	environment_storage.environment_set_wetness(p_env, p_wetness);
+}
+
+float RendererSceneRender::environment_get_wetness(RID p_env) const {
+	return environment_storage.environment_get_wetness(p_env);
+}
+
+// Mariner G4b.
+void RendererSceneRender::environment_set_snow(RID p_env, float p_snow) {
+	environment_storage.environment_set_snow(p_env, p_snow);
+}
+
+float RendererSceneRender::environment_get_snow(RID p_env) const {
+	return environment_storage.environment_get_snow(p_env);
 }
 
 bool RendererSceneRender::environment_get_ddgi_enabled(RID p_env) const {

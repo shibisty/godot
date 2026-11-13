@@ -598,7 +598,8 @@ String ShaderRD::_version_get_sha1(Version *p_version) const {
 }
 
 static const char *shader_file_header = "GDSC";
-static const uint32_t cache_file_version = 4;
+// Mariner E5d: 5 - RenderingShaderContainer::CONTAINER_VERSION 3 (an older cache is a silent miss, not an error).
+static const uint32_t cache_file_version = 5;
 
 String ShaderRD::_get_cache_file_relative_path(Version *p_version, int p_group, const String &p_api_name) {
 	String sha1 = _version_get_sha1(p_version);
@@ -713,6 +714,15 @@ void ShaderRD::_allocate_placeholders(Version *p_version, int p_group) {
 
 // Try to compile all variants for a given group.
 // Will skip variants that are disabled.
+// Mariner fix: shader variants compile on their own thread pool. version_get_shader() waits for the compile group of
+// a version while holding the version mutex; pipeline compilation tasks of the same shader on the main pool block on
+// that mutex, so when they take every main pool thread the queued compile tasks never run (deadlock at startup, seen
+// with 2 worker threads). Same approach as upstream PR #103506, kept separate from the main pool.
+static WorkerThreadPool *_get_compilation_pool() {
+	static WorkerThreadPool *pool = WorkerThreadPool::get_named_pool(SNAME("ShaderCompilationPool")); // Thread-safe initialization (C++11).
+	return pool;
+}
+
 void ShaderRD::_compile_version_start(Version *p_version, int p_group) {
 	if (!group_enabled[p_group]) {
 		return;
@@ -732,7 +742,7 @@ void ShaderRD::_compile_version_start(Version *p_version, int p_group) {
 	compile_data.version = p_version;
 	compile_data.group = p_group;
 
-	WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &ShaderRD::_compile_variant, compile_data, group_to_variant_map[p_group].size(), -1, true, SNAME("ShaderCompilation"));
+	WorkerThreadPool::GroupID group_task = _get_compilation_pool()->add_template_group_task(this, &ShaderRD::_compile_variant, compile_data, group_to_variant_map[p_group].size(), -1, true, SNAME("ShaderCompilation"));
 	p_version->group_compilation_tasks.write[p_group] = group_task;
 }
 
@@ -741,7 +751,7 @@ void ShaderRD::_compile_version_end(Version *p_version, int p_group) {
 		return;
 	}
 	WorkerThreadPool::GroupID group_task = p_version->group_compilation_tasks[p_group];
-	WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
+	_get_compilation_pool()->wait_for_group_task_completion(group_task);
 	p_version->group_compilation_tasks.write[p_group] = 0;
 
 	bool all_valid = true;

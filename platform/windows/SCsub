@@ -123,6 +123,15 @@ env.Depends(prog, "godot.manifest")
 if env.msvc:
     env.Depends(prog, "godot.natvis")
 
+# Mariner fixes: with MSVC the prebuilt libraries are passed in LINKFLAGS, so SCons doesn't relink the executable when
+# Mesa NIR is replaced (e.g. by the ray tracing build of patch E5d). Make it a dependency.
+if env["d3d12"]:
+    for mesa_dir in [env["mesa_libs"] + "-" + env["arch"] + ("-msvc" if env.msvc else "-gcc"), env["mesa_libs"]]:
+        mesa_lib = mesa_dir + "/bin/libNIR.windows." + env["arch"] + (".lib" if env.msvc else ".a")
+        if os.path.exists(mesa_lib):
+            env.Depends(prog, mesa_lib)
+            break
+
 # Build console wrapper app.
 if env["windows_subsystem"] == "gui":
     if env.editor_build:
@@ -175,6 +184,16 @@ if env["d3d12"]:
             env.CommandNoCache(
                 target_dir + "/" + dll,
                 env["agility_sdk_path"] + "/build/native/bin/" + agility_arch_subdir + "/" + dll,
+                Copy("$TARGET", "$SOURCE"),
+            )
+
+    # Mariner E7b: DirectX Shader Compiler, loaded at runtime to compile the HLSL of mesh pipelines (task / mesh
+    # shaders); dxil.dll validates and signs its output.
+    if env["dxc_path"] != "" and os.path.exists(env["dxc_path"]):
+        for dll in ["dxcompiler.dll", "dxil.dll"]:
+            env.CommandNoCache(
+                "#bin/" + dll,
+                env["dxc_path"] + "/bin/" + dxc_arch_subdir + "/" + dll,
                 Copy("$TARGET", "$SOURCE"),
             )
 

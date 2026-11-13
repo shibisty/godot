@@ -1173,6 +1173,9 @@ Ref<Texture> Environment::get_adjustment_color_correction() const {
 
 void Environment::_update_color_grading() {
 	RS::get_singleton()->environment_set_color_grading(environment, color_grading_enabled, color_grading_temperature, color_grading_tint, color_grading_shadows, color_grading_midtones, color_grading_highlights, color_grading_tonal_ranges, color_grading_slope, color_grading_offset, color_grading_power, color_grading_saturation, color_grading_gamut_mapping);
+	RS::get_singleton()->environment_set_color_grading_night_vision(environment, color_grading_night_vision, color_grading_night_vision_tint, color_grading_night_vision_start, color_grading_night_vision_end); // Mariner F3b.
+	RS::get_singleton()->environment_set_color_grading_channel_mixer(environment, color_grading_mixer_red, color_grading_mixer_green, color_grading_mixer_blue); // Mariner F3c.
+	RS::get_singleton()->environment_set_color_grading_curves(environment, color_grading_contrast, color_grading_vibrance, color_grading_curves_shadow_gamma, color_grading_curves_mid_point, color_grading_curves_highlight_scale);
 }
 
 void Environment::set_color_grading_enabled(bool p_value) {
@@ -1281,6 +1284,117 @@ void Environment::set_color_grading_gamut_mapping(bool p_value) {
 
 bool Environment::is_color_grading_gamut_mapping() const {
 	return color_grading_gamut_mapping;
+}
+
+// Mariner F3b.
+void Environment::set_color_grading_night_vision(float p_value) {
+	color_grading_night_vision = CLAMP(p_value, 0.0f, 1.0f);
+	_update_color_grading();
+}
+
+float Environment::get_color_grading_night_vision() const {
+	return color_grading_night_vision;
+}
+
+void Environment::set_color_grading_night_vision_tint(const Color &p_value) {
+	color_grading_night_vision_tint = p_value;
+	_update_color_grading();
+}
+
+Color Environment::get_color_grading_night_vision_tint() const {
+	return color_grading_night_vision_tint;
+}
+
+void Environment::set_color_grading_night_vision_start(float p_value) {
+	color_grading_night_vision_start = MAX(p_value, 1e-8f);
+	_update_color_grading();
+}
+
+float Environment::get_color_grading_night_vision_start() const {
+	return color_grading_night_vision_start;
+}
+
+void Environment::set_color_grading_night_vision_end(float p_value) {
+	color_grading_night_vision_end = MAX(p_value, 1e-9f);
+	_update_color_grading();
+}
+
+float Environment::get_color_grading_night_vision_end() const {
+	return color_grading_night_vision_end;
+}
+
+// Mariner F3c.
+
+void Environment::set_color_grading_mixer_red(const Vector3 &p_value) {
+	color_grading_mixer_red = p_value;
+	_update_color_grading();
+}
+
+Vector3 Environment::get_color_grading_mixer_red() const {
+	return color_grading_mixer_red;
+}
+
+void Environment::set_color_grading_mixer_green(const Vector3 &p_value) {
+	color_grading_mixer_green = p_value;
+	_update_color_grading();
+}
+
+Vector3 Environment::get_color_grading_mixer_green() const {
+	return color_grading_mixer_green;
+}
+
+void Environment::set_color_grading_mixer_blue(const Vector3 &p_value) {
+	color_grading_mixer_blue = p_value;
+	_update_color_grading();
+}
+
+Vector3 Environment::get_color_grading_mixer_blue() const {
+	return color_grading_mixer_blue;
+}
+
+void Environment::set_color_grading_contrast(float p_value) {
+	color_grading_contrast = MAX(p_value, 0.0f);
+	_update_color_grading();
+}
+
+float Environment::get_color_grading_contrast() const {
+	return color_grading_contrast;
+}
+
+void Environment::set_color_grading_vibrance(float p_value) {
+	color_grading_vibrance = MAX(p_value, 0.0f);
+	_update_color_grading();
+}
+
+float Environment::get_color_grading_vibrance() const {
+	return color_grading_vibrance;
+}
+
+void Environment::set_color_grading_curves_shadow_gamma(const Vector3 &p_value) {
+	color_grading_curves_shadow_gamma = p_value.maxf(0.01);
+	_update_color_grading();
+}
+
+Vector3 Environment::get_color_grading_curves_shadow_gamma() const {
+	return color_grading_curves_shadow_gamma;
+}
+
+void Environment::set_color_grading_curves_mid_point(const Vector3 &p_value) {
+	color_grading_curves_mid_point = p_value.maxf(1e-4);
+	_update_color_grading();
+}
+
+Vector3 Environment::get_color_grading_curves_mid_point() const {
+	return color_grading_curves_mid_point;
+}
+
+void Environment::set_color_grading_curves_highlight_scale(const Vector3 &p_value) {
+	color_grading_curves_highlight_scale = p_value.maxf(0.0);
+	_update_color_grading();
+}
+
+Vector3 Environment::get_color_grading_curves_highlight_scale() const {
+	return color_grading_curves_highlight_scale;
 }
 
 void Environment::_update_adjustment() {
@@ -1518,6 +1632,106 @@ void Environment::_update_ddgi() {
 	RS::get_singleton()->environment_set_ddgi_update(environment, ddgi_probes_per_frame, ddgi_relocation);
 	RS::get_singleton()->environment_set_ddgi_channels(environment, ddgi_sky_energy, ddgi_lights_energy);
 	RS::get_singleton()->environment_set_ddgi_sea(environment, ddgi_sea_enabled, ddgi_sea_level, ddgi_sea_color);
+}
+
+// Wetness of the world (Mariner G4).
+
+void Environment::set_wetness(float p_wetness) {
+	wetness = CLAMP(p_wetness, 0.0f, 1.0f);
+	RS::get_singleton()->environment_set_wetness(environment, wetness);
+}
+
+float Environment::get_wetness() const {
+	return wetness;
+}
+
+// Snow on the world (Mariner G4b).
+
+void Environment::set_snow(float p_snow) {
+	snow = CLAMP(p_snow, 0.0f, 1.0f);
+	RS::get_singleton()->environment_set_snow(environment, snow);
+}
+
+float Environment::get_snow() const {
+	return snow;
+}
+
+// Overhead map (Mariner G1a).
+
+void Environment::set_overhead_map_enabled(bool p_enabled) {
+	overhead_map_enabled = p_enabled;
+	_update_overhead_map();
+}
+
+bool Environment::is_overhead_map_enabled() const {
+	return overhead_map_enabled;
+}
+
+void Environment::set_overhead_map_size(float p_size) {
+	overhead_map_size = CLAMP(p_size, 16.0f, 8192.0f);
+	_update_overhead_map();
+}
+
+float Environment::get_overhead_map_size() const {
+	return overhead_map_size;
+}
+
+void Environment::set_overhead_map_height(float p_height) {
+	overhead_map_height = CLAMP(p_height, 4.0f, 4096.0f);
+	_update_overhead_map();
+}
+
+float Environment::get_overhead_map_height() const {
+	return overhead_map_height;
+}
+
+void Environment::set_overhead_map_resolution(int p_resolution) {
+	overhead_map_resolution = CLAMP(int(Math::next_power_of_2(uint32_t(MAX(p_resolution, 1)))), 128, 4096);
+	_update_overhead_map();
+}
+
+int Environment::get_overhead_map_resolution() const {
+	return overhead_map_resolution;
+}
+
+void Environment::set_overhead_map_cull_mask(uint32_t p_mask) {
+	overhead_map_cull_mask = p_mask;
+	_update_overhead_map();
+}
+
+uint32_t Environment::get_overhead_map_cull_mask() const {
+	return overhead_map_cull_mask;
+}
+
+void Environment::set_overhead_map_sky_occlusion(float p_amount) {
+	overhead_map_sky_occlusion = CLAMP(p_amount, 0.0f, 1.0f);
+	_update_overhead_map();
+}
+
+float Environment::get_overhead_map_sky_occlusion() const {
+	return overhead_map_sky_occlusion;
+}
+
+void Environment::set_overhead_map_sky_occlusion_radius(float p_radius) {
+	overhead_map_sky_occlusion_radius = MAX(p_radius, 0.5f);
+	_update_overhead_map();
+}
+
+float Environment::get_overhead_map_sky_occlusion_radius() const {
+	return overhead_map_sky_occlusion_radius;
+}
+
+void Environment::set_overhead_map_bias(float p_bias) {
+	overhead_map_bias = CLAMP(p_bias, 0.0f, 16.0f);
+	_update_overhead_map();
+}
+
+float Environment::get_overhead_map_bias() const {
+	return overhead_map_bias;
+}
+
+void Environment::_update_overhead_map() {
+	RS::get_singleton()->environment_set_overhead_map(environment, overhead_map_enabled, overhead_map_size, overhead_map_height, overhead_map_resolution, overhead_map_cull_mask, overhead_map_sky_occlusion, overhead_map_sky_occlusion_radius, overhead_map_bias);
 }
 
 // Private methods, constructor and destructor
@@ -2067,6 +2281,30 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_color_grading_saturation"), &Environment::get_color_grading_saturation);
 	ClassDB::bind_method(D_METHOD("set_color_grading_gamut_mapping", "value"), &Environment::set_color_grading_gamut_mapping);
 	ClassDB::bind_method(D_METHOD("is_color_grading_gamut_mapping"), &Environment::is_color_grading_gamut_mapping);
+	ClassDB::bind_method(D_METHOD("set_color_grading_night_vision", "value"), &Environment::set_color_grading_night_vision);
+	ClassDB::bind_method(D_METHOD("get_color_grading_night_vision"), &Environment::get_color_grading_night_vision);
+	ClassDB::bind_method(D_METHOD("set_color_grading_night_vision_tint", "value"), &Environment::set_color_grading_night_vision_tint);
+	ClassDB::bind_method(D_METHOD("get_color_grading_night_vision_tint"), &Environment::get_color_grading_night_vision_tint);
+	ClassDB::bind_method(D_METHOD("set_color_grading_night_vision_start", "value"), &Environment::set_color_grading_night_vision_start);
+	ClassDB::bind_method(D_METHOD("get_color_grading_night_vision_start"), &Environment::get_color_grading_night_vision_start);
+	ClassDB::bind_method(D_METHOD("set_color_grading_night_vision_end", "value"), &Environment::set_color_grading_night_vision_end);
+	ClassDB::bind_method(D_METHOD("get_color_grading_night_vision_end"), &Environment::get_color_grading_night_vision_end);
+	ClassDB::bind_method(D_METHOD("set_color_grading_mixer_red", "value"), &Environment::set_color_grading_mixer_red);
+	ClassDB::bind_method(D_METHOD("get_color_grading_mixer_red"), &Environment::get_color_grading_mixer_red);
+	ClassDB::bind_method(D_METHOD("set_color_grading_mixer_green", "value"), &Environment::set_color_grading_mixer_green);
+	ClassDB::bind_method(D_METHOD("get_color_grading_mixer_green"), &Environment::get_color_grading_mixer_green);
+	ClassDB::bind_method(D_METHOD("set_color_grading_mixer_blue", "value"), &Environment::set_color_grading_mixer_blue);
+	ClassDB::bind_method(D_METHOD("get_color_grading_mixer_blue"), &Environment::get_color_grading_mixer_blue);
+	ClassDB::bind_method(D_METHOD("set_color_grading_contrast", "value"), &Environment::set_color_grading_contrast);
+	ClassDB::bind_method(D_METHOD("get_color_grading_contrast"), &Environment::get_color_grading_contrast);
+	ClassDB::bind_method(D_METHOD("set_color_grading_vibrance", "value"), &Environment::set_color_grading_vibrance);
+	ClassDB::bind_method(D_METHOD("get_color_grading_vibrance"), &Environment::get_color_grading_vibrance);
+	ClassDB::bind_method(D_METHOD("set_color_grading_curves_shadow_gamma", "value"), &Environment::set_color_grading_curves_shadow_gamma);
+	ClassDB::bind_method(D_METHOD("get_color_grading_curves_shadow_gamma"), &Environment::get_color_grading_curves_shadow_gamma);
+	ClassDB::bind_method(D_METHOD("set_color_grading_curves_mid_point", "value"), &Environment::set_color_grading_curves_mid_point);
+	ClassDB::bind_method(D_METHOD("get_color_grading_curves_mid_point"), &Environment::get_color_grading_curves_mid_point);
+	ClassDB::bind_method(D_METHOD("set_color_grading_curves_highlight_scale", "value"), &Environment::set_color_grading_curves_highlight_scale);
+	ClassDB::bind_method(D_METHOD("get_color_grading_curves_highlight_scale"), &Environment::get_color_grading_curves_highlight_scale);
 
 	ADD_GROUP("Color Grading", "color_grading_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "color_grading_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_color_grading_enabled", "is_color_grading_enabled");
@@ -2081,6 +2319,18 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "color_grading_power"), "set_color_grading_power", "get_color_grading_power");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "color_grading_saturation", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), "set_color_grading_saturation", "get_color_grading_saturation");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "color_grading_gamut_mapping"), "set_color_grading_gamut_mapping", "is_color_grading_gamut_mapping");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "color_grading_night_vision", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_color_grading_night_vision", "get_color_grading_night_vision");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "color_grading_night_vision_tint", PROPERTY_HINT_COLOR_NO_ALPHA), "set_color_grading_night_vision_tint", "get_color_grading_night_vision_tint");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "color_grading_night_vision_start", PROPERTY_HINT_RANGE, "0.00001,10,0.00001,or_greater,exp"), "set_color_grading_night_vision_start", "get_color_grading_night_vision_start");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "color_grading_night_vision_end", PROPERTY_HINT_RANGE, "0.000001,1,0.000001,or_greater,exp"), "set_color_grading_night_vision_end", "get_color_grading_night_vision_end");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "color_grading_mixer_red"), "set_color_grading_mixer_red", "get_color_grading_mixer_red");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "color_grading_mixer_green"), "set_color_grading_mixer_green", "get_color_grading_mixer_green");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "color_grading_mixer_blue"), "set_color_grading_mixer_blue", "get_color_grading_mixer_blue");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "color_grading_contrast", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), "set_color_grading_contrast", "get_color_grading_contrast");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "color_grading_vibrance", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), "set_color_grading_vibrance", "get_color_grading_vibrance");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "color_grading_curves_shadow_gamma"), "set_color_grading_curves_shadow_gamma", "get_color_grading_curves_shadow_gamma");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "color_grading_curves_mid_point"), "set_color_grading_curves_mid_point", "get_color_grading_curves_mid_point");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "color_grading_curves_highlight_scale"), "set_color_grading_curves_highlight_scale", "get_color_grading_curves_highlight_scale");
 
 	// Path tracing (Mariner E5c)
 
@@ -2160,6 +2410,43 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_sea_enabled"), "set_ddgi_sea_enabled", "is_ddgi_sea_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_sea_level", PROPERTY_HINT_RANGE, "-100,100,0.01,or_less,or_greater,suffix:m"), "set_ddgi_sea_level", "get_ddgi_sea_level");
 	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "ddgi_sea_color", PROPERTY_HINT_COLOR_NO_ALPHA), "set_ddgi_sea_color", "get_ddgi_sea_color");
+
+	// Overhead map (Mariner G1a).
+	ClassDB::bind_method(D_METHOD("set_overhead_map_enabled", "enabled"), &Environment::set_overhead_map_enabled);
+	ClassDB::bind_method(D_METHOD("is_overhead_map_enabled"), &Environment::is_overhead_map_enabled);
+	ClassDB::bind_method(D_METHOD("set_overhead_map_size", "size"), &Environment::set_overhead_map_size);
+	ClassDB::bind_method(D_METHOD("get_overhead_map_size"), &Environment::get_overhead_map_size);
+	ClassDB::bind_method(D_METHOD("set_overhead_map_height", "height"), &Environment::set_overhead_map_height);
+	ClassDB::bind_method(D_METHOD("get_overhead_map_height"), &Environment::get_overhead_map_height);
+	ClassDB::bind_method(D_METHOD("set_overhead_map_resolution", "resolution"), &Environment::set_overhead_map_resolution);
+	ClassDB::bind_method(D_METHOD("get_overhead_map_resolution"), &Environment::get_overhead_map_resolution);
+	ClassDB::bind_method(D_METHOD("set_overhead_map_cull_mask", "mask"), &Environment::set_overhead_map_cull_mask);
+	ClassDB::bind_method(D_METHOD("get_overhead_map_cull_mask"), &Environment::get_overhead_map_cull_mask);
+	ClassDB::bind_method(D_METHOD("set_overhead_map_sky_occlusion", "amount"), &Environment::set_overhead_map_sky_occlusion);
+	ClassDB::bind_method(D_METHOD("get_overhead_map_sky_occlusion"), &Environment::get_overhead_map_sky_occlusion);
+	ClassDB::bind_method(D_METHOD("set_overhead_map_sky_occlusion_radius", "radius"), &Environment::set_overhead_map_sky_occlusion_radius);
+	ClassDB::bind_method(D_METHOD("get_overhead_map_sky_occlusion_radius"), &Environment::get_overhead_map_sky_occlusion_radius);
+	ClassDB::bind_method(D_METHOD("set_overhead_map_bias", "bias"), &Environment::set_overhead_map_bias);
+	ClassDB::bind_method(D_METHOD("get_overhead_map_bias"), &Environment::get_overhead_map_bias);
+
+	// Mariner G4.
+	ClassDB::bind_method(D_METHOD("set_wetness", "wetness"), &Environment::set_wetness);
+	ClassDB::bind_method(D_METHOD("get_wetness"), &Environment::get_wetness);
+	ClassDB::bind_method(D_METHOD("set_snow", "snow"), &Environment::set_snow); // Mariner G4b.
+	ClassDB::bind_method(D_METHOD("get_snow"), &Environment::get_snow);
+	ADD_GROUP("Weather", "");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wetness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_wetness", "get_wetness");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "snow", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_snow", "get_snow"); // Mariner G4b.
+
+	ADD_GROUP("Overhead Map", "overhead_map_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "overhead_map_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_overhead_map_enabled", "is_overhead_map_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "overhead_map_size", PROPERTY_HINT_RANGE, "16,8192,1,suffix:m"), "set_overhead_map_size", "get_overhead_map_size");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "overhead_map_height", PROPERTY_HINT_RANGE, "4,4096,1,suffix:m"), "set_overhead_map_height", "get_overhead_map_height");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "overhead_map_resolution", PROPERTY_HINT_ENUM, "128:128,256:256,512:512,1024:1024,2048:2048,4096:4096"), "set_overhead_map_resolution", "get_overhead_map_resolution");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "overhead_map_cull_mask", PROPERTY_HINT_LAYERS_3D_RENDER), "set_overhead_map_cull_mask", "get_overhead_map_cull_mask");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "overhead_map_sky_occlusion", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_overhead_map_sky_occlusion", "get_overhead_map_sky_occlusion");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "overhead_map_sky_occlusion_radius", PROPERTY_HINT_RANGE, "0.5,256,0.1,or_greater,suffix:m"), "set_overhead_map_sky_occlusion_radius", "get_overhead_map_sky_occlusion_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "overhead_map_bias", PROPERTY_HINT_RANGE, "0,4,0.01,or_greater,suffix:m"), "set_overhead_map_bias", "get_overhead_map_bias");
 
 	// Constants
 
@@ -2251,6 +2538,7 @@ Environment::Environment() {
 	_update_color_grading();
 	_update_pathtracing();
 	_update_ddgi();
+	_update_overhead_map();
 	_update_volumetric_fog();
 	_update_bg_energy();
 	notify_property_list_changed();

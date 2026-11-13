@@ -98,6 +98,108 @@ hvec3 f0_Clear_Coat_To_Surface(hvec3 f0) {
 	return clamp(f0 * (f0 * (half(0.941892) - half(0.263008) * f0) + half(0.346479)) - half(0.0285998), half(0.0), half(1.0));
 }
 
+#ifdef LIGHT_SHEEN_USED
+// Mariner M6: sheen (cloth) lobe of the material, set by the scene shader before the lights; the lights add their
+// sheen into sheen_light, which the scene shader adds after scaling the base layer down.
+#ifndef MARINER_MATERIAL_GLOBALS
+vec3 sheen_color = vec3(0.0);
+float sheen_roughness = 0.5;
+#endif
+vec3 sheen_light = vec3(0.0);
+vec3 sheen_ambient = vec3(0.0); // Irradiance for the indirect sheen.
+
+// Estevez and Kulla 2017, "Production Friendly Microfacet Sheen BRDF".
+float D_charlie(float p_roughness, float p_NoH) {
+	float a = max(p_roughness * p_roughness, 1e-3);
+	float inv_a = 1.0 / a;
+	float sin2h = max(1.0 - p_NoH * p_NoH, 0.0078125); // Avoids pow(0, x) in fp16.
+	return (2.0 + inv_a) * pow(sin2h, inv_a * 0.5) / (2.0 * M_PI);
+}
+
+// Neubelt and Pettineo 2013, "Crafting a Next-gen Material Pipeline for The Order: 1886".
+float V_neubelt(float p_NoV, float p_NoL) {
+	return 1.0 / (4.0 * (p_NoL + p_NoV - p_NoL * p_NoV));
+}
+#endif
+
+#ifdef LIGHT_IRIDESCENCE_USED
+// Mariner F5: thin-film iridescence (Belcour and Barla 2017, "A Practical Extension to Microfacet Theory for the
+// Modeling of Varying Iridescence"). The Fresnel of the film over the base is evaluated once per pixel for the view
+// angle and replaces the Schlick Fresnel of the specular lobe by the amount `iridescence`.
+#ifndef MARINER_MATERIAL_GLOBALS
+float iridescence = 0.0;
+#endif
+vec3 iridescence_fresnel = vec3(0.0);
+
+// Spectral sensitivity of the CIE XYZ matching functions in Fourier space for an optical path difference (Gaussian fits
+// of the paper, section 4), with a phase shift; result in linear Rec. 709.
+vec3 iridescence_sensitivity(float p_opd, vec3 p_shift) {
+	float phase = 2.0 * M_PI * p_opd * 1.0e-9;
+	const vec3 val = vec3(5.4856e-13, 4.4201e-13, 5.2481e-13);
+	const vec3 pos = vec3(1.6810e+06, 1.7953e+06, 2.2084e+06);
+	const vec3 var = vec3(4.3278e+09, 9.3046e+09, 6.6121e+09);
+	vec3 xyz = val * sqrt(2.0 * M_PI * var) * cos(pos * phase + p_shift) * exp(-phase * phase * var);
+	xyz.x += 9.7470e-14 * sqrt(2.0 * M_PI * 4.5282e+09) * cos(2.2399e+06 * phase + p_shift.x) * exp(-4.5282e+09 * phase * phase);
+	xyz /= 1.0685e-7;
+	// XYZ to linear Rec. 709 (D65).
+	const mat3 xyz_to_rec709 = mat3(
+			vec3(3.2404542, -0.9692660, 0.0556434),
+			vec3(-1.5371385, 1.8760108, -0.2040259),
+			vec3(-0.4985314, 0.0415560, 1.0572252));
+	return xyz_to_rec709 * xyz;
+}
+
+float iridescence_schlick(float p_r0, float p_cos) {
+	float m = clamp(1.0 - p_cos, 0.0, 1.0);
+	float m2 = m * m;
+	return p_r0 + (1.0 - p_r0) * m2 * m2 * m;
+}
+
+// Reflectance of air / film (p_film_ior, p_thickness nm) / base (from p_f0) at p_cos_theta, linear Rec. 709.
+vec3 iridescence_fresnel_eval(float p_film_ior, float p_cos_theta, float p_thickness, vec3 p_f0) {
+	// Film thickness 0: the film disappears.
+	float film_ior = mix(1.0, p_film_ior, smoothstep(0.0, 0.03, p_thickness * 1e-3));
+	float sin2_t2 = (1.0 / (film_ior * film_ior)) * (1.0 - p_cos_theta * p_cos_theta);
+	if (sin2_t2 >= 1.0) {
+		return vec3(1.0); // Total internal reflection.
+	}
+	float cos_t2 = sqrt(1.0 - sin2_t2);
+
+	// First interface (air to film).
+	float r0_12 = (film_ior - 1.0) / (film_ior + 1.0);
+	float r12 = iridescence_schlick(r0_12 * r0_12, p_cos_theta);
+	float t121 = 1.0 - r12;
+	float phi12 = film_ior < 1.0 ? M_PI : 0.0;
+	float phi21 = M_PI - phi12;
+
+	// Second interface (film to base); the base IOR from its F0 (no extinction).
+	vec3 sqrt_f0 = sqrt(clamp(p_f0, vec3(0.0), vec3(0.9999)));
+	vec3 base_ior = (1.0 + sqrt_f0) / (1.0 - sqrt_f0);
+	vec3 r0_23 = (base_ior - film_ior) / (base_ior + film_ior);
+	r0_23 *= r0_23;
+	vec3 r23 = vec3(iridescence_schlick(r0_23.x, cos_t2), iridescence_schlick(r0_23.y, cos_t2), iridescence_schlick(r0_23.z, cos_t2));
+	vec3 phi23 = mix(vec3(0.0), vec3(M_PI), lessThan(base_ior, vec3(film_ior)));
+
+	float opd = 2.0 * film_ior * p_thickness * cos_t2;
+	vec3 phi = vec3(phi21) + phi23;
+
+	// Airy summation of the multiple reflections, two orders in Fourier space.
+	vec3 r123 = clamp(r12 * r23, vec3(1e-5), vec3(0.9999));
+	vec3 r123_sqrt = sqrt(r123);
+	vec3 rs = t121 * t121 * r23 / (vec3(1.0) - r123);
+	vec3 c0 = r12 + rs;
+	vec3 result = c0;
+	vec3 cm = rs - t121;
+	for (int m = 1; m <= 2; m++) {
+		cm *= r123_sqrt;
+		vec3 sm = 2.0 * iridescence_sensitivity(float(m) * opd, float(m) * phi);
+		result += cm * sm;
+	}
+	// The constant term is already a reflectance per channel; the interference terms come in Rec. 709.
+	return clamp(result, vec3(0.0), vec3(1.0));
+}
+#endif
+
 #ifdef MICRO_SHADOWING
 // Mariner M2: material ambient occlusion of the pixel, for the micro-shadowing of direct light (set by the scene shader
 // before the lights are processed).
@@ -234,6 +336,17 @@ void light_compute(hvec3 N, hvec3 L, hvec3 V, half A, hvec3 light_color, bool is
 		specular_light += clearcoat_specular_brdf_NL * light_color * attenuation * specular_amount;
 #endif // LIGHT_CLEARCOAT_USED
 
+#ifdef LIGHT_SHEEN_USED
+		{
+			// Mariner M6: sheen lobe.
+			vec3 sheen_h = normalize(vec3(V) + vec3(L));
+			float sheen_NoH = clamp(dot(vec3(N), sheen_h), 0.0, 1.0);
+			float sheen_NoL = float(cNdotL);
+			float sheen_brdf_NL = D_charlie(sheen_roughness, sheen_NoH) * V_neubelt(float(cNdotV), sheen_NoL) * sheen_NoL;
+			sheen_light += sheen_color * sheen_brdf_NL * vec3(light_color) * float(attenuation * specular_amount);
+		}
+#endif
+
 		if (metallic < half(1.0)) {
 			half diffuse_brdf_NL; // BRDF times N.L for calculating diffuse radiance
 
@@ -323,6 +436,9 @@ void light_compute(hvec3 N, hvec3 L, hvec3 V, half A, hvec3 light_color, bool is
 			// https://google.github.io/filament/Filament.html#lighting/occlusion/specularocclusion
 			half f90 = clamp(dot(f0, hvec3(50.0 * 0.33)), metallic, half(1.0));
 			hvec3 F = f0 + (f90 - f0) * cLdotH5;
+#ifdef LIGHT_IRIDESCENCE_USED
+			F = mix(F, hvec3(iridescence_fresnel), half(iridescence)); // Mariner F5.
+#endif
 			hvec3 specular_brdf_NL = energy_compensation * cNdotL * D * F * G;
 			specular_light += specular_brdf_NL * light_color * attenuation * cc_attenuation * specular_amount;
 #endif
@@ -442,7 +558,31 @@ half sample_omni_pcf_shadow(texture2D shadow, float blur_scale, vec2 coord, vec4
 	return half(avg * (1.0 / float(sc_soft_shadow_samples())));
 }
 
-half sample_directional_soft_shadow(texture2D shadow, vec3 pssm_coord, vec2 tex_scale, float taa_frame_count) {
+// Mariner G0a: the depth gradient of the receiver plane in the shadow map (depth per uv), from the geometry normal (view
+// space) and the cascade matrix (orthographic: linear). The soft shadow kernel spans centimeters to tens of centimeters;
+// compared against one depth, a receiver tilted to the light shadowed itself in the half of the kernel closer to the
+// light (a pole's shadow on a floor at 45 degrees got ~35 % more darkness than its width). Clamped to a slope of 8
+// (83 degrees): at grazing angles the normal bias already decides.
+vec2 directional_shadow_depth_gradient(mat4 p_matrix, vec3 p_normal, vec2 p_uv_scale, float p_z_range) {
+	vec3 t1 = normalize(abs(p_normal.z) < 0.9 ? cross(p_normal, vec3(0.0, 0.0, 1.0)) : cross(p_normal, vec3(1.0, 0.0, 0.0)));
+	vec3 t2 = cross(p_normal, t1);
+	vec3 a = (p_matrix * vec4(t1, 0.0)).xyz;
+	vec3 b = (p_matrix * vec4(t2, 0.0)).xyz;
+	float det = a.x * b.y - a.y * b.x;
+	if (abs(det) < 1e-20) {
+		return vec2(0.0);
+	}
+	// uv = M st with M = (a.xy, b.xy), depth = (a.z, b.z) . st, so d depth / d uv = (a.z, b.z) M^-1.
+	vec2 g = vec2(a.z * b.y - b.z * a.y, b.z * a.x - a.z * b.x) / det;
+	float g_max = 8.0 / max(p_z_range * p_uv_scale.x, 1e-9);
+	float l = length(g);
+	if (l > g_max) {
+		g *= g_max / l;
+	}
+	return g;
+}
+
+half sample_directional_soft_shadow(texture2D shadow, vec3 pssm_coord, vec2 tex_scale, vec2 depth_grad, float taa_frame_count) {
 	//find blocker
 	float blocker_count = 0.0;
 	float blocker_average = 0.0;
@@ -455,11 +595,35 @@ half sample_directional_soft_shadow(texture2D shadow, vec3 pssm_coord, vec2 tex_
 		disk_rotation = mat2(vec2(cr, -sr), vec2(sr, cr));
 	}
 
-	SPEC_CONSTANT_LOOP_ANNOTATION
-	for (uint i = 0; i < sc_directional_penumbra_shadow_samples(); i++) {
-		vec2 suv = pssm_coord.xy + (disk_rotation * scene_data_block.data.directional_penumbra_shadow_kernel[i].xy) * tex_scale;
-		float d = textureLod(sampler2D(shadow, SAMPLER_LINEAR_CLAMP), suv, 0.0).r;
+	// Mariner G0a: a texel is a blocker of this point only if its own penumbra cone reaches it: its depth gap to the
+	// receiver, as a fraction of the search radius ((d - z) / (1 - z), see below), must cover the sample's distance from
+	// the center (also as a fraction of the search radius). Otherwise every texel of the search disk counted — e.g. the
+	// whole height of a pole for a point at its foot — the average blocker was far, the penumbra too wide: a halo
+	// around the shadows of thin objects. Stock: every texel closer to the light than the receiver.
+	// The search radius reaches the near plane of the cascade (tens of meters) while penumbrae are often centimeters,
+	// so the search samples spread over all scales, from one texel to the whole radius (log-spaced radii, golden
+	// angle), plus the point itself (the umbra).
+	float receiver_span = max(1.0 - pssm_coord.z, 1e-6);
+	// (tex_scale is negative: the light direction points to the light, so range_pos - range_begin < 0.)
+	float radius_min = clamp((1.0 / float(textureSize(sampler2D(shadow, SAMPLER_LINEAR_CLAMP), 0).x)) / max(abs(tex_scale.x), 1e-9), 1e-5, 1.0);
+	{
+		float d = textureLod(sampler2D(shadow, SAMPLER_LINEAR_CLAMP), pssm_coord.xy, 0.0).r;
 		if (d > pssm_coord.z) {
+			blocker_average += d;
+			blocker_count += 1.0;
+		}
+	}
+	uint search_samples = sc_directional_penumbra_shadow_samples();
+	SPEC_CONSTANT_LOOP_ANNOTATION
+	for (uint i = 0; i < search_samples; i++) {
+		float t = (float(i) + 0.5) / float(search_samples);
+		float r = pow(radius_min, 1.0 - t);
+		float a = float(i) * 2.39996323;
+		vec2 k = vec2(cos(a), sin(a)) * r;
+		vec2 off = (disk_rotation * k) * tex_scale;
+		float z = pssm_coord.z + dot(depth_grad, off); // The receiver plane under the sample.
+		float d = textureLod(sampler2D(shadow, SAMPLER_LINEAR_CLAMP), pssm_coord.xy + off, 0.0).r;
+		if (d > z && (d - z) / receiver_span >= r) {
 			blocker_average += d;
 			blocker_count += 1.0;
 		}
@@ -468,15 +632,21 @@ half sample_directional_soft_shadow(texture2D shadow, vec3 pssm_coord, vec2 tex_
 	if (blocker_count > 0.0) {
 		//blockers found, do soft shadow
 		blocker_average /= blocker_count;
-		float penumbra = (-pssm_coord.z + blocker_average) / (1.0 - blocker_average);
+		// Mariner G0a: the light is orthographic, the penumbra is (receiver - blocker distance) x the light's angular
+		// radius, and tex_scale is the search radius: (receiver - near plane distance) x the angular radius. So the
+		// fraction is (blocker - receiver depth) / (1 - receiver depth) (reverse-Z: 1 at the near plane), at most 1.
+		// The stock divisor (1 - blocker_average) is the perspective formula: blockers near the near plane — the
+		// cascade is fitted to the casters, so the tallest one — blew the penumbra up to the whole search radius, a
+		// noisy half-shadow halo around thin objects (a pole's shadow got ~0.35 m of darkness instead of 0.2).
+		float penumbra = clamp((blocker_average - pssm_coord.z) / receiver_span, 0.0, 1.0);
 		tex_scale *= penumbra;
 
 		float s = 0.0;
 
 		SPEC_CONSTANT_LOOP_ANNOTATION
 		for (uint i = 0; i < sc_directional_penumbra_shadow_samples(); i++) {
-			vec2 suv = pssm_coord.xy + (disk_rotation * scene_data_block.data.directional_penumbra_shadow_kernel[i].xy) * tex_scale;
-			s += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(suv, pssm_coord.z, 1.0));
+			vec2 off = (disk_rotation * scene_data_block.data.directional_penumbra_shadow_kernel[i].xy) * tex_scale;
+			s += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(pssm_coord.xy + off, pssm_coord.z + dot(depth_grad, off), 1.0));
 		}
 
 		return half(s / float(sc_directional_penumbra_shadow_samples()));
@@ -517,6 +687,10 @@ void light_process_omni(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		hvec3 binormal, hvec3 tangent, half anisotropy,
 #endif
 		inout hvec3 diffuse_light, inout hvec3 specular_light) {
+	// Mariner G3: not outside the light's clip box (a cabin lamp does not light the deck through the hull).
+	if (!light_clip_inside(omni_lights.data[idx].clip_x, omni_lights.data[idx].clip_y, omni_lights.data[idx].clip_z, omni_lights.data[idx].clip, vertex)) {
+		return;
+	}
 
 	// Omni light attenuation.
 	vec3 light_rel_vec = omni_lights.data[idx].position - vertex;
@@ -819,6 +993,10 @@ void light_process_spot(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 #endif
 		inout hvec3 diffuse_light,
 		inout hvec3 specular_light) {
+	// Mariner G3: not outside the light's clip box (a cabin lamp does not light the deck through the hull).
+	if (!light_clip_inside(spot_lights.data[idx].clip_x, spot_lights.data[idx].clip_y, spot_lights.data[idx].clip_z, spot_lights.data[idx].clip, vertex)) {
+		return;
+	}
 
 	// Spot light attenuation.
 	vec3 light_rel_vec = spot_lights.data[idx].position - vertex;
@@ -1009,6 +1187,10 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		hvec3 binormal, hvec3 tangent, half anisotropy,
 #endif
 		inout hvec3 diffuse_light, inout hvec3 specular_light) {
+	// Mariner G3: not outside the light's clip box (a cabin lamp does not light the deck through the hull).
+	if (!light_clip_inside(area_lights.data[idx].clip_x, area_lights.data[idx].clip_y, area_lights.data[idx].clip_z, area_lights.data[idx].clip, vertex)) {
+		return;
+	}
 	half EPSILON = half(1e-7);
 	hvec3 area_width = hvec3(area_lights.data[idx].area_width);
 	hvec3 area_height = hvec3(area_lights.data[idx].area_height);

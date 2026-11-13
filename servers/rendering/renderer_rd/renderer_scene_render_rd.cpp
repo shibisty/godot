@@ -467,6 +467,9 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 	Size2i target_size = rb->get_target_size();
 	bool can_use_effects = target_size.x >= 8 && target_size.y >= 8; // FIXME I think this should check internal size, we do all our post processing at this size...
 	can_use_effects &= _debug_draw_can_use_effects(debug_draw);
+	// Mariner G6: a raw HDR output (the camera of a planar reflection) - no camera effects, glow or adjustments.
+	const bool raw_output = p_render_data->scene_data && p_render_data->scene_data->raw_output;
+	can_use_effects &= !raw_output;
 	bool can_use_storage = _render_buffers_can_be_storage();
 
 	RSE::ViewportScaling3DMode scale_mode = rb->get_scaling_3d_mode();
@@ -526,6 +529,18 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 
 	if (using_dof && p_render_data->transparent_bg) {
 		WARN_PRINT_ONCE("Depth of field is not supported in viewports with a transparent background. Disabling DoF in transparent viewport.");
+		using_dof = false;
+	}
+
+	// Mariner F2: gathered depth of field with two layers (Forward+, one view); the classic bokeh otherwise.
+	if (can_use_effects && using_dof && can_use_storage && gather_dof && rb->get_view_count() == 1 && GLOBAL_GET_CACHED(int, "rendering/camera/depth_of_field/depth_of_field_mode") == 1) {
+		RENDER_TIMESTAMP("Depth of Field (Gather)");
+		RD::get_singleton()->draw_command_begin_label("DOF (Gather)");
+		const RID color = use_upscaled_texture ? rb->get_upscaled_texture(0) : rb->get_internal_texture(0);
+		const float z_near = p_render_data->scene_data->view_projection[0].get_z_near();
+		const float z_far = p_render_data->scene_data->view_projection[0].get_z_far();
+		gather_dof->process(rb.ptr(), color, color_size, rb->get_depth_texture(0), p_render_data->camera_attributes, z_near, z_far, p_render_data->scene_data->cam_orthogonal, RSG::rasterizer->get_frame_number());
+		RD::get_singleton()->draw_command_end_label();
 		using_dof = false;
 	}
 
@@ -631,7 +646,16 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		double step = RSG::camera_attributes->camera_attributes_get_auto_exposure_adjust_speed(p_render_data->camera_attributes) * time_step;
 		float auto_exposure_min_sensitivity = RSG::camera_attributes->camera_attributes_get_auto_exposure_min_sensitivity(p_render_data->camera_attributes);
 		float auto_exposure_max_sensitivity = RSG::camera_attributes->camera_attributes_get_auto_exposure_max_sensitivity(p_render_data->camera_attributes);
-		luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate);
+		// Mariner G2: from a histogram of the log luminance (compute; the raster effects keep the average).
+		const RendererCameraAttributes::AutoExposureHistogram histogram = RSG::camera_attributes->camera_attributes_get_auto_exposure_histogram(p_render_data->camera_attributes);
+		if (histogram.enabled && luminance->is_histogram_supported()) {
+			const double speed_bright = RSG::camera_attributes->camera_attributes_get_auto_exposure_adjust_speed(p_render_data->camera_attributes);
+			const float adapt_bright = float(1.0 - Math::exp(-speed_bright * time_step));
+			const float adapt_dark = float(1.0 - Math::exp(-double(histogram.speed_dark) * time_step));
+			luminance->luminance_histogram_exposure(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, histogram.low_percentile, histogram.high_percentile, histogram.center_weight, adapt_bright, adapt_dark, set_immediate);
+		} else {
+			luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate);
+		}
 
 		// Swap final reduce with prev luminance.
 
@@ -808,6 +832,12 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			tonemap.white = environment_get_white(p_render_data->environment, limit_agx_white, max_value);
 			tonemap.exposure = environment_get_exposure(p_render_data->environment);
 			tonemap.max_value = max_value;
+		}
+		if (raw_output) {
+			// Mariner G6: the scene's light as it is (linear, exposure 1, unclamped in an HDR target).
+			tonemap.tonemap_mode = RSE::ENV_TONE_MAPPER_LINEAR;
+			tonemap.exposure = 1.0;
+			tonemap.white = 1.0;
 		}
 
 		tonemap.use_color_correction = false;
@@ -995,6 +1025,8 @@ void RendererSceneRenderRD::_post_process_subpass(RID p_source_texture, RID p_fr
 	// Seeing we don't support FSR in our mobile renderer right now target_size = internal_size...
 	Size2i target_size = rb->get_target_size();
 	bool can_use_effects = target_size.x >= 8 && target_size.y >= 8 && debug_draw == RSE::VIEWPORT_DEBUG_DRAW_DISABLED;
+	const bool raw_output = p_render_data->scene_data && p_render_data->scene_data->raw_output; // Mariner G6.
+	can_use_effects &= !raw_output;
 
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_switch_to_next_pass();
 
@@ -1023,6 +1055,11 @@ void RendererSceneRenderRD::_post_process_subpass(RID p_source_texture, RID p_fr
 		tonemap.exposure = environment_get_exposure(p_render_data->environment);
 		tonemap.white = environment_get_white(p_render_data->environment, limit_agx_white, max_value);
 		tonemap.max_value = max_value;
+	}
+	if (raw_output) {
+		tonemap.tonemap_mode = RSE::ENV_TONE_MAPPER_LINEAR; // Mariner G6.
+		tonemap.exposure = 1.0;
+		tonemap.white = 1.0;
 	}
 
 	// We don't support glow or auto exposure here, if they are needed, don't use subpasses!
@@ -1460,6 +1497,9 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 		scene_data.cam_projection = p_camera_data->main_projection;
 		scene_data.cam_orthogonal = p_camera_data->is_orthogonal;
 		scene_data.camera_visible_layers = p_camera_data->visible_layers;
+		scene_data.use_clip_plane = p_camera_data->use_clip_plane; // Mariner G6.
+		scene_data.clip_plane = p_camera_data->clip_plane;
+		scene_data.raw_output = p_camera_data->raw_output;
 		scene_data.taa_jitter = p_camera_data->taa_jitter;
 		scene_data.taa_frame_count = p_camera_data->taa_frame_count;
 		scene_data.main_cam_transform = p_camera_data->main_transform;
@@ -1560,6 +1600,7 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 		render_data.rt_instances = raytracing_instances;
 		render_data.rt_lights = raytracing_lights;
 		render_data.ddgi_volume = ddgi_volume;
+		render_data.overhead_map = overhead_map; // Mariner G1a.
 
 		if (p_render_buffers.is_valid() && p_reflection_probe.is_null()) {
 			render_data.transparent_bg = texture_storage->render_target_get_transparent(rb->get_render_target());
@@ -1959,10 +2000,12 @@ void RendererSceneRenderRD::init() {
 	bokeh_dof = memnew(RendererRD::BokehDOF(!can_use_storage));
 	if (can_use_storage) {
 		motion_blur = memnew(RendererRD::MotionBlur); // Mariner E15a.
+		gather_dof = memnew(RendererRD::GatherDOF); // Mariner F2.
 		lens_flare = memnew(RendererRD::LensFlare); // Mariner E15b.
 		cas = memnew(RendererRD::CAS); // Mariner E23.
 	}
 	copy_effects = memnew(RendererRD::CopyEffects(raster_effects));
+	hiz_pyramid = memnew(RendererRD::HiZPyramid); // Mariner E13b (compute, also with the Mobile renderer).
 	debug_effects = memnew(RendererRD::DebugEffects);
 	luminance = memnew(RendererRD::Luminance(!can_use_storage));
 	smaa = memnew(RendererRD::SMAA);
@@ -1996,11 +2039,19 @@ RendererSceneRenderRD::~RendererSceneRenderRD() {
 		memdelete(motion_blur); // Mariner E15a.
 		motion_blur = nullptr;
 	}
+	if (gather_dof) {
+		memdelete(gather_dof); // Mariner F2.
+		gather_dof = nullptr;
+	}
 	if (bokeh_dof) {
 		memdelete(bokeh_dof);
 	}
 	if (copy_effects) {
 		memdelete(copy_effects);
+	}
+	if (hiz_pyramid) {
+		memdelete(hiz_pyramid); // Mariner E13b.
+		hiz_pyramid = nullptr;
 	}
 	if (debug_effects) {
 		memdelete(debug_effects);

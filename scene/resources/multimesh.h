@@ -55,6 +55,7 @@ private:
 	AABB custom_aabb;
 	bool use_colors = false;
 	bool use_custom_data = false;
+	bool use_custom_data2 = false; // Mariner E14c.
 	int instance_count = 0;
 	int visible_instance_count = -1;
 	PhysicsInterpolationQuality _physics_interpolation_quality = INTERP_QUALITY_FAST;
@@ -90,6 +91,8 @@ public:
 
 	void set_use_custom_data(bool p_enable);
 	bool is_using_custom_data() const;
+	void set_use_custom_data2(bool p_enable); // Mariner E14c.
+	bool is_using_custom_data2() const;
 
 	void set_transform_format(TransformFormat p_transform_format);
 	TransformFormat get_transform_format() const;
@@ -113,6 +116,8 @@ public:
 
 	void set_instance_custom_data(int p_instance, const Color &p_custom_data);
 	Color get_instance_custom_data(int p_instance) const;
+	void set_instance_custom_data2(int p_instance, const Color &p_custom_data); // Mariner E14c.
+	Color get_instance_custom_data2(int p_instance) const;
 
 	void reset_instance_physics_interpolation(int p_instance);
 	void reset_instances_physics_interpolation();

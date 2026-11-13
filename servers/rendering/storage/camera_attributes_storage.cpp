@@ -272,6 +272,29 @@ float RendererCameraAttributes::camera_attributes_get_auto_exposure_scale(RID p_
 	return cam_attributes->auto_exposure_scale;
 }
 
+// Mariner G2.
+void RendererCameraAttributes::camera_attributes_set_auto_exposure_histogram(RID p_camera_attributes, bool p_histogram, float p_low_percentile, float p_high_percentile, float p_center_weight, float p_speed_dark) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL(cam_attributes);
+	cam_attributes->auto_exposure_histogram = p_histogram;
+	cam_attributes->auto_exposure_low_percentile = CLAMP(p_low_percentile, 0.0f, 0.99f);
+	cam_attributes->auto_exposure_high_percentile = CLAMP(p_high_percentile, cam_attributes->auto_exposure_low_percentile + 0.01f, 1.0f);
+	cam_attributes->auto_exposure_center_weight = CLAMP(p_center_weight, 0.0f, 1.0f);
+	cam_attributes->auto_exposure_speed_dark = MAX(p_speed_dark, 0.0f);
+}
+
+RendererCameraAttributes::AutoExposureHistogram RendererCameraAttributes::camera_attributes_get_auto_exposure_histogram(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	AutoExposureHistogram r;
+	ERR_FAIL_NULL_V(cam_attributes, r);
+	r.enabled = cam_attributes->auto_exposure_histogram;
+	r.low_percentile = cam_attributes->auto_exposure_low_percentile;
+	r.high_percentile = cam_attributes->auto_exposure_high_percentile;
+	r.center_weight = cam_attributes->auto_exposure_center_weight;
+	r.speed_dark = cam_attributes->auto_exposure_speed_dark;
+	return r;
+}
+
 uint64_t RendererCameraAttributes::camera_attributes_get_auto_exposure_version(RID p_camera_attributes) {
 	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
 	ERR_FAIL_NULL_V(cam_attributes, 0);

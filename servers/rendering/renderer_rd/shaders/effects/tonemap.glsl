@@ -108,6 +108,13 @@ layout(set = 3, binding = 1, std140) uniform ColorGradingBlock {
 	vec4 slope; // w: saturation.
 	vec4 offset; // w: 1 = gamut mapping.
 	vec4 power;
+	vec4 night_vision; // Mariner F3b: rgb tint, a amount; midtones.w / power.w: log2 of start / end luminance.
+	vec4 mixer_red; // Mariner F3c: rows of the channel mixer; w: contrast.
+	vec4 mixer_green; // w: vibrance.
+	vec4 mixer_blue; // w: 1 = curves.
+	vec4 curves_gamma;
+	vec4 curves_mid;
+	vec4 curves_scale;
 }
 grading;
 
@@ -125,9 +132,25 @@ vec3 acescct_to_linear(vec3 y) {
 	return mix(hi, lo, lessThanEqual(y, vec3(0.155251141552511)));
 }
 
-// p_color: scene-linear, exposed, before the tone mapper.
-vec3 apply_color_grading(vec3 p_color) {
+// p_color: scene-linear, exposed, before the tone mapper; p_exposure: the exposure applied to it.
+vec3 apply_color_grading(vec3 p_color, float p_exposure) {
 	vec3 c = max(grading.white_balance * p_color, vec3(0.0));
+	// Mariner F3c: channel mixer.
+	c = max(vec3(dot(grading.mixer_red.rgb, c), dot(grading.mixer_green.rgb, c), dot(grading.mixer_blue.rgb, c)), vec3(0.0));
+
+	if (grading.night_vision.a > 0.0) {
+		// Mariner F3b: night vision. Below the start luminance of the scene (before the exposure) the rods take over
+		// from the cones (mesopic vision), fully at the end luminance: the colour fades to the scotopic luminance with
+		// a blue shift (Purkinje). Scotopic luminance from XYZ after Larson, Rushmeier and Piatko 1997 ("A Visibility
+		// Matching Tone Reproduction Operator"), mesopic blend over log luminance and the blue tint as Jensen et al. 2000
+		// ("A Physically-Based Night Sky Model"); white maps to the same luminance.
+		const mat3 rec709_to_xyz = mat3(vec3(0.4124564, 0.2126729, 0.0193339), vec3(0.3575761, 0.7151522, 0.1191920), vec3(0.1804375, 0.0721750, 0.9503041));
+		vec3 xyz = rec709_to_xyz * c;
+		float scene_y = xyz.y / max(p_exposure, 1e-8);
+		float s = clamp((log2(max(scene_y, 1e-12)) - grading.midtones.w) / (grading.power.w - grading.midtones.w), 0.0, 1.0);
+		float scotopic = max(xyz.y * (1.33 * (1.0 + (xyz.y + xyz.z) / max(xyz.x, 1e-8)) - 1.68), 0.0) * (1.0 / 2.5725);
+		c = mix(c, scotopic * grading.night_vision.rgb, s * grading.night_vision.a);
+	}
 
 	float y = dot(c, GRADING_LUMINANCE);
 	float s = 1.0 - smoothstep(grading.tonal_ranges.x, grading.tonal_ranges.y, y);
@@ -139,10 +162,30 @@ vec3 apply_color_grading(vec3 p_color) {
 	v = v * grading.slope.rgb + grading.offset.rgb;
 	vec3 pv = pow(max(v, vec3(0.0)), grading.power.rgb);
 	v = mix(v, pv, greaterThan(v, vec3(0.0)));
+	// Mariner F3c: contrast in ACEScct around the middle grey (0.18 linear): the same in every stop, keeps hue.
+	const float ACESCCT_MID_GREY = 0.4135884; // (log2(0.18) + 9.72) / 17.52
+	v = (v - ACESCCT_MID_GREY) * grading.mixer_red.w + ACESCCT_MID_GREY;
 	c = acescct_to_linear(v);
 
+	// Mariner F3c: vibrance — a saturation that changes the less saturated colors most (skin, sky, foliage), the
+	// already vivid ones little.
 	y = dot(c, GRADING_LUMINANCE);
-	return max(vec3(y) + grading.slope.w * (c - vec3(y)), vec3(0.0));
+	float hi = max(c.r, max(c.g, c.b));
+	float sat = hi > 0.0 ? (hi - min(c.r, min(c.g, c.b))) / hi : 0.0;
+	c = max(vec3(y) + (1.0 + (grading.mixer_green.w - 1.0) * (1.0 - sat)) * (c - vec3(y)), vec3(0.0));
+
+	y = dot(c, GRADING_LUMINANCE);
+	c = max(vec3(y) + grading.slope.w * (c - vec3(y)), vec3(0.0));
+
+	if (grading.mixer_blue.w > 0.5) {
+		// Mariner F3c: per channel curves in scene-linear light, pivoting at the mid point m: below it m (x / m)^gamma
+		// (shadows), above it m + (x - m) * scale (highlights); continuous at m.
+		vec3 m = grading.curves_mid.rgb;
+		vec3 dark = m * pow(c / m, grading.curves_gamma.rgb);
+		vec3 light = m + (c - m) * grading.curves_scale.rgb;
+		c = max(mix(light, dark, lessThanEqual(c, m)), vec3(0.0));
+	}
+	return c;
 }
 
 // Brings a color into 0..p_limit without changing its hue: negative channels (from the white balance or saturation) are
@@ -1028,7 +1071,7 @@ void main() {
 	}
 
 	if (bool(params.flags & FLAG_USE_COLOR_GRADING)) {
-		color.rgb = apply_color_grading(color.rgb); // Mariner F3.
+		color.rgb = apply_color_grading(color.rgb, exposure); // Mariner F3.
 	}
 
 	// Tonemap to lower dynamic range.

@@ -293,7 +293,7 @@ FSR3FrameGenerationEffect::FSR3FrameGenerationEffect() {
 	FFX3Effect fi_effect;
 	fi_effect.passes = device->fi_passes;
 	fi_effect.pass_count = FFX_FRAMEINTERPOLATION_PASS_COUNT;
-	fi_effect.samplers.push_back({ 1000, true }); // s_LinearClamp
+	fi_effect.samplers.push_back({ 900, true }); // s_LinearClamp (below 1000: the D3D12 register encoding).
 	device->base.effects[FFX_EFFECT_FRAMEINTERPOLATION] = fi_effect;
 
 	FFX3Effect of_effect;

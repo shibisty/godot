@@ -162,8 +162,15 @@ private:
 		float slope[4]; // w: saturation.
 		float offset[4]; // w: 1 = gamut mapping.
 		float power[4];
+		float night_vision[4]; // Mariner F3b: rgb tint (luminance 1), a amount; midtones.w = log2 start, power.w = log2 end.
+		float mixer_red[4]; // Mariner F3c: rows of the channel mixer; w: contrast.
+		float mixer_green[4]; // w: vibrance.
+		float mixer_blue[4]; // w: 1 = curves.
+		float curves_gamma[4];
+		float curves_mid[4];
+		float curves_scale[4];
 	};
-	static_assert(sizeof(ColorGradingUBO) == 160);
+	static_assert(sizeof(ColorGradingUBO) == 272);
 	RID color_grading_buffer;
 
 	struct Tonemap {

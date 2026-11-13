@@ -45,17 +45,18 @@ void RendererMeshStorage::multimesh_free(RID p_rid) {
 	_multimesh_free(p_rid);
 }
 
-void RendererMeshStorage::multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors, bool p_use_custom_data, bool p_use_indirect) {
+void RendererMeshStorage::multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors, bool p_use_custom_data, bool p_use_indirect, bool p_use_custom_data2) {
 	MultiMeshInterpolator *mmi = _multimesh_get_interpolator(p_multimesh);
 	if (mmi) {
 		mmi->_transform_format = p_transform_format;
 		mmi->_use_colors = p_use_colors;
 		mmi->_use_custom_data = p_use_custom_data;
+		mmi->_use_custom_data2 = p_use_custom_data && p_use_custom_data2;
 		mmi->_num_instances = p_instances;
 
 		mmi->_vf_size_xform = p_transform_format == RSE::MULTIMESH_TRANSFORM_2D ? 8 : 12;
 		mmi->_vf_size_color = p_use_colors ? 4 : 0;
-		mmi->_vf_size_data = p_use_custom_data ? 4 : 0;
+		mmi->_vf_size_data = p_use_custom_data ? (mmi->_use_custom_data2 ? 8 : 4) : 0; // Mariner E14c: both vec4s.
 
 		mmi->_stride = mmi->_vf_size_xform + mmi->_vf_size_color + mmi->_vf_size_data;
 
@@ -65,7 +66,7 @@ void RendererMeshStorage::multimesh_allocate_data(RID p_multimesh, int p_instanc
 		mmi->_data_interpolated.resize_initialized(size_in_floats);
 	}
 
-	_multimesh_allocate_data(p_multimesh, p_instances, p_transform_format, p_use_colors, p_use_custom_data, p_use_indirect);
+	_multimesh_allocate_data(p_multimesh, p_instances, p_transform_format, p_use_colors, p_use_custom_data, p_use_indirect, p_use_custom_data2);
 }
 
 int RendererMeshStorage::multimesh_get_instance_count(RID p_multimesh) const {
@@ -186,15 +187,8 @@ void RendererMeshStorage::multimesh_instance_set_custom_data(RID p_multimesh, in
 		float *ptr = mmi->_data_curr.ptrw();
 		ptr += start;
 
-		if (mmi->_vf_size_data == 4) {
-			for (int n = 0; n < 4; n++) {
-				ptr[n] = p_color.components[n];
-			}
-		} else {
-#ifdef DEV_ENABLED
-			// The options are currently 4 or zero, but just in case this changes in future...
-			ERR_FAIL_COND(mmi->_vf_size_data != 0);
-#endif
+		for (int n = 0; n < 4; n++) { // The first vec4 (of one, or two with Mariner E14c).
+			ptr[n] = p_color.components[n];
 		}
 		_multimesh_add_to_interpolation_lists(p_multimesh, *mmi);
 		return;
@@ -229,6 +223,32 @@ Color RendererMeshStorage::multimesh_instance_get_color(RID p_multimesh, int p_i
 
 Color RendererMeshStorage::multimesh_instance_get_custom_data(RID p_multimesh, int p_index) const {
 	return _multimesh_instance_get_custom_data(p_multimesh, p_index);
+}
+
+// Mariner E14c.
+void RendererMeshStorage::multimesh_instance_set_custom_data2(RID p_multimesh, int p_index, const Color &p_color) {
+	MultiMeshInterpolator *mmi = _multimesh_get_interpolator(p_multimesh);
+	if (mmi && mmi->interpolated) {
+		ERR_FAIL_COND(!mmi->_use_custom_data2);
+		ERR_FAIL_INDEX(p_index, mmi->_num_instances);
+		float *w = mmi->_data_curr.ptrw();
+		const int start = (p_index * mmi->_stride) + mmi->_vf_size_xform + mmi->_vf_size_color + 4;
+		w[start + 0] = p_color.r;
+		w[start + 1] = p_color.g;
+		w[start + 2] = p_color.b;
+		w[start + 3] = p_color.a;
+		_multimesh_add_to_interpolation_lists(p_multimesh, *mmi);
+		return;
+	}
+	_multimesh_instance_set_custom_data2(p_multimesh, p_index, p_color);
+}
+
+Color RendererMeshStorage::multimesh_instance_get_custom_data2(RID p_multimesh, int p_index) const {
+	return _multimesh_instance_get_custom_data2(p_multimesh, p_index);
+}
+
+bool RendererMeshStorage::multimesh_uses_custom_data2(RID p_multimesh) const {
+	return _multimesh_uses_custom_data2(p_multimesh);
 }
 
 void RendererMeshStorage::multimesh_set_buffer(RID p_multimesh, const Vector<float> &p_buffer) {
@@ -526,16 +546,13 @@ void RendererMeshStorage::update_interpolation_frame(bool p_process) {
 						pf_int += 4;
 					}
 
-					// Custom data.
-					if (mmi->_vf_size_data == 4) {
-						for (int i = 0; i < 4; i++) {
-							pf_int[i] = Math::lerp(pf_prev[i], pf_curr[i], f);
-						}
-
-						pf_prev += 4;
-						pf_curr += 4;
-						pf_int += 4;
+					// Custom data (one vec4, or two with Mariner E14c).
+					for (int i = 0; i < mmi->_vf_size_data; i++) {
+						pf_int[i] = Math::lerp(pf_prev[i], pf_curr[i], f);
 					}
+					pf_prev += mmi->_vf_size_data;
+					pf_curr += mmi->_vf_size_data;
+					pf_int += mmi->_vf_size_data;
 				}
 
 				_multimesh_set_buffer(rid, mmi->_data_interpolated);

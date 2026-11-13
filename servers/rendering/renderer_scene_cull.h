@@ -88,6 +88,9 @@ public:
 		RID env;
 		RID attributes;
 		RID compositor;
+		bool use_clip_plane = false; // Mariner G6.
+		Plane clip_plane;
+		bool raw_output = false;
 
 		Transform3D transform;
 
@@ -117,6 +120,8 @@ public:
 	virtual void camera_set_camera_attributes(RID p_camera, RID p_attributes);
 	virtual void camera_set_compositor(RID p_camera, RID p_compositor);
 	virtual void camera_set_use_vertical_aspect(RID p_camera, bool p_enable);
+	virtual void camera_set_clip_plane(RID p_camera, bool p_enable, const Plane &p_plane); // Mariner G6.
+	virtual void camera_set_raw_output(RID p_camera, bool p_enable);
 	virtual bool is_camera(RID p_camera) const;
 
 	/* OCCLUDER API */
@@ -772,6 +777,20 @@ public:
 		Basis shadow_cache_basis;
 		bool shadow_cache_basis_valid = false;
 		real_t shadow_cache_radius[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES] = {}; // Last radius per cascade.
+		// Mariner E10c: per cascade, the static casters drawn last frame (instance RID -> version and light-space
+		// bounds) and that frame's cascade, to tell whether the cached depth can be scrolled to the new cascade.
+		struct ShadowCacheCaster {
+			uint64_t version = 0;
+			AABB aabb; // World space.
+		};
+		struct ShadowCacheScroll {
+			bool valid = false;
+			Transform3D transform;
+			Projection projection;
+			real_t zfar = 0.0;
+			Vector<Plane> planes; // The culling frustum of the cascade.
+			HashMap<uint64_t, ShadowCacheCaster> casters;
+		} shadow_cache_scroll[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
 
 	private:
 		// Instead of a single dirty flag, we maintain a count
@@ -946,6 +965,7 @@ public:
 
 	PagedArrayPool<Instance *> instance_cull_page_pool;
 	PagedArrayPool<RenderGeometryInstance *> geometry_instance_cull_page_pool;
+	RendererSceneRender::OverheadMapData overhead_map_data; // Mariner G1a.
 	PagedArrayPool<RID> rid_cull_page_pool;
 
 	PagedArray<Instance *> instance_cull_result;
@@ -972,6 +992,7 @@ public:
 			// order-independent hash of the static set (sum and xor of mixed instance/version values).
 			PagedArray<RenderGeometryInstance *> cascade_static_instances[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
 			PagedArray<RenderGeometryInstance *> cascade_dynamic_instances[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
+			PagedArray<Instance *> cascade_static_sources[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES]; // Mariner E10c.
 			uint64_t cascade_static_hash_sum[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES] = {};
 			uint64_t cascade_static_hash_xor[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES] = {};
 			// Mariner E10b: casters of the object shadow and their bounds.
@@ -1005,6 +1026,7 @@ public:
 					directional_shadows[i].cascade_geometry_instances[j].clear();
 					directional_shadows[i].cascade_static_instances[j].clear();
 					directional_shadows[i].cascade_dynamic_instances[j].clear();
+					directional_shadows[i].cascade_static_sources[j].clear();
 					directional_shadows[i].cascade_static_hash_sum[j] = 0;
 					directional_shadows[i].cascade_static_hash_xor[j] = 0;
 				}
@@ -1043,6 +1065,7 @@ public:
 					directional_shadows[i].cascade_geometry_instances[j].reset();
 					directional_shadows[i].cascade_static_instances[j].reset();
 					directional_shadows[i].cascade_dynamic_instances[j].reset();
+					directional_shadows[i].cascade_static_sources[j].reset();
 				}
 				directional_shadows[i].object_instances.reset();
 				directional_shadows[i].translucent_instances.reset();
@@ -1076,6 +1099,7 @@ public:
 					directional_shadows[i].cascade_geometry_instances[j].merge_unordered(p_cull_result.directional_shadows[i].cascade_geometry_instances[j]);
 					directional_shadows[i].cascade_static_instances[j].merge_unordered(p_cull_result.directional_shadows[i].cascade_static_instances[j]);
 					directional_shadows[i].cascade_dynamic_instances[j].merge_unordered(p_cull_result.directional_shadows[i].cascade_dynamic_instances[j]);
+					directional_shadows[i].cascade_static_sources[j].merge_unordered(p_cull_result.directional_shadows[i].cascade_static_sources[j]);
 					directional_shadows[i].cascade_static_hash_sum[j] += p_cull_result.directional_shadows[i].cascade_static_hash_sum[j];
 					directional_shadows[i].cascade_static_hash_xor[j] ^= p_cull_result.directional_shadows[i].cascade_static_hash_xor[j];
 				}
@@ -1126,6 +1150,7 @@ public:
 					directional_shadows[i].cascade_geometry_instances[j].set_page_pool(p_geometry_instance_pool);
 					directional_shadows[i].cascade_static_instances[j].set_page_pool(p_geometry_instance_pool);
 					directional_shadows[i].cascade_dynamic_instances[j].set_page_pool(p_geometry_instance_pool);
+					directional_shadows[i].cascade_static_sources[j].set_page_pool(p_instance_pool);
 				}
 				directional_shadows[i].object_instances.set_page_pool(p_geometry_instance_pool);
 				directional_shadows[i].translucent_instances.set_page_pool(p_geometry_instance_pool);
@@ -1265,6 +1290,7 @@ public:
 	struct Cull {
 		struct Shadow {
 			RID light_instance;
+			InstanceLightData *light_data = nullptr; // Mariner E10c.
 			uint32_t caster_mask;
 			// Mariner E10b: object shadow layers (0 = none) and the first cascade they are left out of.
 			uint32_t object_layers = 0;
@@ -1314,6 +1340,7 @@ public:
 		uint32_t rt_cull_mask = 0;
 		AABB rt_aabb;
 	} cull;
+	void _shadow_cache_scroll_check(InstanceLightData *p_light, int p_cascade, const Cull::Shadow::Cascade &p_cascade_data, const PagedArray<Instance *> &p_sources, RendererSceneRender::RenderShadowData &r_data); // Mariner E10c.
 
 	struct VisibilityCullData {
 		uint64_t viewport_mask;
@@ -1578,8 +1605,14 @@ public:
 	PASS3(environment_set_ddgi_update, RID, int, bool)
 	PASS3(environment_set_ddgi_channels, RID, float, float)
 	PASS4(environment_set_ddgi_sea, RID, bool, float, const Color &)
+	PASS9(environment_set_overhead_map, RID, bool, float, float, int, uint32_t, float, float, float) // Mariner G1a.
+	PASS2(environment_set_wetness, RID, float) // Mariner G4.
+	PASS2(environment_set_snow, RID, float) // Mariner G4b.
 	PASS4(environment_set_ssao_gtao, RID, bool, bool, float)
 	PASS13(environment_set_color_grading, RID, bool, float, float, const Color &, const Color &, const Color &, const Vector4 &, const Vector3 &, const Vector3 &, const Vector3 &, float, bool)
+	PASS5(environment_set_color_grading_night_vision, RID, float, const Color &, float, float)
+	PASS4(environment_set_color_grading_channel_mixer, RID, const Vector3 &, const Vector3 &, const Vector3 &)
+	PASS6(environment_set_color_grading_curves, RID, float, float, const Vector3 &, const Vector3 &, const Vector3 &)
 	PASS6(environment_set_restir, RID, bool, int, int, bool, bool)
 	PASS1RC(bool, environment_get_pathtracing_enabled, RID)
 	PASS0RC(bool, pathtracing_is_supported)

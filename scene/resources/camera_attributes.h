@@ -37,6 +37,13 @@
 class CameraAttributes : public Resource {
 	GDCLASS(CameraAttributes, Resource);
 
+public:
+	// Mariner G2.
+	enum AutoExposureMode {
+		AUTO_EXPOSURE_MODE_AVERAGE,
+		AUTO_EXPOSURE_MODE_HISTOGRAM,
+	};
+
 private:
 	RID camera_attributes;
 
@@ -54,6 +61,14 @@ protected:
 	float auto_exposure_speed = 0.5;
 	float auto_exposure_scale = 0.4;
 	virtual void _update_auto_exposure() {}
+
+	// Mariner G2: exposure from a histogram of the log luminance.
+	AutoExposureMode auto_exposure_mode = AUTO_EXPOSURE_MODE_AVERAGE;
+	float auto_exposure_low_percentile = 0.5;
+	float auto_exposure_high_percentile = 0.98;
+	float auto_exposure_center_weight = 0.5;
+	float auto_exposure_speed_dark = 0.25;
+	void _update_auto_exposure_histogram();
 
 	// Mariner E15a: motion blur.
 	bool motion_blur_enabled = false;
@@ -94,6 +109,17 @@ public:
 	float get_exposure_sensitivity() const;
 
 	void set_auto_exposure_enabled(bool p_enabled);
+	// Mariner G2.
+	void set_auto_exposure_mode(AutoExposureMode p_mode);
+	AutoExposureMode get_auto_exposure_mode() const;
+	void set_auto_exposure_low_percentile(float p_percentile);
+	float get_auto_exposure_low_percentile() const;
+	void set_auto_exposure_high_percentile(float p_percentile);
+	float get_auto_exposure_high_percentile() const;
+	void set_auto_exposure_center_weight(float p_weight);
+	float get_auto_exposure_center_weight() const;
+	void set_auto_exposure_speed_dark(float p_speed);
+	float get_auto_exposure_speed_dark() const;
 	bool is_auto_exposure_enabled() const;
 	void set_auto_exposure_speed(float p_auto_exposure_speed);
 	float get_auto_exposure_speed() const;
@@ -251,3 +277,5 @@ public:
 	CameraAttributesPhysical();
 	~CameraAttributesPhysical();
 };
+
+VARIANT_ENUM_CAST(CameraAttributes::AutoExposureMode); // Mariner G2.

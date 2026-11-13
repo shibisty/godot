@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/os/mutex.h"
 #include "core/templates/a_hash_map.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
@@ -110,6 +111,16 @@ class RenderingDeviceDriverD3D12 : public RenderingDeviceDriver {
 		bool aniso_filter_with_point_mip_supported = false;
 	};
 
+	struct RaytracingCapabilities {
+		bool ray_query_supported = false;
+		bool raytracing_pipeline_supported = false;
+	};
+
+	// Mariner E7b: mesh shader tier 1, shader model 6.5 and DXC to compile the mesh pipelines' HLSL.
+	struct MeshShaderCapabilities {
+		bool supported = false;
+	};
+
 	RenderingContextDriverD3D12 *context_driver = nullptr;
 	RenderingContextDriver::Device context_device;
 	Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
@@ -126,6 +137,8 @@ class RenderingDeviceDriverD3D12 : public RenderingDeviceDriver {
 	BarrierCapabilities barrier_capabilities;
 	MiscFeaturesSupport misc_features_support;
 	SamplerCapabilities sampler_capabilities;
+	RaytracingCapabilities raytracing_capabilities;
+	MeshShaderCapabilities mesh_shader_capabilities;
 	RenderingShaderContainerFormatD3D12 shader_container_format;
 	String pipeline_cache_id;
 	D3D12_HEAP_TYPE dynamic_persistent_upload_heap = D3D12_HEAP_TYPE_UPLOAD;
@@ -180,7 +193,12 @@ class RenderingDeviceDriverD3D12 : public RenderingDeviceDriver {
 		Microsoft::WRL::ComPtr<ID3D12CommandSignature> draw;
 		Microsoft::WRL::ComPtr<ID3D12CommandSignature> draw_indexed;
 		Microsoft::WRL::ComPtr<ID3D12CommandSignature> dispatch;
+		// Mariner E7b: DispatchMesh() arguments, by stride (the arguments are 12 bytes; the stride is free).
+		HashMap<uint32_t, Microsoft::WRL::ComPtr<ID3D12CommandSignature>> dispatch_mesh;
+		Mutex dispatch_mesh_mutex;
 	} indirect_cmd_signatures;
+
+	ID3D12CommandSignature *_get_dispatch_mesh_command_signature(uint32_t p_stride);
 
 	static void STDMETHODCALLTYPE _debug_message_func(D3D12_MESSAGE_CATEGORY p_category, D3D12_MESSAGE_SEVERITY p_severity, D3D12_MESSAGE_ID p_id, LPCSTR p_description, void *p_context);
 	void _set_object_name(ID3D12Object *p_object, String p_object_name);
@@ -499,11 +517,14 @@ private:
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> cmd_allocator;
 		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> cmd_list;
 		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList1> cmd_list_1;
+		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> cmd_list_4;
 		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList5> cmd_list_5;
+		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList6> cmd_list_6; // Mariner E7b: DispatchMesh().
 		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> cmd_list_7;
 
 		ID3D12PipelineState *graphics_pso = nullptr;
 		ID3D12PipelineState *compute_pso = nullptr;
+		ID3D12StateObject *raytracing_pso = nullptr;
 
 		uint32_t nir_graphics_runtime_data_root_param_idx = UINT32_MAX;
 		uint32_t nir_compute_runtime_data_root_param_idx = UINT32_MAX;
@@ -555,8 +576,29 @@ private:
 		TightLocalVector<FramebufferID> framebuffers;
 		RDD::DataFormat data_format = DATA_FORMAT_MAX;
 		RDD::ColorSpace color_space = COLOR_SPACE_MAX;
+		// Mariner E24c: an extra image presented before the frame's own (FSR 3 frame generation). DXGI presents the
+		// current back buffer and only the current one may be written by the GPU, so the extra image is drawn into
+		// the current back buffer and the frame itself into an intermediate texture (the two framebuffers' contents
+		// are swapped meanwhile); after the first Present() the intermediate is copied into the new current back
+		// buffer and presented.
+		bool extra_active = false;
+		uint32_t extra_back_buffer = UINT32_MAX;
+		ID3D12Resource *extra_resource = nullptr;
+		TextureInfo extra_texture_info;
+		FramebufferID extra_framebuffer;
+		TightLocalVector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> extra_allocators;
+		TightLocalVector<uint64_t> extra_allocator_values;
+		uint32_t extra_allocator_index = 0;
+		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> extra_cmd_list;
+		Microsoft::WRL::ComPtr<ID3D12Fence> extra_fence;
+		uint64_t extra_fence_value = 0;
 	};
 
+	void _swap_chain_extra_restore(SwapChain *p_swap_chain);
+	bool _swap_chain_extra_prepare(SwapChain *p_swap_chain);
+	void _swap_chain_extra_wait_idle(SwapChain *p_swap_chain);
+	void _swap_chain_extra_release(SwapChain *p_swap_chain);
+	void _swap_chain_extra_copy(SwapChain *p_swap_chain, ID3D12CommandQueue *p_queue);
 	void _swap_chain_release(SwapChain *p_swap_chain);
 	void _swap_chain_release_buffers(SwapChain *p_swap_chain);
 	RenderPassID _swap_chain_create_render_pass(RDD::DataFormat p_format);
@@ -566,6 +608,7 @@ public:
 	virtual SwapChainID swap_chain_create(RenderingContextDriver::SurfaceID p_surface) override;
 	virtual Error swap_chain_resize(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain, uint32_t p_desired_framebuffer_count) override;
 	virtual FramebufferID swap_chain_acquire_framebuffer(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain, bool &r_resize_required) override;
+	virtual FramebufferID swap_chain_acquire_extra_framebuffer(CommandQueueID p_cmd_queue, SwapChainID p_swap_chain) override;
 	virtual RenderPassID swap_chain_get_render_pass(SwapChainID p_swap_chain) override;
 	virtual DataFormat swap_chain_get_format(SwapChainID p_swap_chain) override;
 	virtual ColorSpace swap_chain_get_color_space(SwapChainID p_swap_chain) override;
@@ -660,7 +703,20 @@ private:
 		Microsoft::WRL::ComPtr<ID3D12RootSignatureDeserializer> root_signature_deserializer;
 		const D3D12_ROOT_SIGNATURE_DESC *root_signature_desc = nullptr; // Owned by the deserializer.
 		uint32_t root_signature_crc = 0;
+
+		struct ShaderConfig {
+			uint32_t payload_size_in_bytes = 0;
+			uint32_t attribute_size_in_bytes = 0;
+		};
+
+		HashMap<ShaderStage, ShaderConfig> stages_shader_config;
 	};
+
+	bool _shader_apply_specialization_constants(
+			const ShaderInfo *p_shader_info,
+			VectorView<PipelineSpecializationConstant> p_specialization_constants,
+			ShaderStage p_stage,
+			Vector<uint8_t> &r_bytecode);
 
 	bool _shader_apply_specialization_constants(
 			const ShaderInfo *p_shader_info,
@@ -804,7 +860,7 @@ public:
 	virtual void command_render_draw_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, uint32_t p_draw_count, uint32_t p_stride) override final;
 	virtual void command_render_draw_indirect_count(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, BufferID p_count_buffer, uint64_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride) override final;
 
-	// Mariner E7: mesh shading is not supported by this driver (SUPPORTS_MESH_SHADER is false).
+	// Mariner E7b: mesh shading (D3D12 mesh shader tier 1).
 	virtual void command_render_draw_mesh_tasks(CommandBufferID p_cmd_buffer, uint32_t p_group_count_x, uint32_t p_group_count_y, uint32_t p_group_count_z) override final;
 	virtual void command_render_draw_mesh_tasks_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, uint32_t p_draw_count, uint32_t p_stride) override final;
 	virtual void command_render_draw_mesh_tasks_indirect_count(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, BufferID p_count_buffer, uint64_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride) override final;
@@ -862,6 +918,18 @@ public:
 
 	// ---- ACCELERATION STRUCTURES ----
 
+private:
+	struct AccelerationStructureInfo {
+		TightLocalVector<D3D12_RAYTRACING_GEOMETRY_DESC> geometries;
+		D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
+		BufferID buffer;
+		uint32_t scratch_buffer_size = 0;
+		LocalVector<BufferInfo *> input_buffer_infos; // For legacy barriers.
+	};
+
+	bool _acceleration_structure_create(AccelerationStructureInfo *r_acceleration_structure_info);
+
+public:
 	virtual AccelerationStructureID blas_create(VectorView<AccelerationStructureGeometry> p_geometries, BitField<AccelerationStructureFlagBits> p_flags) override final;
 	virtual AccelerationStructureID tlas_create(uint32_t p_max_instance_count, BitField<AccelerationStructureFlagBits> p_flags) override final;
 	virtual void acceleration_structure_instance_write(uint8_t *r_driver_instance, const AccelerationStructureInstance &p_instance) override final;
@@ -869,16 +937,28 @@ public:
 	virtual uint32_t acceleration_structure_get_scratch_size_bytes(AccelerationStructureID p_acceleration_structure) override final;
 
 	// ----- PIPELINE -----
+private:
+	struct RaytracingPipelineInfo {
+		Microsoft::WRL::ComPtr<ID3D12StateObject> pso;
+		const ShaderInfo *layout_defining_shader_info = nullptr;
+		TightLocalVector<const void *> shader_identifiers;
+	};
 
+public:
 	virtual RaytracingPipelineID raytracing_pipeline_create(VectorView<PipelineShader> p_shaders, VectorView<uint32_t> p_raygen_shader_indices, VectorView<uint32_t> p_miss_shader_indices, VectorView<HitGroup> p_hit_groups, uint32_t p_max_trace_recursion_depth, ShaderID p_layout_defining_shader) override final;
 	virtual void raytracing_pipeline_free(RaytracingPipelineID p_pipeline) override final;
 
 	virtual bool raytracing_pipeline_get_shader_group_handles(RaytracingPipelineID p_pipeline, uint32_t p_group_index_offset, VectorView<uint32_t> p_group_indices, uint8_t *r_data, uint32_t p_data_stride_bytes) override final;
 
-	// ----- COMMANDS -----
+private:
+	D3D12_GPU_VIRTUAL_ADDRESS_RANGE _sbt_to_gpu_virtual_address_range(const ShaderBindingTable &p_sbt);
+	D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE _sbt_to_gpu_virtual_address_range_and_stride(const ShaderBindingTable &p_sbt);
 
+public:
+	// ----- COMMANDS -----
 	virtual void command_build_blas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer) override final;
-	virtual void command_build_tlas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer, BufferID p_instance_buffer, uint32_t p_instance_offset, uint32_t p_instance_count) override final;
+	virtual void command_update_blas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer) override final; // Mariner E5a.
+	virtual void command_build_tlas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer, BufferID p_instance_buffer, uint32_t p_instance_offset, uint32_t p_instance_count, VectorView<AccelerationStructureID> p_blases) override final;
 	virtual void command_bind_raytracing_pipeline(CommandBufferID p_cmd_buffer, RaytracingPipelineID p_pipeline) override final;
 	virtual void command_bind_raytracing_uniform_set(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index) override final;
 	virtual void command_trace_rays(CommandBufferID p_cmd_buffer, const ShaderBindingTable &p_raygen_sbt, const ShaderBindingTable &p_miss_sbt, const ShaderBindingTable &p_hit_sbt, uint32_t p_width, uint32_t p_height, uint32_t p_depth) override final;
@@ -978,6 +1058,8 @@ private:
 			ShaderInfo,
 			UniformSetInfo,
 			RenderPassInfo,
+			AccelerationStructureInfo,
+			RaytracingPipelineInfo,
 			TimestampQueryPoolInfo>;
 	PagedAllocator<VersatileResource, true> resources_allocator;
 

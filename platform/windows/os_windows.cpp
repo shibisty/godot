@@ -2859,7 +2859,9 @@ LPVOID install_iat_hook(const String &p_target, const String &p_module, const St
 						LPVOID old_func = (LPVOID)first_thunk->u1.Function;
 						first_thunk->u1.Function = (DWORD_PTR)p_hook_func;
 
-						VirtualProtect((LPVOID)(&first_thunk->u1.Function), 8, old_protect, nullptr);
+						// Mariner: a valid pointer for the old protection (required by the API; Wine crashes on nullptr).
+						DWORD restored_protect = 0;
+						VirtualProtect((LPVOID)(&first_thunk->u1.Function), 8, old_protect, &restored_protect);
 						return old_func;
 					}
 					original_first_thunk++;

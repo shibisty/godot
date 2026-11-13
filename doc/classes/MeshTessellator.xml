@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="MeshTessellator" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Splits a mesh's triangles to a target edge length, for displacement (Mariner G7).
+	</brief_description>
+	<description>
+		Tessellation as a mesh operation, for all renderers and graphics APIs: [method tessellate] splits the triangles until no edge is longer than [member target_edge_length], optionally rounding them out by Phong tessellation, and builds the LODs on the shape the material's displacement ([member BaseMaterial3D.displacement_enabled]) gives the mesh - the GPU's LOD selection then coarsens the mesh with the distance without flattening the relief. In the editor: [b]Mesh &gt; Tessellate Mesh...[/b] on a [MeshInstance3D].
+		[codeblock]
+		var tessellator = MeshTessellator.new()
+		tessellator.target_edge_length = 0.05
+		$Deck.mesh = tessellator.tessellate($Deck.mesh, $Deck.material_override)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_displaced_vertices" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="arrays" type="Array" />
+			<param index="1" name="material" type="Material" />
+			<description>
+				Returns the positions of a surface's vertices ([param arrays] as from [method Mesh.surface_get_arrays]) moved as the displacement of [param material] moves them (a [BaseMaterial3D] with [member BaseMaterial3D.displacement_enabled]), read on the CPU from the first mipmap of its texture. Without a displacement, returns them as they are.
+			</description>
+		</method>
+		<method name="get_displacement_texture_lod" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="mesh" type="Mesh" />
+			<param index="1" name="material" type="Material" />
+			<param index="2" name="edge_length" type="float" />
+			<description>
+				Returns the mipmap level of [param material]'s displacement texture with about one texel per edge of [param edge_length] on [param mesh] - for [member BaseMaterial3D.displacement_texture_lod], so that texels finer than the vertices do not alias (Mariner G7c). [code]-1.0[/code] if the material has no displacement. The editor's [b]Tessellate Mesh...[/b] sets it on the material it uses.
+			</description>
+		</method>
+		<method name="tessellate" qualifiers="const">
+			<return type="ArrayMesh" />
+			<param index="0" name="mesh" type="Mesh" />
+			<param index="1" name="material_override" type="Material" default="null" />
+			<description>
+				Returns a copy of [param mesh] with its triangle surfaces split until no edge is longer than [member target_edge_length]. Each split cuts an edge at its middle and both triangles beside it, the longest edges first: no T-junctions, no cracks, also along UV seams. The new vertices take every attribute from their place in the original triangle (UVs, normals, tangents, colors, custom channels, bone weights, blend shapes); the materials and names stay. Triangles of no area are left out; other primitives are copied.
+				The LODs are made on the shape the surface's material (or [param material_override], for all surfaces) gives the mesh with its displacement: the simplifier keeps the vertices where the relief is, as in the material's vertex shader. A displaced mesh also gets a [member ArrayMesh.custom_aabb] that holds the displacement's reach.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="generate_lods" type="bool" setter="set_generate_lods" getter="is_generating_lods" default="true">
+			If [code]true[/code], the result has LODs (simplified index buffers) made on the displaced shape. Without them, a tessellated mesh draws all its triangles at every distance.
+		</member>
+		<member name="max_triangles" type="int" setter="set_max_triangles" getter="get_max_triangles" default="2000000">
+			The most triangles the result may have (all surfaces together). The splitting stops there with a warning, and the surface may then have cracks along its UV seams.
+		</member>
+		<member name="phong_enabled" type="bool" setter="set_phong_enabled" getter="is_phong_enabled" default="false">
+			If [code]true[/code], the new vertices are lifted onto a smooth surface by Phong tessellation (Boubekeur and Alexa, 2008): projected onto the tangent planes of the original triangle's corners. Coarse, smooth-shaded meshes round out (a low-poly sphere becomes round); hard edges (where the normals are split) stay straight, flat faces flat.
+		</member>
+		<member name="phong_shape" type="float" setter="set_phong_shape" getter="get_phong_shape" default="0.75">
+			How far Phong tessellation lifts the new vertices, from [code]0[/code] (flat, the original triangles) to [code]1[/code] (fully onto the projections, which bulges past a sphere on coarse meshes). [code]0.75[/code] is the paper's choice.
+		</member>
+		<member name="target_edge_length" type="float" setter="set_target_edge_length" getter="get_target_edge_length" default="0.25">
+			The longest an edge of the result may be, in the mesh's units (meters). For a displacement, about the height map's texel size on the surface, or the detail the silhouette needs.
+		</member>
+	</members>
+</class>

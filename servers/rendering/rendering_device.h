@@ -270,7 +270,7 @@ public:
 	Error buffer_clear(RID p_buffer, uint32_t p_offset, uint32_t p_size);
 	Vector<uint8_t> buffer_get_data(RID p_buffer, uint32_t p_offset = 0, uint32_t p_size = 0); // This causes stall, only use to retrieve large buffers for saving.
 	// Mariner: true while p_buffer is a live storage, uniform or texture buffer of this device (RIDs are never reused).
-	bool buffer_is_valid(RID p_buffer) const { return storage_buffer_owner.owns(p_buffer) || uniform_buffer_owner.owns(p_buffer) || texture_buffer_owner.owns(p_buffer); }
+	bool buffer_is_valid(RID p_buffer) const { return storage_buffer_owner.owns(p_buffer) || uniform_buffer_owner.owns(p_buffer) || texture_buffer_owner.owns(p_buffer) || vertex_buffer_owner.owns(p_buffer) || index_buffer_owner.owns(p_buffer); }
 	Error buffer_get_data_async(RID p_buffer, const Callable &p_callback, uint32_t p_offset = 0, uint32_t p_size = 0);
 	uint64_t buffer_get_device_address(RID p_buffer);
 	uint8_t *buffer_persistent_map_advance(RID p_buffer);
@@ -965,7 +965,7 @@ private:
 
 #ifndef DISABLE_DEPRECATED
 public:
-	enum BarrierMask {
+	enum BarrierMask{
 		BARRIER_MASK_VERTEX = 1,
 		BARRIER_MASK_FRAGMENT = 8,
 		BARRIER_MASK_COMPUTE = 2,
@@ -976,7 +976,7 @@ public:
 		BARRIER_MASK_NO_BARRIER = 0x8000,
 	};
 
-	enum InitialAction {
+	enum InitialAction{
 		INITIAL_ACTION_LOAD,
 		INITIAL_ACTION_CLEAR,
 		INITIAL_ACTION_DISCARD,
@@ -988,7 +988,7 @@ public:
 		INITIAL_ACTION_CONTINUE = INITIAL_ACTION_LOAD,
 	};
 
-	enum FinalAction {
+	enum FinalAction{
 		FINAL_ACTION_STORE,
 		FINAL_ACTION_DISCARD,
 		FINAL_ACTION_MAX,
@@ -1336,7 +1336,7 @@ public:
 	// Mariner E24b (frame generation): a screen can show an extra image per frame, presented before the frame's own
 	// (pacing: the present mode; FIFO shows each for a vertical blank). Enabling it gives the swap chain one more
 	// image (recreated on the next acquisition). After screen_prepare_for_drawing(), screen_prepare_extra_for_drawing()
-	// acquires the extra image and draw_list_begin_for_screen_extra() draws it. Vulkan only for now (ERR_UNAVAILABLE).
+	// acquires the extra image and draw_list_begin_for_screen_extra() draws it. Vulkan and Direct3D 12 (E24c); other drivers: ERR_UNAVAILABLE.
 	void screen_set_extra_present_enabled(DisplayServerEnums::WindowID p_screen, bool p_enabled);
 	bool screen_is_extra_present_enabled(DisplayServerEnums::WindowID p_screen) const;
 	Error screen_prepare_extra_for_drawing(DisplayServerEnums::WindowID p_screen = DisplayServerEnums::MAIN_WINDOW_ID);

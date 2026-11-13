@@ -4,9 +4,6 @@
 
 #VERSION_DEFINES
 
-#extension GL_EXT_buffer_reference : require
-#extension GL_ARB_gpu_shader_int64 : require
-
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 // Bakes the per-(MultiMesh, surface) merged BLAS inputs in a single dispatch:
@@ -19,15 +16,7 @@ layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 // (idx < N*I) -- both run in the same invocation, no barrier needed because
 // they target disjoint destination buffers.
 //
-// Source vertex/index buffers are immutable mesh data and accessed via BDA.
-// Everything else (mm transforms, mesh attributes, all merged outputs) goes
-// through descriptor sets so the draw graph tracks the dependencies for us.
-layout(buffer_reference, std430) readonly buffer SrcFloatBuf {
-	float v[];
-};
-layout(buffer_reference, std430) readonly buffer SrcUintBuf {
-	uint v[];
-};
+// Mariner E5d: every buffer goes through the descriptor set (no buffer device addresses: D3D12 has none in shaders).
 
 layout(set = 0, binding = 0) restrict writeonly buffer DstVtxBuf {
 	uint v[];
@@ -51,14 +40,22 @@ layout(set = 0, binding = 4) restrict writeonly buffer DstIdxBuf {
 	uint v[];
 }
 dst_idx;
+layout(set = 0, binding = 6) restrict readonly buffer SrcIdxBuf {
+	uint v[];
+}
+src_i;
 #endif
+layout(set = 0, binding = 5) restrict readonly buffer SrcVtxBuf {
+	uint v[];
+}
+src_vtx;
 
 layout(push_constant, std430) uniform PC {
-	uint src_vtx_lo; // BDA lo of source vertex buffer (immutable)
-	uint src_vtx_hi;
+	uint pad0; // Mariner E5d: were the source buffers' device addresses.
+	uint pad1;
 #ifdef MODE_INDEXED
-	uint src_idx_lo; // BDA lo of source index buffer (immutable)
-	uint src_idx_hi;
+	uint pad2;
+	uint pad3;
 	uint index_count; // indices per instance
 	uint src_is_16bit; // 1 if source is packed uint16
 #endif
@@ -100,11 +97,10 @@ void main() {
 		uint inst = idx / push.vertex_count;
 		uint vtx = idx % push.vertex_count;
 
-		SrcFloatBuf src = SrcFloatBuf(packUint2x32(uvec2(push.src_vtx_lo, push.src_vtx_hi)));
 		vec3 p = vec3(
-				src.v[vtx * push.pos_stride_words + 0u],
-				src.v[vtx * push.pos_stride_words + 1u],
-				src.v[vtx * push.pos_stride_words + 2u]);
+				uintBitsToFloat(src_vtx.v[vtx * push.pos_stride_words + 0u]),
+				uintBitsToFloat(src_vtx.v[vtx * push.pos_stride_words + 1u]),
+				uintBitsToFloat(src_vtx.v[vtx * push.pos_stride_words + 2u]));
 
 		// MM buffer stores a row-major 3x4 transform per instance.
 		// Read the three rows, then transpose so GLSL's column-major mat3
@@ -127,9 +123,8 @@ void main() {
 		}
 
 		if (push.has_tbn != 0u) {
-			SrcUintBuf src_u = SrcUintBuf(packUint2x32(uvec2(push.src_vtx_lo, push.src_vtx_hi)));
 			uint tbn_src = push.src_tbn_base_words + vtx * push.src_tbn_stride_words;
-			uint n_packed = src_u.v[tbn_src];
+			uint n_packed = src_vtx.v[tbn_src];
 
 			vec2 n_oct = vec2(float(n_packed & 0xFFFFu), float(n_packed >> 16u)) / 65535.0 * 2.0 - 1.0;
 			vec3 rn = normalize(rot * oct_to_vec3(n_oct));
@@ -141,7 +136,7 @@ void main() {
 
 			if (push.src_tbn_stride_words >= 2u) {
 				// Tangent encodes the bitangent sign in sign(t_raw.y); preserve it.
-				uint t_packed = src_u.v[tbn_src + 1u];
+				uint t_packed = src_vtx.v[tbn_src + 1u];
 				vec2 t_raw = vec2(float(t_packed & 0xFFFFu), float(t_packed >> 16u)) / 65535.0 * 2.0 - 1.0;
 				float bitan_sign = sign(t_raw.y);
 				vec2 t_oct = vec2(t_raw.x, abs(t_raw.y) * 2.0 - 1.0);
@@ -161,7 +156,6 @@ void main() {
 		uint inst_i = idx / push.index_count;
 		uint local_pos = idx % push.index_count;
 
-		SrcUintBuf src_i = SrcUintBuf(packUint2x32(uvec2(push.src_idx_lo, push.src_idx_hi)));
 		uint src_idx;
 		if (push.src_is_16bit != 0u) {
 			uint byte_off = local_pos * 2u;

@@ -218,6 +218,11 @@ HashMap<String, String> TextShaderPreview::builtin_spatial_types = {
 	{ "RIM_TINT", "float" },
 	{ "CLEARCOAT", "float" },
 	{ "CLEARCOAT_ROUGHNESS", "float" },
+	{ "SHEEN", "vec3" }, // Mariner M6, F5.
+	{ "SHEEN_ROUGHNESS", "float" },
+	{ "IRIDESCENCE", "float" },
+	{ "IRIDESCENCE_IOR", "float" },
+	{ "IRIDESCENCE_THICKNESS", "float" },
 	{ "ANISOTROPY", "float" },
 	{ "SSS_STRENGTH", "float" },
 	{ "SSS_TRANSMITTANCE_DEPTH", "float" },

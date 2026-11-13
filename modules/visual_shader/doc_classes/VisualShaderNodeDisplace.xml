@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VisualShaderNodeDisplace" inherits="VisualShaderNode" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Moves the vertex along its normal by a height map (Mariner G7).
+	</brief_description>
+	<description>
+		True displacement in the vertex shader, as [member BaseMaterial3D.displacement_enabled]: outputs [code]VERTEX + normalize(NORMAL) * (height - midlevel) * scale[/code], the height read from the red channel of [code]height_map[/code] (a sampler port: connect a texture parameter) at [code]uv[/code] (the mesh's UV if not connected) and the mipmap [code]lod[/code]. Connect the output to the vertex shader's Vertex. The mesh needs vertices dense enough for the relief: tessellate it with [MeshTessellator], whose LODs follow a [BaseMaterial3D]'s displacement (pass one with the same height map as its [code]material_override[/code]). For the shading normal, use [VisualShaderNodeHeightNormal] in the fragment shader.
+	</description>
+	<tutorials>
+	</tutorials>
+</class>

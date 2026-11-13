@@ -46,8 +46,14 @@ public:
 	Projection cam_projection;
 	Vector2 taa_jitter;
 	float taa_frame_count = 0.0f;
+	// Mariner F4: internal / output resolution under a temporal upscaler, for the specular anti-aliasing kernel.
+	float roughness_limiter_resolution_scale = 1.0f;
 	uint32_t camera_visible_layers;
 	bool cam_orthogonal = false;
+	// Mariner G6: RS.camera_set_clip_plane() (world space) and RS.camera_set_raw_output().
+	bool use_clip_plane = false;
+	Plane clip_plane;
+	bool raw_output = false;
 	bool flip_y = false;
 
 	// For billboards to cast correct shadows.
@@ -183,6 +189,9 @@ private:
 		float IBL_exposure_normalization; // Adjusts for baked exposure.
 		uint32_t camera_visible_layers;
 		float pass_alpha_multiplier;
+
+		float weather[4]; // Mariner G4: x the wetness of the world (Environment.wetness); G4b: y the snow (Environment.snow); zw reserved.
+		float clip_plane[4]; // Mariner G6: view space; (0, 0, 0, 1) - none.
 	};
 
 	struct UBODATA {

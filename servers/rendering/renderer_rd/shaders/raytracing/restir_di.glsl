@@ -5,6 +5,10 @@
 #VERSION_DEFINES
 
 #extension GL_EXT_ray_query : require
+#extension GL_EXT_nonuniform_qualifier : require
+#ifdef RT_NONUNIFORM_WATERFALL
+#extension GL_KHR_shader_subgroup_ballot : require
+#endif
 
 // Mariner E20: ReSTIR DI - direct light of many omni / spot lights (Light3D.light_restir) with ray traced shadows, for
 // the opaque pass of Forward+. Algorithm after Bitterli et al. 2020 ("Spatiotemporal reservoir resampling for
@@ -115,6 +119,18 @@ shadow_params;
 // Mariner E20c: depth before the late opaque surfaces (water, render_mode opaque_late): PASS_SHADOW for the late pass
 // traces only the pixels the late surfaces cover.
 layout(set = 0, binding = 16) uniform sampler2D opaque_depth;
+
+// Mariner E20e: materials of the ray tracing scene for the shadow rays (alpha scissor, raytracing_opacity).
+#include "../oct_inc.glsl"
+#define PT_SCENE_SET 2
+#define PT_SCENE_NO_TLAS
+#ifndef PI
+#define PI M_PI
+#endif
+#include "pathtracer_scene_inc.glsl"
+layout(set = 2, binding = 3) uniform sampler material_sampler; // Linear, mipmaps, repeat.
+layout(set = 2, binding = 4) uniform sampler material_sampler_nearest;
+layout(set = 1, binding = 0) uniform texture2D rt_textures[];
 
 layout(push_constant, std430) uniform PushConstant {
 	uint pass;
@@ -321,6 +337,68 @@ float target(Surface s, uint index, vec2 u) {
 	return luminance(diffuse) + luminance(specular) * 0.25;
 }
 
+// Mariner E20e: does a candidate triangle of a shadow ray stop the light? Alpha scissor of its material (albedo alpha
+// from the texture and the vertex colors, as the path tracer and DDGI), and the share of rays a partly transparent
+// instance lets through (GeometryInstance3D.raytracing_opacity), decided per ray and triangle. Dielectric media
+// (water) stay opaque for shadows.
+uint shadow_ray_seed = 0u;
+
+bool shadow_occludes(uint inst, uint prim, vec2 candidate_bary) {
+	GeometryData g = geometries[inst];
+	uint transmission = g.layer_mask >> GEOM_TRANSMISSION_SHIFT;
+	if (transmission != 0u && (pcg(shadow_ray_seed ^ (inst * 0x9E3779B9u) ^ (prim * 0x85EBCA6Bu)) >> 24u) < transmission) {
+		return false;
+	}
+	MaterialData mat = materials[inst];
+	if (mat.alpha_scissor <= 0.0 || (mat.flags & MAT_FLAG_DIELECTRIC) != 0u) {
+		return true;
+	}
+	vec3 bary = vec3(1.0 - candidate_bary.x - candidate_bary.y, candidate_bary.x, candidate_bary.y);
+	uint i0, i1, i2;
+	get_triangle_indices_ex(g, prim, i0, i1, i2);
+	float alpha = mat.albedo_color.a;
+	if (mat.albedo_texture_idx != 0u) {
+		vec2 uv = fetch_uv(g, i0, i1, i2, bary) * mat.uv1_scale + mat.uv1_offset;
+#ifdef RT_NONUNIFORM_WATERFALL
+		// Mariner E5d: one texture index of the wave at a time (rt_load(), pathtracer_scene_inc.glsl).
+		uint tex_idx = mat.albedo_texture_idx;
+		for (;;) {
+			uint idx = subgroupBroadcastFirst(tex_idx);
+			if (idx == tex_idx) {
+				if ((mat.flags & MAT_FLAG_POINT_FILTER) != 0u) {
+					alpha *= textureLod(sampler2D(rt_textures[idx], material_sampler_nearest), uv, 0.0).a;
+				} else {
+					alpha *= textureLod(sampler2D(rt_textures[idx], material_sampler), uv, 0.0).a;
+				}
+				break;
+			}
+		}
+#else
+		if ((mat.flags & MAT_FLAG_POINT_FILTER) != 0u) {
+			alpha *= textureLod(sampler2D(rt_textures[nonuniformEXT(mat.albedo_texture_idx)], material_sampler_nearest), uv, 0.0).a;
+		} else {
+			alpha *= textureLod(sampler2D(rt_textures[nonuniformEXT(mat.albedo_texture_idx)], material_sampler), uv, 0.0).a;
+		}
+#endif
+	}
+	if ((mat.flags & MAT_FLAG_USE_VERTEX_COLOR) != 0u) {
+		alpha *= fetch_color(g, i0, i1, i2, bary).a;
+	}
+	return alpha >= mat.alpha_scissor;
+}
+
+// Runs a shadow ray query to its end, confirming only the candidates that stop the light.
+// (A macro: GLSL does not allow ray query objects as inout parameters.)
+#define SHADOW_RAY_PROCEED(q) \
+	shadow_ray_seed = pcg(rng_state ^ 0x68E31DA4u); \
+	rng_state = shadow_ray_seed; \
+	while (rayQueryProceedEXT(q)) { \
+		if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT && \
+				shadow_occludes(uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)), uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)), rayQueryGetIntersectionBarycentricsEXT(q, false))) { \
+			rayQueryConfirmIntersectionEXT(q); \
+		} \
+	}
+
 // Shadow ray from the surface to the light point (the light itself is not in the scene: lights have no geometry).
 bool visible(Surface s, vec3 L, float dist) {
 	float scale = max(length(s.position - params.view_to_world[3].xyz), 1.0);
@@ -330,9 +408,8 @@ bool visible(Surface s, vec3 L, float dist) {
 		return true;
 	}
 	rayQueryEXT q;
-	rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT, 0xFF, origin, 0.0, L, t_max);
-	while (rayQueryProceedEXT(q)) {
-	}
+	rayQueryInitializeEXT(q, tlas, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT, 0xFF, origin, 0.0, L, t_max);
+	SHADOW_RAY_PROCEED(q);
 	return rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT;
 }
 
@@ -576,9 +653,8 @@ void main() {
 					vec3 origin = s.position + s.normal * (0.002 * scale) + L * (0.001 * scale);
 					rayQueryEXT q;
 					// Not the first hit: the nearest occluder sizes the penumbra.
-					rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT, 0xFF, origin, 0.0, L, shadow_params.range.x);
-					while (rayQueryProceedEXT(q)) {
-					}
+					rayQueryInitializeEXT(q, tlas, gl_RayFlagsSkipClosestHitShaderEXT, 0xFF, origin, 0.0, L, shadow_params.range.x);
+					SHADOW_RAY_PROCEED(q);
 					if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
 						vis = 1.0;
 						hit = 0.0;

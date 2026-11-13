@@ -168,7 +168,7 @@ void RenderDDGI::_initialize(RendererSceneRenderRD *p_owner) {
 	use_octmap_array = p_owner->is_using_radiance_octmap_array();
 	RD *rd = RD::get_singleton();
 
-	String defines = "\n#define MAX_ROUGHNESS_LOD " + itos(MAX(p_owner->get_roughness_layers() - 1, 1)) + ".0\n";
+	String defines = "\n#define MAX_ROUGHNESS_LOD " + itos(MAX(p_owner->get_roughness_layers() - 1, 1)) + ".0\n" + RenderRaytracing::get_scene_shader_defines();
 	Vector<String> variants;
 	variants.push_back("\n");
 	variants.push_back("\n#define USE_RADIANCE_OCTMAP_ARRAY\n");
@@ -443,7 +443,8 @@ bool RenderDDGI::update(RendererSceneRenderRD *p_owner, const RenderDataRD *p_re
 				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 17, tex(1, l.distance)),
 				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 18, tex(1, l.probe_data)),
 				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 19, tex(0, w.irradiance_lights)),
-				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 20, tex(1, l.irradiance_lights)));
+				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 20, tex(1, l.irradiance_lights)),
+				rb->get_raytracing_geometry_buffers_uniform(30)); // Mariner E5d: RT_GEOMETRY_BUFFERS_BINDING.
 		RID update_set = cache->get_cache(update_shader_rd, 0,
 				RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, dd.params_buffer),
 				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, v.rays),

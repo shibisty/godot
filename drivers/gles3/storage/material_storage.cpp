@@ -1314,6 +1314,12 @@ MaterialStorage::MaterialStorage() {
 		actions.renames["RIM_TINT"] = "rim_tint";
 		actions.renames["CLEARCOAT"] = "clearcoat";
 		actions.renames["CLEARCOAT_ROUGHNESS"] = "clearcoat_roughness";
+		// Mariner M6, F5.
+		actions.renames["SHEEN"] = "sheen_color";
+		actions.renames["SHEEN_ROUGHNESS"] = "sheen_roughness";
+		actions.renames["IRIDESCENCE"] = "iridescence";
+		actions.renames["IRIDESCENCE_IOR"] = "iridescence_ior";
+		actions.renames["IRIDESCENCE_THICKNESS"] = "iridescence_thickness";
 		actions.renames["ANISOTROPY"] = "anisotropy";
 		actions.renames["ANISOTROPY_FLOW"] = "anisotropy_flow";
 		actions.renames["SSS_STRENGTH"] = "sss_strength";
@@ -1323,15 +1329,21 @@ MaterialStorage::MaterialStorage() {
 		actions.renames["BACKLIGHT"] = "backlight";
 		actions.renames["MAIN_LIGHT_DIRECTION"] = "main_light_direction"; // Mariner E16.
 		actions.renames["MAIN_LIGHT_SHADOW"] = "main_light_shadow";
+		actions.renames["SKY_OCCLUSION"] = "sky_occlusion_builtin"; // Mariner G1b.
+		actions.renames["OVERHEAD_COVER"] = "overhead_cover_builtin";
+		actions.renames["WETNESS"] = "scene_data_block.data.weather.x"; // Mariner G4.
+		actions.renames["SNOW"] = "scene_data_block.data.weather.y"; // Mariner G4b.
 		actions.renames["AO"] = "ao";
 		actions.renames["AO_LIGHT_AFFECT"] = "ao_light_affect";
 		actions.renames["EMISSION"] = "emission";
 		actions.renames["POINT_COORD"] = "gl_PointCoord";
 		actions.renames["INSTANCE_CUSTOM"] = "instance_custom";
+		actions.renames["INSTANCE_CUSTOM2"] = "vec4(0.0)"; // Mariner E14c: not in this renderer (no vertex attribute left).
 		actions.renames["SCREEN_UV"] = "screen_uv";
 		actions.renames["DEPTH"] = "gl_FragDepth";
 		actions.renames["FOG"] = "fog";
 		actions.renames["RADIANCE"] = "custom_radiance";
+		actions.renames["REFLECTION"] = "custom_reflection"; // Mariner G6.
 		actions.renames["IRRADIANCE"] = "custom_irradiance";
 		actions.renames["BONE_INDICES"] = "bone_attrib";
 		actions.renames["BONE_WEIGHTS"] = "weight_attrib";
@@ -1373,6 +1385,11 @@ MaterialStorage::MaterialStorage() {
 		actions.usage_defines["RIM_TINT"] = "@RIM";
 		actions.usage_defines["CLEARCOAT"] = "#define LIGHT_CLEARCOAT_USED\n";
 		actions.usage_defines["CLEARCOAT_ROUGHNESS"] = "@CLEARCOAT";
+		actions.usage_defines["SHEEN"] = "#define LIGHT_SHEEN_USED\n"; // Mariner M6.
+		actions.usage_defines["SHEEN_ROUGHNESS"] = "@SHEEN";
+		actions.usage_defines["IRIDESCENCE"] = "#define LIGHT_IRIDESCENCE_USED\n"; // Mariner F5.
+		actions.usage_defines["IRIDESCENCE_IOR"] = "@IRIDESCENCE";
+		actions.usage_defines["IRIDESCENCE_THICKNESS"] = "@IRIDESCENCE";
 		actions.usage_defines["ANISOTROPY"] = "#define LIGHT_ANISOTROPY_USED\n";
 		actions.usage_defines["ANISOTROPY_FLOW"] = "@ANISOTROPY";
 		actions.usage_defines["AO"] = "#define AO_USED\n";
@@ -1407,10 +1424,13 @@ MaterialStorage::MaterialStorage() {
 		actions.usage_defines["SSS_TRANSMITTANCE_DEPTH"] = "#define ENABLE_TRANSMITTANCE\n";
 		actions.usage_defines["BACKLIGHT"] = "#define LIGHT_BACKLIGHT_USED\n";
 		actions.usage_defines["MAIN_LIGHT_SHADOW"] = "#define MAIN_LIGHT_SHADOW_USED\n"; // Mariner E16.
+		actions.usage_defines["SKY_OCCLUSION"] = "#define SKY_OCCLUSION_USED\n#define NORMAL_USED\n"; // Mariner G1b.
+		actions.usage_defines["OVERHEAD_COVER"] = "#define OVERHEAD_COVER_USED\n#define NORMAL_USED\n";
 		actions.usage_defines["SCREEN_UV"] = "#define SCREEN_UV_USED\n";
 
 		actions.usage_defines["FOG"] = "#define CUSTOM_FOG_USED\n";
 		actions.usage_defines["RADIANCE"] = "#define CUSTOM_RADIANCE_USED\n";
+		actions.usage_defines["REFLECTION"] = "#define CUSTOM_REFLECTION_USED\n"; // Mariner G6.
 		actions.usage_defines["IRRADIANCE"] = "#define CUSTOM_IRRADIANCE_USED\n";
 
 		actions.render_mode_defines["skip_vertex_transform"] = "#define SKIP_TRANSFORM_USED\n";

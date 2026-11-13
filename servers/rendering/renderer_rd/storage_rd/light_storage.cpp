@@ -45,6 +45,10 @@ LightStorage *LightStorage::get_singleton() {
 	return singleton;
 }
 
+float LightStorage::directional_penumbra_tan(float p_angular_diameter) {
+	return Math::tan(Math::deg_to_rad(p_angular_diameter) * 0.5f);
+}
+
 LightStorage::LightStorage() {
 	singleton = this;
 
@@ -355,7 +359,37 @@ void LightStorage::light_set_restir(RID p_light, bool p_enable) {
 bool LightStorage::light_is_restir(RID p_light) const {
 	Light *light = light_owner.get_or_null(p_light);
 	ERR_FAIL_NULL_V(light, false);
-	return light->restir;
+	return light->restir && !light->clip_volume; // Mariner G3: clipped lights stay rasterized.
+}
+
+// Mariner G3.
+void LightStorage::light_set_clip_volume(RID p_light, bool p_enable, const Vector3 &p_offset, const Vector3 &p_size) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+	light->clip_volume = p_enable;
+	light->clip_volume_offset = p_offset;
+	light->clip_volume_size = p_size.maxf(0.001);
+	light->version++;
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+bool LightStorage::light_has_clip_volume(RID p_light) const {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, false);
+	return light->clip_volume;
+}
+
+void LightStorage::clip_volume_rows(const Transform3D &p_world_to_view, const Transform3D &p_light_transform, const Vector3 &p_offset, const Vector3 &p_size, float r_rows[3][4]) {
+	// The box's axes are the light's (orthonormalized: a scaled light node does not stretch the box twice).
+	const Transform3D to_view = p_world_to_view * Transform3D(p_light_transform.basis.orthonormalized(), p_light_transform.origin);
+	const Vector3 center = to_view.xform(p_offset);
+	for (int i = 0; i < 3; i++) {
+		const Vector3 axis = to_view.basis.get_column(i).normalized() / MAX(p_size[i] * 0.5f, 0.0005f);
+		r_rows[i][0] = axis.x;
+		r_rows[i][1] = axis.y;
+		r_rows[i][2] = axis.z;
+		r_rows[i][3] = -axis.dot(center);
+	}
 }
 
 void LightStorage::light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) {
@@ -970,7 +1004,9 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 					// I know tan(0) is 0, but let's not risk it with numerical precision.
 					// technically this will keep expanding until reaching the sun, but all we care
 					// is expand until we reach the radius of the near plane (there can't be more occluders than that)
-					angular_diameter = Math::tan(Math::deg_to_rad(angular_diameter));
+					// Mariner G0a: the penumbra radius per unit of distance is tan of half the angular diameter
+					// (the stock tan of the whole diameter made sun shadows twice as soft as the light's size).
+					angular_diameter = directional_penumbra_tan(angular_diameter);
 					if (light->shadow && light->param[RSE::LIGHT_PARAM_SHADOW_BLUR] > 0.0) {
 						// Only enable PCSS-like soft shadows if blurring is enabled.
 						// Otherwise, performance would decrease with no visual difference.
@@ -1306,7 +1342,18 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 		light_data.color[2] = linear_col.b * energy;
 		light_data.specular_amount = light->param[RSE::LIGHT_PARAM_SPECULAR] * 2.0;
 		// Mariner E20: lit by ReSTIR DI in the opaque pass (negative lights stay rasterized: they are not resampled).
-		light_data.restir = (light->restir && !light->negative && p_render_data && p_render_data->restir_active && (type == RSE::LIGHT_OMNI || type == RSE::LIGHT_SPOT)) ? 1.0f : 0.0f;
+		light_data.restir = (light->restir && !light->clip_volume && !light->negative && p_render_data && p_render_data->restir_active && (type == RSE::LIGHT_OMNI || type == RSE::LIGHT_SPOT)) ? 1.0f : 0.0f;
+		// Mariner G3: the clip box in view space.
+		light_data.clip = light->clip_volume ? 1.0f : 0.0f;
+		{
+			float rows[3][4] = {};
+			if (light->clip_volume) {
+				clip_volume_rows(inverse_transform, light_transform, light->clip_volume_offset, light->clip_volume_size, rows);
+			}
+			memcpy(light_data.clip_x, rows[0], sizeof(light_data.clip_x));
+			memcpy(light_data.clip_y, rows[1], sizeof(light_data.clip_y));
+			memcpy(light_data.clip_z, rows[2], sizeof(light_data.clip_z));
+		}
 		light_data.volumetric_fog_energy = light->param[RSE::LIGHT_PARAM_VOLUMETRIC_FOG_ENERGY];
 		light_data.bake_mode = light->bake_mode;
 

@@ -31,6 +31,7 @@
 #include "render_restir.h"
 
 #include "render_pathtracer.h"
+#include "render_raytracing.h"
 
 #include "core/templates/hash_map.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
@@ -189,7 +190,7 @@ void RenderRestirDI::_initialize() {
 	RD *rd = RD::get_singleton();
 	Vector<String> variants;
 	variants.push_back("");
-	di_shader.initialize(variants);
+	di_shader.initialize(variants, RenderRaytracing::get_scene_shader_defines());
 	di_version = di_shader.version_create();
 	di_shader_rd = di_shader.version_get_shader(di_version, 0);
 	di_pipeline = di_shader_rd.is_valid() ? rd->compute_pipeline_create(di_shader_rd) : RID();
@@ -209,6 +210,20 @@ RenderRestirDI::~RenderRestirDI() {
 		denoise_shader.version_free(denoise_version);
 		shadow_denoise_shader.version_free(shadow_denoise_version);
 	}
+}
+
+// Mariner E20e: set 2 of restir_di.glsl (instances, materials and samplers of the ray tracing scene).
+static RID _restir_scene_uniform_set(RID p_shader, const Ref<RenderSceneBuffersRD> &p_render_buffers) {
+	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
+	const RenderSceneBuffersRD::RaytracingScene &rts = p_render_buffers->raytracing_scene;
+	const RID linear_repeat = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED);
+	const RID nearest_repeat = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED);
+	return UniformSetCacheRD::get_singleton()->get_cache(p_shader, 2,
+			RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, rts.instance_buffer),
+			RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 2, rts.material_buffer),
+			RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 3, linear_repeat),
+			RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 4, nearest_repeat),
+			p_render_buffers->get_raytracing_geometry_buffers_uniform(30)); // Mariner E5d: RT_GEOMETRY_BUFFERS_BINDING.
 }
 
 bool RenderRestirDI::update(RendererSceneRenderRD *p_owner, const RenderDataRD *p_render_data, RID p_normal_roughness) {
@@ -439,6 +454,8 @@ bool RenderRestirDI::update(RendererSceneRenderRD *p_owner, const RenderDataRD *
 				RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 16, Vector<RID>({ nearest, depth })));
 	};
 
+	const RID scene_set = _restir_scene_uniform_set(di_shader_rd, rb);
+	const RID texture_set = rb->get_raytracing_texture_uniform_set(di_shader_rd, 1);
 	RD::get_singleton()->draw_command_begin_label("ReSTIR DI");
 	auto dispatch = [&](RID p_pipeline, RID p_set, uint32_t p_pass, int32_t p_step) {
 		PushConstant push = {};
@@ -447,6 +464,11 @@ bool RenderRestirDI::update(RendererSceneRenderRD *p_owner, const RenderDataRD *
 		RD::ComputeListID list = rd->compute_list_begin();
 		rd->compute_list_bind_compute_pipeline(list, p_pipeline);
 		rd->compute_list_bind_uniform_set(list, p_set, 0);
+		if (p_pipeline == di_pipeline) {
+			// Mariner E20e: materials and textures of the ray tracing scene for the alpha test of the shadow rays.
+			rd->compute_list_bind_uniform_set(list, scene_set, 2);
+			rd->compute_list_bind_uniform_set(list, texture_set, 1);
+		}
 		rd->compute_list_set_push_constant(list, &push, sizeof(PushConstant));
 		rd->compute_list_dispatch_threads(list, size.width, size.height, 1);
 		rd->compute_list_end();
@@ -582,6 +604,8 @@ bool RenderRestirDI::update_late_shadows(const RenderDataRD *p_render_data, RID 
 
 	// Shadow parameters of the late pass (its own history flag), written by update().
 	const RID shadow_params = st.late_shadow_params_buffer;
+	const RID scene_set = _restir_scene_uniform_set(di_shader_rd, rb);
+	const RID texture_set = rb->get_raytracing_texture_uniform_set(di_shader_rd, 1);
 
 	auto dispatch = [&](RID p_pipeline, RID p_set, uint32_t p_pass, int32_t p_step) {
 		PushConstant push = {};
@@ -590,6 +614,11 @@ bool RenderRestirDI::update_late_shadows(const RenderDataRD *p_render_data, RID 
 		RD::ComputeListID list = rd->compute_list_begin();
 		rd->compute_list_bind_compute_pipeline(list, p_pipeline);
 		rd->compute_list_bind_uniform_set(list, p_set, 0);
+		if (p_pipeline == di_pipeline) {
+			// Mariner E20e: materials and textures of the ray tracing scene for the alpha test of the shadow rays.
+			rd->compute_list_bind_uniform_set(list, scene_set, 2);
+			rd->compute_list_bind_uniform_set(list, texture_set, 1);
+		}
 		rd->compute_list_set_push_constant(list, &push, sizeof(PushConstant));
 		rd->compute_list_dispatch_threads(list, size.width, size.height, 1);
 		rd->compute_list_end();

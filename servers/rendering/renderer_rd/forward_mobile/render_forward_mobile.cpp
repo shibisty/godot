@@ -2375,6 +2375,15 @@ void RenderForwardMobile::_setup_environment(const RenderDataRD *p_render_data, 
 
 	// Start a new setup.
 	scene_state.uniform_buffers.prepare_for_upload();
+	{
+		// Mariner F4.
+		float limiter_scale = 1.0f;
+		const Ref<RenderSceneBuffersRD> &rb = p_render_data->render_buffers;
+		if (rb.is_valid() && RSE::scaling_3d_mode_type(rb->get_scaling_3d_mode()) == RSE::VIEWPORT_SCALING_3D_TYPE_TEMPORAL && rb->get_target_size().x > 0) {
+			limiter_scale = MIN(1.0f, float(rb->get_internal_size().x) / float(rb->get_target_size().x));
+		}
+		p_render_data->scene_data->roughness_limiter_resolution_scale = limiter_scale;
+	}
 	p_render_data->scene_data->update_ubo(scene_state.uniform_buffers.get_for_upload(0u), get_debug_draw_mode(), env, reflection_probe_instance, p_render_data->camera_attributes, p_pancake_shadows, p_screen_size, p_viewport_size, p_default_bg_color, luminance_multiplier, p_opaque_render_buffers, false);
 }
 
@@ -2458,6 +2467,7 @@ void RenderForwardMobile::_render_list_template(RenderingDevice::DrawListID p_dr
 		pipeline_specialization.multimesh_format_2d = bool(inst->flags_cache & INSTANCE_DATA_FLAG_MULTIMESH_FORMAT_2D);
 		pipeline_specialization.multimesh_has_color = bool(inst->flags_cache & INSTANCE_DATA_FLAG_MULTIMESH_HAS_COLOR);
 		pipeline_specialization.multimesh_has_custom_data = bool(inst->flags_cache & INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA);
+		pipeline_specialization.multimesh_has_custom_data2 = !(inst->flags_cache & INSTANCE_DATA_FLAG_PARTICLES) && bool(inst->flags_cache & INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA2); // Mariner E14c.
 
 		SceneState::PushConstant push_constant;
 		push_constant.base_index = i + p_params->element_offset;
@@ -3165,6 +3175,9 @@ void RenderForwardMobile::_geometry_instance_update(RenderGeometryInstance *p_ge
 		if (mesh_storage->multimesh_uses_custom_data(ginstance->data->base)) {
 			ginstance->base_flags |= INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA;
 		}
+		if (mesh_storage->_multimesh_uses_custom_data2(ginstance->data->base)) {
+			ginstance->base_flags |= INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA2; // Mariner E14c.
+		}
 		if (mesh_storage->multimesh_uses_indirect(ginstance->data->base)) {
 			ginstance->base_flags |= INSTANCE_DATA_FLAG_MULTIMESH_INDIRECT;
 		}
@@ -3576,6 +3589,9 @@ RenderForwardMobile::RenderForwardMobile() {
 	}
 	// defines += "\n#define SDFGI_OCT_SIZE " + itos(gi.sdfgi_get_lightprobe_octahedron_size()) + "\n";
 	defines += "\n#define MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS " + itos(MAX_DIRECTIONAL_LIGHTS) + "\n";
+	if (RD::get_singleton()->has_feature(RD::SUPPORTS_CLIP_DISTANCE)) {
+		defines += "\n#define USE_CLIP_PLANE\n"; // Mariner G6.
+	}
 	// Mariner M1-M3.
 	if (GLOBAL_GET("rendering/shading/overrides/multiscatter_diffuse")) {
 		defines += "\n#define DIFFUSE_MULTISCATTER\n";

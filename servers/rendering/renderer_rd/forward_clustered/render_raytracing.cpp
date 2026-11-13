@@ -99,11 +99,87 @@ uint32_t RenderRaytracing::TextureRegistry::add(RID p_texture) {
 }
 
 // ---------------------------------------------------------------------------
+// Buffer registry (Mariner E5d: the geometry buffer array of the shaders)
+// ---------------------------------------------------------------------------
+
+void RenderRaytracing::BufferRegistry::initialize() {
+	RD *rd = RD::get_singleton();
+	if (dummy.is_null()) {
+		dummy = rd->storage_buffer_create(16);
+		rd->set_resource_name(dummy, "Raytracing geometry buffer (none)");
+	}
+	buffers.clear();
+	buffer_to_index.clear();
+	free_indices.clear();
+	buffers.push_back(dummy);
+	version++;
+}
+
+void RenderRaytracing::BufferRegistry::finalize() {
+	if (dummy.is_valid()) {
+		RD::get_singleton()->free_rid(dummy);
+		dummy = RID();
+	}
+	buffers.clear();
+	buffer_to_index.clear();
+	free_indices.clear();
+}
+
+void RenderRaytracing::BufferRegistry::scrub_invalid() {
+	RD *rd = RD::get_singleton();
+	bool changed = false;
+	for (uint32_t i = 1; i < buffers.size(); i++) {
+		if (buffers[i] != dummy && !rd->buffer_is_valid(buffers[i])) {
+			buffer_to_index.erase(buffers[i]);
+			buffers[i] = dummy;
+			free_indices.push_back(i);
+			changed = true;
+		}
+	}
+	if (changed) {
+		version++;
+	}
+}
+
+uint32_t RenderRaytracing::BufferRegistry::add(RID p_buffer) {
+	if (p_buffer.is_null()) {
+		return 0;
+	}
+	HashMap<RID, uint32_t>::Iterator it = buffer_to_index.find(p_buffer);
+	if (it != buffer_to_index.end()) {
+		return it->value;
+	}
+	uint32_t index;
+	if (!free_indices.is_empty()) {
+		index = free_indices[free_indices.size() - 1];
+		free_indices.resize(free_indices.size() - 1);
+		buffers[index] = p_buffer;
+	} else {
+		if (buffers.size() >= RT_MAX_GEOMETRY_BUFFERS) {
+			ERR_PRINT_ONCE("Raytracing scene: too many geometry buffers (" + itos(RT_MAX_GEOMETRY_BUFFERS) + "), some meshes read as empty.");
+			return 0;
+		}
+		index = buffers.size();
+		buffers.push_back(p_buffer);
+	}
+	buffer_to_index[p_buffer] = index;
+	version++;
+	return index;
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
 bool RenderRaytracing::is_supported() {
 	return RendererRD::MeshStorage::get_singleton()->has_raytracing_buffers();
+}
+
+String RenderRaytracing::get_scene_shader_defines() {
+	if (String(RD::get_singleton()->get_device_api_name()).to_lower() == "d3d12") {
+		return "\n#define RT_NONUNIFORM_WATERFALL\n";
+	}
+	return String();
 }
 
 void RenderRaytracing::initialize() {
@@ -123,6 +199,7 @@ void RenderRaytracing::initialize() {
 	}
 
 	texture_registry.initialize();
+	buffer_registry.initialize();
 }
 
 RenderRaytracing::~RenderRaytracing() {
@@ -130,6 +207,7 @@ RenderRaytracing::~RenderRaytracing() {
 	if (initialized) {
 		mm_merge_shader.shader.version_free(mm_merge_shader.version);
 	}
+	buffer_registry.finalize();
 }
 
 void RenderRaytracing::_free_deformed_entry(DeformedCacheEntry *p_entry) {
@@ -293,6 +371,7 @@ void RenderRaytracing::_prepare_frame() {
 	}
 
 	texture_registry.scrub_invalid();
+	buffer_registry.scrub_invalid();
 }
 
 // ---------------------------------------------------------------------------
@@ -439,12 +518,12 @@ void RenderRaytracing::_populate_surface_blas(void *p_mesh_surface, RID p_vertex
 	if (geom.primitive_count == 0) {
 		return;
 	}
-	geom.vertex_address = rd->buffer_get_device_address(vertex_buffer);
+	geom.vertex_buffer = buffer_registry.add(vertex_buffer);
 	if (attribute_buffer.is_valid()) {
-		geom.attribute_address = rd->buffer_get_device_address(attribute_buffer);
+		geom.attribute_buffer = buffer_registry.add(attribute_buffer);
 	}
 	if (index_buffer.is_valid() && geom.index_format != RT_INDEX_FORMAT_NONE) {
-		geom.index_address = rd->buffer_get_device_address(index_buffer);
+		geom.index_buffer = buffer_registry.add(index_buffer);
 	}
 
 	RD::AccelerationStructureGeometry as_geom;
@@ -963,11 +1042,12 @@ bool RenderRaytracing::_build_merged_mm_blas(RID p_mm_rid, RID p_mm_gpu_buffer, 
 		push_buf(3, src_attr_buf);
 		if (indexed) {
 			push_buf(4, entry->replicated_idx_buffer);
+			push_buf(6, index_buffer); // Mariner E5d: sources through descriptors, not device addresses.
 		}
+		push_buf(5, vtx_buf);
 		RID merge_uniform_set = rd->uniform_set_create(uniforms, mm_merge_shader.version_shader[mode], 0, true);
 		ERR_FAIL_COND_V(merge_uniform_set.is_null(), false);
 
-		uint64_t vtx_bda = rd->buffer_get_device_address(vtx_buf);
 		uint32_t tbn_stride_words = tbn_stride / 4;
 		uint32_t dst_tbn_base_words = p_mm_count * vertex_count * 3;
 
@@ -979,12 +1059,11 @@ bool RenderRaytracing::_build_merged_mm_blas(RID p_mm_rid, RID p_mm_gpu_buffer, 
 
 		// Push constant layout of multimesh_merge.glsl (the index fields only exist in MODE_INDEXED).
 		LocalVector<uint32_t> pc;
-		pc.push_back(uint32_t(vtx_bda));
-		pc.push_back(uint32_t(vtx_bda >> 32));
+		pc.push_back(0);
+		pc.push_back(0);
 		if (indexed) {
-			uint64_t src_idx_bda = rd->buffer_get_device_address(index_buffer);
-			pc.push_back(uint32_t(src_idx_bda));
-			pc.push_back(uint32_t(src_idx_bda >> 32));
+			pc.push_back(0);
+			pc.push_back(0);
 			pc.push_back(index_count);
 			pc.push_back(vertex_count <= 65536 ? 1u : 0u);
 		}
@@ -1046,7 +1125,8 @@ bool RenderRaytracing::_build_merged_mm_blas(RID p_mm_rid, RID p_mm_gpu_buffer, 
 	r_surf_data->aabb_transform = Transform3D();
 
 	RT_InstanceData &geom = r_surf_data->geometry;
-	geom.vertex_address = rd->buffer_get_device_address(entry->merged_vtx_buffer);
+	geom.vertex_buffer = buffer_registry.add(entry->merged_vtx_buffer);
+	geom.vertex_offset = 0;
 	geom.vertex_count = p_mm_count * vertex_count;
 	geom.position_stride = 12;
 	geom.flags = (geom.flags & ~RT_GEOM_FLAG_COMPRESSED) | RT_GEOM_FLAG_MULTIMESH;
@@ -1058,13 +1138,15 @@ bool RenderRaytracing::_build_merged_mm_blas(RID p_mm_rid, RID p_mm_gpu_buffer, 
 		geom.tangent_stride = has_tangent ? tbn_stride : 0;
 	}
 	if (has_attr) {
-		geom.attribute_address = rd->buffer_get_device_address(entry->merged_attr_buffer);
+		geom.attribute_buffer = buffer_registry.add(entry->merged_attr_buffer);
+		geom.attribute_offset = 0;
 	}
 	if (indexed) {
-		geom.index_address = rd->buffer_get_device_address(entry->replicated_idx_buffer);
+		geom.index_buffer = buffer_registry.add(entry->replicated_idx_buffer);
+		geom.index_offset = 0;
 		geom.index_format = RT_INDEX_FORMAT_UINT32;
 	} else {
-		geom.index_address = 0;
+		geom.index_buffer = 0;
 		geom.index_format = RT_INDEX_FORMAT_NONE;
 	}
 	geom.primitive_count = p_mm_count * prim_count;
@@ -1264,14 +1346,15 @@ void RenderRaytracing::build_scene(const RenderDataRD *p_render_data) {
 	for (const PendingMMSurface &pending : pending_mm_surfaces) {
 		const uint32_t mm_stride = mesh_storage->multimesh_get_stride(pending.mm_rid);
 		const uint32_t mm_cur_offset = mesh_storage->multimesh_get_current_instance_offset(pending.mm_rid);
-		const uint64_t mm_address = rd->buffer_get_device_address(pending.mm_gpu_buffer);
+		const uint32_t mm_buffer = buffer_registry.add(pending.mm_gpu_buffer);
 
 		SurfaceData merged_sd;
 		if (_build_merged_mm_blas(pending.mm_rid, pending.mm_gpu_buffer, pending.mesh_surface, pending.mm_count, pending.surf->surface_index, pending.surface_counter, compute_list, dirty_blas_list, dirty_blas_update_list, &merged_sd)) {
 			RT_InstanceData geom = merged_sd.geometry;
 			geom.layer_mask = pending.layer_mask;
 			geom.flags |= pending.geom_flags;
-			geom.multimesh_address = mm_address + uint64_t(mm_cur_offset) * mm_stride * sizeof(float);
+			geom.multimesh_buffer = mm_buffer;
+			geom.multimesh_offset = mm_cur_offset * mm_stride;
 			geom.mm_stride = mm_stride;
 			geom.mm_color_offset = mesh_storage->multimesh_get_color_offset(pending.mm_rid);
 			geom.mm_custom_offset = mesh_storage->multimesh_get_custom_data_offset(pending.mm_rid);
@@ -1314,7 +1397,8 @@ void RenderRaytracing::build_scene(const RenderDataRD *p_render_data) {
 			if (surf_data->is_compressed) {
 				xform = xform * surf_data->aabb_transform;
 			}
-			geom.multimesh_address = mm_address + uint64_t(mm_cur_offset + mi) * mm_stride * sizeof(float);
+			geom.multimesh_buffer = mm_buffer;
+			geom.multimesh_offset = (mm_cur_offset + mi) * mm_stride;
 			push_instance(surf_data->blas, xform, geom, pending.material, pending.inst_flags, pending.mask);
 		}
 	}
@@ -1402,6 +1486,15 @@ void RenderRaytracing::build_scene(const RenderDataRD *p_render_data) {
 			rts.textures.write[i] = texture_registry.textures[i];
 		}
 		rts.textures_version = texture_registry.version;
+	}
+	if (rts.geometry_buffers_version != buffer_registry.version) {
+		// Mariner E5d: the whole array (the shaders declare RT_MAX_GEOMETRY_BUFFERS), unused slots - the dummy.
+		rts.geometry_buffers.resize(RT_MAX_GEOMETRY_BUFFERS);
+		RID *w = rts.geometry_buffers.ptrw();
+		for (uint32_t i = 0; i < RT_MAX_GEOMETRY_BUFFERS; i++) {
+			w[i] = i < buffer_registry.buffers.size() ? buffer_registry.buffers[i] : buffer_registry.dummy;
+		}
+		rts.geometry_buffers_version = buffer_registry.version;
 	}
 
 	RD::get_singleton()->draw_command_end_label();

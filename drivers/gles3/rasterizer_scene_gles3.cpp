@@ -1547,6 +1547,32 @@ void RasterizerSceneGLES3::_setup_environment(const RenderDataGLES3 *p_render_da
 	GLES3::MaterialStorage::store_transform(p_render_data->main_cam_transform, scene_state.data.main_cam_inv_view_matrix);
 	scene_state.data.camera_visible_layers = p_render_data->camera_visible_layers;
 
+	// Mariner G6: the clip plane in clip space (gl_ClipDistance = dot(clip position, plane)).
+	if (p_render_data->use_clip_plane) {
+		const Plane view_plane = p_render_data->inv_cam_transform.xform(p_render_data->clip_plane);
+		const real_t pv[4] = { view_plane.normal.x, view_plane.normal.y, view_plane.normal.z, -view_plane.d };
+		const Projection inv = projection.inverse();
+		for (int k = 0; k < 4; k++) {
+			real_t v = 0.0;
+			for (int i = 0; i < 4; i++) {
+				v += pv[i] * inv.columns[k][i];
+			}
+			scene_state.data.clip_plane[k] = v;
+		}
+	} else {
+		scene_state.data.clip_plane[0] = 0.0;
+		scene_state.data.clip_plane[1] = 0.0;
+		scene_state.data.clip_plane[2] = 0.0;
+		scene_state.data.clip_plane[3] = 1.0;
+	}
+
+	// Mariner G4 / G4b: the weather (WETNESS, SNOW).
+	const bool has_env = is_environment(p_render_data->environment);
+	scene_state.data.weather[0] = has_env ? environment_get_wetness(p_render_data->environment) : 0.0f;
+	scene_state.data.weather[1] = has_env ? environment_get_snow(p_render_data->environment) : 0.0f;
+	scene_state.data.weather[2] = 0.0f;
+	scene_state.data.weather[3] = 0.0f;
+
 	if (p_render_data->view_count > 1) {
 		for (uint32_t v = 0; v < p_render_data->view_count; v++) {
 			projection = correction * p_render_data->view_projection[v];
@@ -2413,9 +2439,10 @@ void RasterizerSceneGLES3::render_scene(const Ref<RenderSceneBuffers> &p_render_
 	if (p_environment.is_valid()) {
 		// We apply tonemapping, etc. in post when any of these are true. In this
 		// case, set apply_environment_effects_in_post to true to skip tonemapping during rendering.
-		glow_enabled = environment_get_glow_enabled(p_environment);
+		// Mariner G6: a raw HDR output (the camera of a planar reflection) - no glow or adjustments.
+		glow_enabled = environment_get_glow_enabled(p_environment) && !p_camera_data->raw_output;
 		ssao_enabled = environment_get_ssao_enabled(p_environment);
-		use_bcs = environment_get_adjustments_enabled(p_environment);
+		use_bcs = environment_get_adjustments_enabled(p_environment) && !p_camera_data->raw_output;
 		bool canvas_tonemapping = environment_get_background(p_environment) == RSE::ENV_BG_CANVAS && environment_get_tone_mapper(p_environment) != RSE::ENV_TONE_MAPPER_LINEAR;
 		if (glow_enabled || ssao_enabled || use_bcs || canvas_tonemapping) {
 			apply_environment_effects_in_post = true;
@@ -2439,6 +2466,9 @@ void RasterizerSceneGLES3::render_scene(const Ref<RenderSceneBuffers> &p_render_
 		render_data.cam_projection = p_camera_data->main_projection;
 		render_data.cam_orthogonal = p_camera_data->is_orthogonal;
 		render_data.camera_visible_layers = p_camera_data->visible_layers;
+		render_data.use_clip_plane = p_camera_data->use_clip_plane; // Mariner G6.
+		render_data.clip_plane = p_camera_data->clip_plane;
+		render_data.raw_output = p_camera_data->raw_output;
 		render_data.main_cam_transform = p_camera_data->main_transform;
 
 		render_data.view_count = p_camera_data->view_count;
@@ -2504,6 +2534,9 @@ void RasterizerSceneGLES3::render_scene(const Ref<RenderSceneBuffers> &p_render_
 
 	bool fb_cleared = false;
 
+	// Mariner G6: the camera's clip plane (desktop OpenGL; the sky is drawn without it).
+	const bool use_clip_distance = render_data.use_clip_plane && RasterizerUtilGLES3::is_gles_over_gl();
+
 	Size2i screen_size = rb->internal_size;
 
 	bool use_wireframe = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME;
@@ -2520,6 +2553,14 @@ void RasterizerSceneGLES3::render_scene(const Ref<RenderSceneBuffers> &p_render_
 		tonemap_ubo.brightness = environment_get_adjustments_brightness(render_data.environment);
 		tonemap_ubo.contrast = environment_get_adjustments_contrast(render_data.environment);
 		tonemap_ubo.saturation = environment_get_adjustments_saturation(render_data.environment);
+	}
+	if (render_data.raw_output) {
+		// Mariner G6: the scene's light as it is.
+		tonemap_ubo.exposure = 1.0;
+		tonemap_ubo.tonemapper = int32_t(RSE::ENV_TONE_MAPPER_LINEAR);
+		tonemap_ubo.brightness = 1.0;
+		tonemap_ubo.contrast = 1.0;
+		tonemap_ubo.saturation = 1.0;
 	}
 
 	if (scene_state.tonemap_buffer == 0) {
@@ -2743,7 +2784,13 @@ void RasterizerSceneGLES3::render_scene(const Ref<RenderSceneBuffers> &p_render_
 				SceneShaderGLES3::DISABLE_LIGHT_SPOT | SceneShaderGLES3::DISABLE_LIGHT_AREA;
 
 		RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, spec_constant, use_wireframe);
+		if (use_clip_distance) {
+			glEnable(GL_CLIP_DISTANCE0);
+		}
 		_render_list_template<PASS_MODE_DEPTH>(&render_list_params, &render_data, 0, render_list[RENDER_LIST_OPAQUE].elements.size());
+		if (use_clip_distance) {
+			glDisable(GL_CLIP_DISTANCE0);
+		}
 
 		glColorMask(1, 1, 1, 1);
 
@@ -2859,7 +2906,13 @@ void RasterizerSceneGLES3::render_scene(const Ref<RenderSceneBuffers> &p_render_
 	// Render Opaque Objects.
 	RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, spec_constant_base_flags, use_wireframe);
 
+	if (use_clip_distance) {
+		glEnable(GL_CLIP_DISTANCE0);
+	}
 	_render_list_template<PASS_MODE_COLOR>(&render_list_params, &render_data, 0, render_list[RENDER_LIST_OPAQUE].elements.size());
+	if (use_clip_distance) {
+		glDisable(GL_CLIP_DISTANCE0);
+	}
 
 	scene_state.enable_gl_depth_draw(false);
 	scene_state.enable_gl_stencil_test(false);
@@ -2915,7 +2968,13 @@ void RasterizerSceneGLES3::render_scene(const Ref<RenderSceneBuffers> &p_render_
 	//Render transparent pass
 	RenderListParameters render_list_params_alpha(render_list[RENDER_LIST_ALPHA].elements.ptr(), render_list[RENDER_LIST_ALPHA].elements.size(), reverse_cull, spec_constant_base_flags, use_wireframe);
 
+	if (use_clip_distance) {
+		glEnable(GL_CLIP_DISTANCE0);
+	}
 	_render_list_template<PASS_MODE_COLOR_TRANSPARENT>(&render_list_params_alpha, &render_data, 0, render_list[RENDER_LIST_ALPHA].elements.size(), true);
+	if (use_clip_distance) {
+		glDisable(GL_CLIP_DISTANCE0);
+	}
 
 	scene_state.enable_gl_stencil_test(false);
 
@@ -2969,7 +3028,7 @@ void RasterizerSceneGLES3::_render_post_processing(const RenderDataGLES3 *p_rend
 	float glow_hdr_luminance_cap = 12.0;
 	float srgb_white = 1.0;
 	if (p_render_data->environment.is_valid()) {
-		glow_enabled = environment_get_glow_enabled(p_render_data->environment);
+		glow_enabled = environment_get_glow_enabled(p_render_data->environment) && !p_render_data->raw_output; // Mariner G6.
 		glow_intensity = environment_get_glow_intensity(p_render_data->environment);
 		glow_bloom = environment_get_glow_bloom(p_render_data->environment);
 		glow_hdr_bleed_threshold = environment_get_glow_hdr_bleed_threshold(p_render_data->environment);

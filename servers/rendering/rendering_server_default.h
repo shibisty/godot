@@ -442,7 +442,7 @@ public:
 
 	FUNCRIDSPLIT(multimesh)
 
-	FUNC6(multimesh_allocate_data, RID, int, RSE::MultimeshTransformFormat, bool, bool, bool)
+	FUNC7(multimesh_allocate_data, RID, int, RSE::MultimeshTransformFormat, bool, bool, bool, bool)
 	FUNC1RC(int, multimesh_get_instance_count, RID)
 
 	FUNC2(multimesh_set_mesh, RID, RID)
@@ -461,6 +461,9 @@ public:
 	FUNC2RC(Transform2D, multimesh_instance_get_transform_2d, RID, int)
 	FUNC2RC(Color, multimesh_instance_get_color, RID, int)
 	FUNC2RC(Color, multimesh_instance_get_custom_data, RID, int)
+	FUNC3(multimesh_instance_set_custom_data2, RID, int, const Color &) // Mariner E14c.
+	FUNC2RC(Color, multimesh_instance_get_custom_data2, RID, int)
+	FUNC1RC(bool, multimesh_uses_custom_data2, RID)
 
 	FUNC2(multimesh_set_buffer, RID, const Vector<float> &)
 	FUNC1RC(RID, multimesh_get_command_buffer_rd_rid, RID)
@@ -513,6 +516,7 @@ public:
 	FUNC2(light_set_reverse_cull_face_mode, RID, bool)
 	FUNC2(light_set_shadow_caster_mask, RID, uint32_t)
 	FUNC2(light_set_restir, RID, bool)
+	FUNC4(light_set_clip_volume, RID, bool, const Vector3 &, const Vector3 &) // Mariner G3.
 	FUNC2(light_set_bake_mode, RID, RSE::LightBakeMode)
 	FUNC2(light_set_max_sdfgi_cascade, RID, uint32_t)
 
@@ -667,6 +671,7 @@ public:
 	FUNC2(particles_set_subemitter, RID, RID)
 	FUNC2(particles_set_collision_base_size, RID, float)
 	FUNC2(particles_set_screen_space_collision, RID, bool)
+	FUNC2(particles_set_overhead_map_collision, RID, bool) // Mariner G1c.
 
 	FUNC2(particles_set_transform_align, RID, RSE::ParticlesTransformAlign)
 	FUNC2(particles_set_transform_align_channel_filter, RID, RSE::ParticlesTransformAlignCustomSrc)
@@ -742,6 +747,8 @@ public:
 	FUNC2(camera_set_camera_attributes, RID, RID)
 	FUNC2(camera_set_compositor, RID, RID)
 	FUNC2(camera_set_use_vertical_aspect, RID, bool)
+	FUNC3(camera_set_clip_plane, RID, bool, const Plane &) // Mariner G6.
+	FUNC2(camera_set_raw_output, RID, bool)
 
 	/* OCCLUDER */
 	FUNCRIDSPLIT(occluder)
@@ -912,8 +919,14 @@ public:
 	FUNC3(environment_set_ddgi_update, RID, int, bool)
 	FUNC3(environment_set_ddgi_channels, RID, float, float)
 	FUNC4(environment_set_ddgi_sea, RID, bool, float, const Color &)
+	FUNC9(environment_set_overhead_map, RID, bool, float, float, int, uint32_t, float, float, float) // Mariner G1a.
+	FUNC2(environment_set_wetness, RID, float) // Mariner G4.
+	FUNC2(environment_set_snow, RID, float) // Mariner G4b.
 	FUNC4(environment_set_ssao_gtao, RID, bool, bool, float)
 	FUNC13(environment_set_color_grading, RID, bool, float, float, const Color &, const Color &, const Color &, const Vector4 &, const Vector3 &, const Vector3 &, const Vector3 &, float, bool)
+	FUNC5(environment_set_color_grading_night_vision, RID, float, const Color &, float, float)
+	FUNC4(environment_set_color_grading_channel_mixer, RID, const Vector3 &, const Vector3 &, const Vector3 &)
+	FUNC6(environment_set_color_grading_curves, RID, float, float, const Vector3 &, const Vector3 &, const Vector3 &)
 	FUNC6(environment_set_restir, RID, bool, int, int, bool, bool)
 	FUNC0RC(bool, pathtracing_is_supported)
 	FUNC1(directional_shadow_cache_set_enabled, bool)
@@ -965,6 +978,7 @@ public:
 	FUNC6(camera_attributes_set_image_effects, RID, float, float, float, float, float)
 	FUNC3(camera_attributes_set_exposure, RID, float, float)
 	FUNC6(camera_attributes_set_auto_exposure, RID, bool, float, float, float, float)
+	FUNC6(camera_attributes_set_auto_exposure_histogram, RID, bool, float, float, float, float) // Mariner G2.
 
 	/* SCENARIO API */
 

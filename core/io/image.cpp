@@ -38,6 +38,7 @@
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
 #include "core/templates/hash_map.h"
+#include "core/templates/local_vector.h"
 #include "core/variant/dictionary.h"
 
 const char *Image::format_names[Image::FORMAT_MAX] = {
@@ -3908,6 +3909,8 @@ void Image::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("srgb_to_linear"), &Image::srgb_to_linear);
 	ClassDB::bind_method(D_METHOD("linear_to_srgb"), &Image::linear_to_srgb);
 	ClassDB::bind_method(D_METHOD("normal_map_to_xy"), &Image::normal_map_to_xy);
+	ClassDB::bind_method(D_METHOD("normal_map_to_height", "depth", "invert_green"), &Image::normal_map_to_height, DEFVAL(1.0), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("normal_map_to_cavity", "depth", "radius", "invert_green"), &Image::normal_map_to_cavity, DEFVAL(1.0), DEFVAL(16), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("rgbe_to_srgb"), &Image::rgbe_to_srgb);
 	ClassDB::bind_method(D_METHOD("bump_map_to_normal_map", "bump_scale"), &Image::bump_map_to_normal_map, DEFVAL(1.0));
 
@@ -4031,6 +4034,154 @@ void Image::_bind_methods() {
 
 	BIND_ENUM_CONSTANT(ASTC_FORMAT_4x4);
 	BIND_ENUM_CONSTANT(ASTC_FORMAT_8x8);
+}
+
+// Mariner M5. The relief of a normal map, as in "Material Advances in Call of Duty: WWII" (Chan 2018): its slopes are
+// integrated into a heights field by solving the Poisson equation (Laplacian of the heights = divergence of the slopes)
+// with Jacobi relaxation from coarse to fine levels; the texture is taken to tile. The cavity occlusion looks for the
+// horizon of that heights field in 8 directions and takes the cosine-weighted visible part of the sky, cos^2 of the
+// horizon elevation, averaged over the directions.
+
+static void _m5_solve_level(LocalVector<float> &r_h, const LocalVector<float> &p_div, int p_w, int p_h, int p_iterations) {
+	LocalVector<float> next;
+	next.resize(r_h.size());
+	for (int it = 0; it < p_iterations; it++) {
+		for (int y = 0; y < p_h; y++) {
+			const int ym = ((y - 1 + p_h) % p_h) * p_w;
+			const int yp = ((y + 1) % p_h) * p_w;
+			const int yc = y * p_w;
+			for (int x = 0; x < p_w; x++) {
+				const int xm = (x - 1 + p_w) % p_w;
+				const int xp = (x + 1) % p_w;
+				next[yc + x] = 0.25f * (r_h[yc + xm] + r_h[yc + xp] + r_h[ym + x] + r_h[yp + x] - p_div[yc + x]);
+			}
+		}
+		SWAP(r_h, next);
+	}
+}
+
+static void _m5_solve(LocalVector<float> &r_h, const LocalVector<float> &p_div, int p_w, int p_h) {
+	// Coarse level first (2x smaller, divergence summed in 2x2 blocks and scaled for the doubled texel), then refine.
+	if (p_w >= 16 && p_h >= 16 && (p_w % 2) == 0 && (p_h % 2) == 0) {
+		const int cw = p_w / 2;
+		const int ch = p_h / 2;
+		LocalVector<float> cdiv;
+		cdiv.resize(cw * ch);
+		for (int y = 0; y < ch; y++) {
+			for (int x = 0; x < cw; x++) {
+				const int i = (y * 2) * p_w + x * 2;
+				// Average divergence; the Laplacian on a texel twice as large is 4x smaller, heights twice as large: x2.
+				cdiv[y * cw + x] = (p_div[i] + p_div[i + 1] + p_div[i + p_w] + p_div[i + p_w + 1]) * 0.25f * 4.0f * 0.5f;
+			}
+		}
+		LocalVector<float> ch_h;
+		ch_h.resize(cw * ch);
+		for (uint32_t i = 0; i < ch_h.size(); i++) {
+			ch_h[i] = 0.0f;
+		}
+		_m5_solve(ch_h, cdiv, cw, ch);
+		for (int y = 0; y < p_h; y++) {
+			for (int x = 0; x < p_w; x++) {
+				r_h[y * p_w + x] = ch_h[(y / 2) * cw + x / 2] * 2.0f;
+			}
+		}
+		_m5_solve_level(r_h, p_div, p_w, p_h, 40);
+	} else {
+		_m5_solve_level(r_h, p_div, p_w, p_h, MAX(200, p_w * p_h > 4096 ? 400 : 200));
+	}
+}
+
+Ref<Image> Image::normal_map_to_height(float p_depth, bool p_invert_green) const {
+	ERR_FAIL_COND_V_MSG(is_empty(), Ref<Image>(), "Empty image.");
+	ERR_FAIL_COND_V_MSG(is_compressed(), Ref<Image>(), "Decompress the normal map first.");
+	Ref<Image> src = duplicate();
+	src->clear_mipmaps();
+	src->convert(FORMAT_RGBAF);
+	const int w = src->get_width();
+	const int h = src->get_height();
+
+	// Slopes dh/dx and dh/dy in texels; image y grows downward, a normal map's green points up (OpenGL convention).
+	LocalVector<float> sx, sy, div;
+	sx.resize(w * h);
+	sy.resize(w * h);
+	div.resize(w * h);
+	for (int y = 0; y < h; y++) {
+		for (int x = 0; x < w; x++) {
+			const Color c = src->get_pixel(x, y);
+			const float nx = c.r * 2.0f - 1.0f;
+			float ny = c.g * 2.0f - 1.0f;
+			if (p_invert_green) {
+				ny = -ny;
+			}
+			const float nz = MAX(Math::sqrt(MAX(0.0f, 1.0f - nx * nx - ny * ny)), 0.05f);
+			sx[y * w + x] = -nx / nz;
+			sy[y * w + x] = ny / nz; // Height grows upward = toward smaller y.
+		}
+	}
+	for (int y = 0; y < h; y++) {
+		for (int x = 0; x < w; x++) {
+			const int xm = (x - 1 + w) % w;
+			const int xp = (x + 1) % w;
+			const int ym = (y - 1 + h) % h;
+			const int yp = (y + 1) % h;
+			div[y * w + x] = 0.5f * (sx[y * w + xp] - sx[y * w + xm]) + 0.5f * (sy[yp * w + x] - sy[ym * w + x]);
+		}
+	}
+	LocalVector<float> heights;
+	heights.resize(w * h);
+	for (uint32_t i = 0; i < heights.size(); i++) {
+		heights[i] = 0.0f;
+	}
+	_m5_solve(heights, div, w, h);
+
+	float mean = 0.0f;
+	for (uint32_t i = 0; i < heights.size(); i++) {
+		mean += heights[i];
+	}
+	mean /= MAX(1u, heights.size());
+	Ref<Image> out = Image::create_empty(w, h, false, FORMAT_RF);
+	for (int y = 0; y < h; y++) {
+		for (int x = 0; x < w; x++) {
+			out->set_pixel(x, y, Color((heights[y * w + x] - mean) * p_depth, 0, 0));
+		}
+	}
+	return out;
+}
+
+Ref<Image> Image::normal_map_to_cavity(float p_depth, int p_radius, bool p_invert_green) const {
+	Ref<Image> height_image = normal_map_to_height(p_depth, p_invert_green);
+	ERR_FAIL_COND_V(height_image.is_null(), Ref<Image>());
+	const int w = height_image->get_width();
+	const int h = height_image->get_height();
+	const int radius = CLAMP(p_radius, 1, 256);
+	LocalVector<float> heights;
+	heights.resize(w * h);
+	for (int y = 0; y < h; y++) {
+		for (int x = 0; x < w; x++) {
+			heights[y * w + x] = height_image->get_pixel(x, y).r;
+		}
+	}
+	static const int dirs[8][2] = { { 1, 0 }, { 1, 1 }, { 0, 1 }, { -1, 1 }, { -1, 0 }, { -1, -1 }, { 0, -1 }, { 1, -1 } };
+	Ref<Image> out = Image::create_empty(w, h, false, FORMAT_L8);
+	for (int y = 0; y < h; y++) {
+		for (int x = 0; x < w; x++) {
+			const float h0 = heights[y * w + x];
+			float visible = 0.0f;
+			for (int d = 0; d < 8; d++) {
+				const float step_len = (dirs[d][0] != 0 && dirs[d][1] != 0) ? Math::SQRT2 : 1.0f;
+				float max_tan = 0.0f;
+				for (int s = 1; s <= radius; s++) {
+					const int sx = ((x + dirs[d][0] * s) % w + w) % w;
+					const int sy = ((y + dirs[d][1] * s) % h + h) % h;
+					max_tan = MAX(max_tan, (heights[sy * w + sx] - h0) / (s * step_len));
+				}
+				// cos^2 of the horizon elevation: 1 / (1 + tan^2).
+				visible += 1.0f / (1.0f + max_tan * max_tan);
+			}
+			out->set_pixel(x, y, Color(visible / 8.0f, 0, 0));
+		}
+	}
+	return out;
 }
 
 void Image::normal_map_to_xy() {

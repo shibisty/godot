@@ -3,14 +3,43 @@
 // Vertex fetch functions are ported from NVIDIA's Godot fork (raytracing_hit_inc.glsl), adapted to the E5a layout
 // (MultiMesh instance colors, layer mask) and to inline ray queries.
 //
-// Requires: GL_EXT_buffer_reference, GL_ARB_gpu_shader_int64, oct_inc.glsl, PT_SCENE_SET.
+// Requires: GL_EXT_nonuniform_qualifier, oct_inc.glsl, PT_SCENE_SET.
+//
+// Mariner E5d: the meshes' buffers are an array of storage buffers (binding RT_GEOMETRY_BUFFERS_BINDING of the scene
+// set, RenderSceneBuffersRD::get_raytracing_geometry_buffers_uniform()), not buffer device addresses: shaders on D3D12
+// (DXIL) have no pointers. A buffer is an index into the array and a word offset into it.
 
-layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer FloatBuffer {
-	float v[];
-};
-layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer Uint32Buffer {
+#define RT_MAX_GEOMETRY_BUFFERS 4096
+const uint RT_NO_BUFFER = 0u; // Slot 0: a dummy buffer.
+
+#define RT_GEOMETRY_BUFFERS_BINDING 30
+layout(set = PT_SCENE_SET, binding = RT_GEOMETRY_BUFFERS_BINDING, std430) restrict readonly buffer RTGeometryBuffer {
 	uint v[];
-};
+}
+rt_geometry_buffers[RT_MAX_GEOMETRY_BUFFERS];
+
+// Mariner E5d: with RT_NONUNIFORM_WATERFALL (D3D12, RenderRaytracing::get_scene_shader_defines()) the threads of a
+// wave read the buffer one index at a time: nir_to_dxil marks no handle non-uniform, so each handle must be
+// wave-uniform. Requires GL_KHR_shader_subgroup_ballot then.
+uint rt_load(uint p_buffer, uint p_word) {
+#ifdef RT_NONUNIFORM_WATERFALL
+	uint value = 0u;
+	for (;;) {
+		uint first = subgroupBroadcastFirst(p_buffer);
+		if (first == p_buffer) {
+			value = rt_geometry_buffers[first].v[p_word];
+			break;
+		}
+	}
+	return value;
+#else
+	return rt_geometry_buffers[nonuniformEXT(p_buffer)].v[p_word];
+#endif
+}
+
+float rt_load_float(uint p_buffer, uint p_word) {
+	return uintBitsToFloat(rt_load(p_buffer, p_word));
+}
 
 const uint OFFSET_NONE = 0xFFFFFFFFu;
 
@@ -38,10 +67,15 @@ const uint MAT_FLAG_WAVE_DETAIL = 128u;
 const uint MAT_FLAG_FOAM_PATTERN = 256u;
 
 struct GeometryData {
-	uint64_t vertex_address;
-	uint64_t attribute_address;
-	uint64_t index_address;
-	uint64_t multimesh_address;
+	// Buffers (index into rt_geometry_buffers, RT_NO_BUFFER = 0 if none) and word offsets into them.
+	uint vertex_buffer;
+	uint vertex_offset;
+	uint attribute_buffer;
+	uint attribute_offset;
+	uint index_buffer;
+	uint index_offset;
+	uint multimesh_buffer;
+	uint multimesh_offset;
 	uint vertex_count;
 	uint position_stride;
 	uint normal_byte_offset;
@@ -88,7 +122,9 @@ struct MaterialData {
 	uint cull_mode;
 };
 
+#ifndef PT_SCENE_NO_TLAS // Mariner E20e: ReSTIR binds its own TLAS.
 layout(set = PT_SCENE_SET, binding = 0) uniform accelerationStructureEXT tlas;
+#endif
 
 layout(set = PT_SCENE_SET, binding = 1, std430) restrict readonly buffer GeometryBuffer {
 	GeometryData geometries[];
@@ -110,16 +146,15 @@ struct TBNResult {
 };
 
 void get_triangle_indices_ex(GeometryData geom, uint primitive_id, out uint i0, out uint i1, out uint i2) {
-	if (geom.index_format == 2u || geom.index_address == 0ul) {
+	if (geom.index_format == 2u || geom.index_buffer == RT_NO_BUFFER) {
 		i0 = primitive_id * 3u;
 		i1 = primitive_id * 3u + 1u;
 		i2 = primitive_id * 3u + 2u;
 	} else {
-		Uint32Buffer idx = Uint32Buffer(geom.index_address);
 		if (geom.index_format == 0u) {
 			uint byte_off = primitive_id * 6u;
-			uint word0 = idx.v[byte_off >> 2];
-			uint word1 = idx.v[(byte_off >> 2) + 1u];
+			uint word0 = rt_load(geom.index_buffer, geom.index_offset + (byte_off >> 2));
+			uint word1 = rt_load(geom.index_buffer, geom.index_offset + (byte_off >> 2) + 1u);
 			if ((byte_off & 3u) == 0u) {
 				i0 = word0 & 0xFFFFu;
 				i1 = word0 >> 16;
@@ -130,25 +165,24 @@ void get_triangle_indices_ex(GeometryData geom, uint primitive_id, out uint i0, 
 				i2 = word1 >> 16;
 			}
 		} else {
-			i0 = idx.v[primitive_id * 3u];
-			i1 = idx.v[primitive_id * 3u + 1u];
-			i2 = idx.v[primitive_id * 3u + 2u];
+			i0 = rt_load(geom.index_buffer, geom.index_offset + primitive_id * 3u);
+			i1 = rt_load(geom.index_buffer, geom.index_offset + primitive_id * 3u + 1u);
+			i2 = rt_load(geom.index_buffer, geom.index_offset + primitive_id * 3u + 2u);
 		}
 	}
 }
 
 vec2 fetch_uv(GeometryData geom, uint i0, uint i1, uint i2, vec3 bary) {
-	if (geom.uv_byte_offset == OFFSET_NONE || geom.attribute_address == 0ul) {
+	if (geom.uv_byte_offset == OFFSET_NONE || geom.attribute_buffer == RT_NO_BUFFER) {
 		return vec2(0.0);
 	}
 	uint stride_words = geom.attribute_stride >> 2;
 	uint uv_word_off = geom.uv_byte_offset >> 2;
 	vec2 uv0, uv1, uv2;
 	if ((geom.flags & GEOM_FLAG_COMPRESSED) != 0u) {
-		Uint32Buffer attr = Uint32Buffer(geom.attribute_address);
-		uint p0 = attr.v[i0 * stride_words + uv_word_off];
-		uint p1 = attr.v[i1 * stride_words + uv_word_off];
-		uint p2 = attr.v[i2 * stride_words + uv_word_off];
+		uint p0 = rt_load(geom.attribute_buffer, geom.attribute_offset + i0 * stride_words + uv_word_off);
+		uint p1 = rt_load(geom.attribute_buffer, geom.attribute_offset + i1 * stride_words + uv_word_off);
+		uint p2 = rt_load(geom.attribute_buffer, geom.attribute_offset + i2 * stride_words + uv_word_off);
 		uv0 = vec2(float(p0 & 0xFFFFu), float(p0 >> 16)) / 65535.0;
 		uv1 = vec2(float(p1 & 0xFFFFu), float(p1 >> 16)) / 65535.0;
 		uv2 = vec2(float(p2 & 0xFFFFu), float(p2 >> 16)) / 65535.0;
@@ -159,28 +193,28 @@ vec2 fetch_uv(GeometryData geom, uint i0, uint i1, uint i2, vec3 bary) {
 			uv2 = (uv2 - 0.5) * scale;
 		}
 	} else {
-		FloatBuffer attr_f = FloatBuffer(geom.attribute_address);
-		uv0 = vec2(attr_f.v[i0 * stride_words + uv_word_off], attr_f.v[i0 * stride_words + uv_word_off + 1u]);
-		uv1 = vec2(attr_f.v[i1 * stride_words + uv_word_off], attr_f.v[i1 * stride_words + uv_word_off + 1u]);
-		uv2 = vec2(attr_f.v[i2 * stride_words + uv_word_off], attr_f.v[i2 * stride_words + uv_word_off + 1u]);
+		uint b = geom.attribute_buffer;
+		uint o = geom.attribute_offset + uv_word_off;
+		uv0 = vec2(rt_load_float(b, o + i0 * stride_words), rt_load_float(b, o + i0 * stride_words + 1u));
+		uv1 = vec2(rt_load_float(b, o + i1 * stride_words), rt_load_float(b, o + i1 * stride_words + 1u));
+		uv2 = vec2(rt_load_float(b, o + i2 * stride_words), rt_load_float(b, o + i2 * stride_words + 1u));
 	}
 	return bary.x * uv0 + bary.y * uv1 + bary.z * uv2;
 }
 
 vec4 fetch_color(GeometryData geom, uint i0, uint i1, uint i2, vec3 bary) {
 	vec4 color = vec4(1.0);
-	if (geom.color_byte_offset != OFFSET_NONE && geom.attribute_address != 0ul) {
-		Uint32Buffer attr = Uint32Buffer(geom.attribute_address);
+	if (geom.color_byte_offset != OFFSET_NONE && geom.attribute_buffer != RT_NO_BUFFER) {
 		uint stride_words = geom.attribute_stride >> 2;
-		uint off = geom.color_byte_offset >> 2;
-		color = bary.x * unpackUnorm4x8(attr.v[i0 * stride_words + off]) + bary.y * unpackUnorm4x8(attr.v[i1 * stride_words + off]) + bary.z * unpackUnorm4x8(attr.v[i2 * stride_words + off]);
+		uint off = geom.attribute_offset + (geom.color_byte_offset >> 2);
+		color = bary.x * unpackUnorm4x8(rt_load(geom.attribute_buffer, i0 * stride_words + off)) + bary.y * unpackUnorm4x8(rt_load(geom.attribute_buffer, i1 * stride_words + off)) + bary.z * unpackUnorm4x8(rt_load(geom.attribute_buffer, i2 * stride_words + off));
 	}
 	// MultiMesh instance color (Godot multiplies COLOR by it).
-	if (geom.multimesh_address != 0ul && geom.mm_color_offset != OFFSET_NONE) {
+	if (geom.multimesh_buffer != RT_NO_BUFFER && geom.mm_color_offset != OFFSET_NONE) {
 		uint inst = geom.mm_vertices_per_instance == 0u ? 0u : i0 / geom.mm_vertices_per_instance;
-		FloatBuffer mb = FloatBuffer(geom.multimesh_address);
-		uint o = inst * geom.mm_stride + geom.mm_color_offset;
-		color *= vec4(mb.v[o], mb.v[o + 1u], mb.v[o + 2u], mb.v[o + 3u]);
+		uint mb = geom.multimesh_buffer;
+		uint o = geom.multimesh_offset + inst * geom.mm_stride + geom.mm_color_offset;
+		color *= vec4(rt_load_float(mb, o), rt_load_float(mb, o + 1u), rt_load_float(mb, o + 2u), rt_load_float(mb, o + 3u));
 	}
 	return color;
 }
@@ -197,11 +231,10 @@ void axis_angle_to_tbn(vec3 axis, float angle, out vec3 tangent, out vec3 binorm
 
 TBNResult fetch_tbn_compressed_vertex(GeometryData geom, uint idx) {
 	TBNResult result;
-	Uint32Buffer vb = Uint32Buffer(geom.vertex_address);
-	uint n_packed = vb.v[(geom.normal_byte_offset >> 2) + idx * (geom.normal_stride >> 2)];
+	uint n_packed = rt_load(geom.vertex_buffer, geom.vertex_offset + (geom.normal_byte_offset >> 2) + idx * (geom.normal_stride >> 2));
 	vec2 axis_oct = vec2(float(n_packed & 0xFFFFu), float(n_packed >> 16)) / 65535.0 * 2.0 - 1.0;
 	vec3 axis = oct_to_vec3(axis_oct);
-	uint pos_word1 = vb.v[idx * 2u + 1u];
+	uint pos_word1 = rt_load(geom.vertex_buffer, geom.vertex_offset + idx * 2u + 1u);
 	float angle_raw = float(pos_word1 >> 16) / 65535.0;
 	result.bitangent_sign = angle_raw > 0.5 ? 1.0 : -1.0;
 	float angle = abs(angle_raw * 2.0 - 1.0) * PI;
@@ -212,14 +245,13 @@ TBNResult fetch_tbn_compressed_vertex(GeometryData geom, uint idx) {
 
 TBNResult fetch_tbn_uncompressed_vertex(GeometryData geom, uint idx) {
 	TBNResult result;
-	Uint32Buffer vb = Uint32Buffer(geom.vertex_address);
-	uint norm_base = geom.normal_byte_offset >> 2;
+	uint norm_base = geom.vertex_offset + (geom.normal_byte_offset >> 2);
 	uint norm_stride = geom.normal_stride >> 2;
-	uint n_packed = vb.v[norm_base + idx * norm_stride];
+	uint n_packed = rt_load(geom.vertex_buffer, norm_base + idx * norm_stride);
 	vec2 n_oct = vec2(float(n_packed & 0xFFFFu), float(n_packed >> 16)) / 65535.0 * 2.0 - 1.0;
 	result.normal = oct_to_vec3(n_oct);
 	if (geom.normal_stride >= 8u) {
-		uint t_packed = vb.v[norm_base + idx * norm_stride + 1u];
+		uint t_packed = rt_load(geom.vertex_buffer, norm_base + idx * norm_stride + 1u);
 		vec2 t_raw = vec2(float(t_packed & 0xFFFFu), float(t_packed >> 16)) / 65535.0 * 2.0 - 1.0;
 		vec2 t_oct = vec2(t_raw.x, abs(t_raw.y) * 2.0 - 1.0);
 		result.tangent = oct_to_vec3(t_oct);
@@ -239,7 +271,7 @@ TBNResult fetch_tbn(GeometryData geom, uint i0, uint i1, uint i2, vec3 bary) {
 	result.tangent = vec3(1.0, 0.0, 0.0);
 	result.binormal = vec3(0.0, 0.0, 1.0);
 	result.bitangent_sign = 1.0;
-	if (geom.normal_byte_offset == OFFSET_NONE || geom.vertex_address == 0ul) {
+	if (geom.normal_byte_offset == OFFSET_NONE || geom.vertex_buffer == RT_NO_BUFFER) {
 		return result;
 	}
 	TBNResult t0, t1, t2;
@@ -262,14 +294,13 @@ TBNResult fetch_tbn(GeometryData geom, uint i0, uint i1, uint i2, vec3 bary) {
 // Object space position of a vertex in BLAS space (compressed meshes: [0, 1] of the AABB, as in the TLAS).
 vec3 fetch_position(GeometryData geom, uint i) {
 	if ((geom.flags & GEOM_FLAG_COMPRESSED) != 0u) {
-		Uint32Buffer vb = Uint32Buffer(geom.vertex_address);
-		uint w0 = vb.v[i * 2u];
-		uint w1 = vb.v[i * 2u + 1u];
+		uint w0 = rt_load(geom.vertex_buffer, geom.vertex_offset + i * 2u);
+		uint w1 = rt_load(geom.vertex_buffer, geom.vertex_offset + i * 2u + 1u);
 		return vec3(float(w0 & 0xFFFFu), float(w0 >> 16), float(w1 & 0xFFFFu)) / 65535.0;
 	}
-	FloatBuffer vb = FloatBuffer(geom.vertex_address);
 	uint s = geom.position_stride >> 2;
-	return vec3(vb.v[i * s], vb.v[i * s + 1u], vb.v[i * s + 2u]);
+	uint o = geom.vertex_offset + i * s;
+	return vec3(rt_load_float(geom.vertex_buffer, o), rt_load_float(geom.vertex_buffer, o + 1u), rt_load_float(geom.vertex_buffer, o + 2u));
 }
 
 // ============================================================================

@@ -1,0 +1,28 @@
+diff --git a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_callbacks_glsl.h b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_callbacks_glsl.h
+index 20c5c2967..4cb7fd003 100644
+--- a/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_callbacks_glsl.h
++++ b/thirdparty/amd-fsr3/shaders/ffx_frameinterpolation_callbacks_glsl.h
+@@ -215,7 +215,7 @@
+ ///////////////////////////////////////////////
+ 
+ 
+-layout (set = 0, binding = 1000) uniform sampler s_LinearClamp;
++layout (set = 0, binding = 900) uniform sampler s_LinearClamp;
+ 
+   ///////////////////////////////////////////////
+  // declare SRVs and SRV accessors
+diff --git a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_callbacks_glsl.h b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_callbacks_glsl.h
+index 29f76c2f2..bcf8d3fd9 100644
+--- a/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_callbacks_glsl.h
++++ b/thirdparty/amd-fsr3/shaders/ffx_fsr3upscaler_callbacks_glsl.h
+@@ -282,8 +282,8 @@ FfxUInt32x2 SPD_RenderSize()
+ }
+ #endif // #if defined(FSR3UPSCALER_BIND_CB_SPD)
+ 
+-layout (set = 0, binding = 1000) uniform sampler s_PointClamp;
+-layout (set = 0, binding = 1001) uniform sampler s_LinearClamp;
++layout (set = 0, binding = 900) uniform sampler s_PointClamp;
++layout (set = 0, binding = 901) uniform sampler s_LinearClamp;
+ 
+ #if defined(FSR3UPSCALER_BIND_SRV_SPD_MIPS)
+ layout (set = 0, binding = FSR3UPSCALER_BIND_SRV_SPD_MIPS) uniform texture2D  r_spd_mips;

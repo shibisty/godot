@@ -373,6 +373,9 @@ public:
 	void copy_r32f_to_depth_fb(RID p_source_r32f, RID p_dest_depth_framebuffer, const Rect2i &p_rect);
 	// Mariner E10: copies p_rect of a depth texture into the same rect of a depth-only framebuffer of the same size.
 	void copy_depth_rect_to_depth_fb(RID p_source_depth, RID p_dest_depth_framebuffer, const Rect2i &p_rect);
+	// Mariner E10c: p_source_rect of the source to p_dest_rect (the same size) of the destination; the depth moved by
+	// p_depth_offset except where it is 0 (cleared).
+	void copy_depth_rect_to_depth_fb_shifted(RID p_source_depth, RID p_dest_depth_framebuffer, const Rect2i &p_source_rect, const Rect2i &p_dest_rect, float p_depth_offset);
 	void copy_depth_to_rect_and_linearize(RID p_source_rd_texture, RID p_dest_texture, const Rect2i &p_rect, bool p_flip_y, float p_z_near, float p_z_far);
 	void copy_to_fb_rect(RID p_source_rd_texture, RID p_dest_framebuffer, const Rect2i &p_rect, bool p_flip_y = false, bool p_force_luminance = false, bool p_alpha_to_zero = false, bool p_srgb = false, RID p_secondary = RID(), bool p_multiview = false, bool alpha_to_one = false, bool p_linear = false, bool p_normal = false, const Rect2 &p_src_rect = Rect2(), float p_linear_luminance_multiplier = 1.0, bool p_bilinear_filtering = true);
 	void copy_to_atlas_fb(RID p_source_rd_texture, RID p_dest_framebuffer, const Rect2 &p_uv_rect, RD::DrawListID p_draw_list, bool p_flip_y = false, bool p_panorama = false);

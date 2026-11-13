@@ -21,7 +21,7 @@ struct LightData { //this structure needs to be as packed as possible
 	float specular_amount;
 	float shadow_opacity;
 	float restir; // Mariner E20: 1.0 if the opaque pass gets this light from ReSTIR DI (it skips it).
-	float pad;
+	float clip; // Mariner G3: 1.0 if the light is clipped to its box (clip_x, clip_y, clip_z).
 
 	vec4 atlas_rect; // rect in the shadow atlas
 	mat4 shadow_matrix;
@@ -34,7 +34,21 @@ struct LightData { //this structure needs to be as packed as possible
 	float volumetric_fog_energy;
 	uint bake_mode;
 	vec4 projector_rect; //projector rect in srgb decal atlas
+	// Mariner G3: the clip box (Light3D.clip_volume_*) in view space: the box coordinate along axis i (-1 .. 1 inside) is
+	// dot(clip_i.xyz, vertex) + clip_i.w.
+	vec4 clip_x;
+	vec4 clip_y;
+	vec4 clip_z;
 };
+
+// Mariner G3: whether a point (view space) is inside the light's clip box (true without a box).
+bool light_clip_inside(vec4 p_clip_x, vec4 p_clip_y, vec4 p_clip_z, float p_clip, vec3 p_vertex) {
+	if (p_clip < 0.5) {
+		return true;
+	}
+	vec3 local = vec3(dot(p_clip_x.xyz, p_vertex) + p_clip_x.w, dot(p_clip_y.xyz, p_vertex) + p_clip_y.w, dot(p_clip_z.xyz, p_vertex) + p_clip_z.w);
+	return all(lessThanEqual(abs(local), vec3(1.0)));
+}
 
 #define REFLECTION_AMBIENT_DISABLED 0
 #define REFLECTION_AMBIENT_ENVIRONMENT 1

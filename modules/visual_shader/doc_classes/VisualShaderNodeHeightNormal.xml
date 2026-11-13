@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VisualShaderNodeHeightNormal" inherits="VisualShaderNode" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		The normal of the surface raised by a height map, per pixel (Mariner G7).
+	</brief_description>
+	<description>
+		The normal of the drawn surface raised by [code]height_map[/code] (red channel, a sampler port: connect a texture parameter) times [code]scale[/code] (in meters), at [code]uv[/code] (the mesh's UV if not connected): the surface gradient of the height (Mikkelsen) from the screen derivatives of the position and the UV, the height's slope over a texel or the pixel's footprint. Connect it to the fragment shader's Normal: with [VisualShaderNodeDisplace] the relief is shaded at the texture's resolution, finer than the vertices; alone, it is bump mapping without tangents. In view space, as [code]NORMAL[/code]; the back faces of double-sided materials see it turned.
+	</description>
+	<tutorials>
+	</tutorials>
+</class>

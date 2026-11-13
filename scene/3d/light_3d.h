@@ -76,6 +76,10 @@ private:
 	uint32_t cull_mask = 0;
 	uint32_t shadow_caster_mask = 0xFFFFFFFF;
 	bool restir = false; // Mariner E20.
+	bool clip_volume_enabled = false; // Mariner G3.
+	Vector3 clip_volume_offset;
+	Vector3 clip_volume_size = Vector3(4, 3, 4);
+	void _update_clip_volume();
 	bool distance_fade_enabled = false;
 	real_t distance_fade_begin = 40.0;
 	real_t distance_fade_shadow = 50.0;
@@ -141,6 +145,13 @@ public:
 
 	void set_restir(bool p_enable);
 	bool is_restir() const;
+	// Mariner G3: the box (in this light's space) outside which the light does not shine.
+	void set_clip_volume_enabled(bool p_enable);
+	bool is_clip_volume_enabled() const;
+	void set_clip_volume_offset(const Vector3 &p_offset);
+	Vector3 get_clip_volume_offset() const;
+	void set_clip_volume_size(const Vector3 &p_size);
+	Vector3 get_clip_volume_size() const;
 
 	void set_bake_mode(BakeMode p_mode);
 	BakeMode get_bake_mode() const;

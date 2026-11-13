@@ -229,6 +229,7 @@
 #include "scene/3d/bone_attachment_3d.h"
 #include "scene/3d/bone_constraint_3d.h"
 #include "scene/3d/bone_twist_disperser_3d.h"
+#include "scene/3d/box_impostor_baker.h" // Mariner G5b.
 #include "scene/3d/camera_3d.h"
 #include "scene/3d/ccd_ik_3d.h"
 #include "scene/3d/chain_ik_3d.h"
@@ -257,7 +258,9 @@
 #include "scene/3d/multimesh_instance_3d.h"
 #include "scene/3d/node_3d.h"
 #include "scene/3d/occluder_instance_3d.h"
+#include "scene/3d/octahedral_impostor_baker.h" // Mariner G5e.
 #include "scene/3d/path_3d.h"
+#include "scene/3d/planar_reflection_3d.h" // Mariner G6.
 #include "scene/3d/reflection_probe.h"
 #include "scene/3d/remote_transform_3d.h"
 #include "scene/3d/retarget_modifier_3d.h"
@@ -280,6 +283,7 @@
 #include "scene/resources/3d/joint_limitation_3d.h"
 #include "scene/resources/3d/joint_limitation_cone_3d.h"
 #include "scene/resources/3d/mesh_library.h"
+#include "scene/resources/3d/mesh_tessellator.h" // Mariner G7.
 #include "scene/resources/3d/navigation_mesh_source_geometry_data_3d.h"
 #include "scene/resources/3d/primitive_meshes.h"
 #include "scene/resources/3d/sky_material.h"
@@ -656,6 +660,10 @@ void register_scene_types() {
 	GDREGISTER_CLASS(AreaLight3D);
 	GDREGISTER_CLASS(ReflectionProbe);
 	GDREGISTER_CLASS(Decal);
+	GDREGISTER_CLASS(BoxImpostorBaker); // Mariner G5b.
+	GDREGISTER_CLASS(OctahedralImpostorBaker); // Mariner G5e.
+	GDREGISTER_CLASS(MeshTessellator); // Mariner G7.
+	GDREGISTER_CLASS(PlanarReflection3D); // Mariner G6.
 	GDREGISTER_CLASS(VoxelGI);
 	GDREGISTER_CLASS(VoxelGIData);
 	GDREGISTER_CLASS(LightmapGI);

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="OctahedralImpostorBaker" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Mariner G5e. Bakes a model into an octahedral impostor with depth: one quad that looks like the model from any side.
+	</brief_description>
+	<description>
+		Mariner G5e. For far models whose shape a box does not hold (see [BoxImpostorBaker]) - cranes, masts, ships, lattice towers. The model is photographed orthographically from [member frames] x [member frames] directions spread over the sphere (or the upper hemisphere, [member hemisphere]) by the octahedral map; every photo keeps the albedo, the object-space normal, the depth of the model's front and the depth where the ray leaves the part it entered (the nearest back faces). The result is an [ArrayMesh] with one quad and a [ShaderMaterial] ([method get_shader]): the vertex shader turns the quad to the camera (to the light in the shadow passes), the fragment shader traces the view ray through the 3 photos nearest to the view direction - solid between the front and back depths - and blends what they saw, writing the normal (lit like the model) and the depth of the hit (intersections with water and terrain, shadows). The textures are in the material, so the mesh can be saved as a resource. The editor's [b]Project &gt; Tools &gt; Bake Octahedral Impostor[/b] bakes the selected nodes and adds the impostors next to them.
+		The bake renders, so it needs a rendering server; the source must be inside the scene tree. Materials other than [BaseMaterial3D] are photographed with the unshaded debug draw (Forward+; lit in the Mobile renderer). Single-sided surfaces are as thick as 2 texels of a frame.
+		[codeblock]
+		var baker = OctahedralImpostorBaker.new()
+		baker.frame_size = 256
+		var impostor = MeshInstance3D.new()
+		impostor.mesh = baker.bake($Crane)
+		impostor.transform = $Crane.transform
+		add_child(impostor)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="bake">
+			<return type="ArrayMesh" />
+			<param index="0" name="source" type="Node3D" />
+			<description>
+				Photographs the visible geometry under [param source] (in its own space) and returns the impostor, or [code]null[/code] if there is none. The quad's mesh has a custom AABB holding the bounding sphere.
+			</description>
+		</method>
+		<method name="direction_to_grid" qualifiers="static">
+			<return type="Vector2" />
+			<param index="0" name="direction" type="Vector3" />
+			<param index="1" name="frames" type="int" />
+			<param index="2" name="hemisphere" type="bool" />
+			<description>
+				The position on the frame grid (0 to [param frames] - 1 on both axes) of the direction [param direction] toward the camera: the inverse of [method frame_direction]. With [param hemisphere], directions below the horizon are clamped to it.
+			</description>
+		</method>
+		<method name="frame_basis" qualifiers="static">
+			<return type="Basis" />
+			<param index="0" name="direction" type="Vector3" />
+			<description>
+				The camera basis a frame is photographed with: X right, Y up (world up, or Z when looking straight up or down), Z = [param direction] toward the camera.
+			</description>
+		</method>
+		<method name="frame_direction" qualifiers="static">
+			<return type="Vector3" />
+			<param index="0" name="grid" type="Vector2" />
+			<param index="1" name="frames" type="int" />
+			<param index="2" name="hemisphere" type="bool" />
+			<description>
+				The unit direction toward the camera of the frame at the grid point [param grid] (0 to [param frames] - 1 on both axes): the octahedral map of the whole sphere (the grid's center looks from above, its corners from below) or, with [param hemisphere], of the upper hemisphere (its edges on the horizon).
+			</description>
+		</method>
+		<method name="get_albedo_image" qualifiers="const">
+			<return type="Image" />
+			<description>
+				The last bake's albedo atlas (sRGB, RGBA8 with mipmaps that keep the alpha coverage): the frame at grid point (x, y) in column x, row y.
+			</description>
+		</method>
+		<method name="get_center" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				The center of the last bake's bounding sphere, in the source's space.
+			</description>
+		</method>
+		<method name="get_normal_depth_image" qualifiers="const">
+			<return type="Image" />
+			<description>
+				The last bake's normal and depth atlas (RGBA8): the object-space normal octahedrally encoded in R and G, the depth of the model's front in B and of where the ray leaves it in A, 0 at the front of the bounding sphere and 1 at its back.
+			</description>
+		</method>
+		<method name="get_radius" qualifiers="const">
+			<return type="float" />
+			<description>
+				The radius of the last bake's bounding sphere.
+			</description>
+		</method>
+		<method name="get_shader" qualifiers="static">
+			<return type="Shader" />
+			<description>
+				A new [Shader] of the impostor's material. Its uniforms: [code]impostor_albedo[/code], [code]impostor_normal_depth[/code], [code]impostor_frames[/code], [code]impostor_hemisphere[/code], [code]impostor_center[/code], [code]impostor_radius[/code] (set by the bake); [code]impostor_alpha_cut[/code] (0.35), [code]roughness[/code] (0.85) and [code]impostor_steps[/code] (64, the steps of the trace through each frame).
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="frame_size" type="int" setter="set_frame_size" getter="get_frame_size" default="128">
+			The size of every frame, in pixels: the atlas is [member frames] x [member frame_size] on a side.
+		</member>
+		<member name="frames" type="int" setter="set_frames" getter="get_frames" default="12">
+			The frames along each side of the octahedral grid (2 to 32).
+		</member>
+		<member name="hemisphere" type="bool" setter="set_hemisphere" getter="is_hemisphere" default="false">
+			If [code]true[/code], the frames cover only the upper hemisphere (twice as dense): for models never seen from below.
+		</member>
+		<member name="padding" type="int" setter="set_padding" getter="get_padding" default="2">
+			How far the colors and normals are spread into the empty texels around the model (in addition to 2 texels), so that the filtering and the mipmaps do not pull the background into its edges.
+		</member>
+	</members>
+</class>

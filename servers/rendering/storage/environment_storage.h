@@ -51,6 +51,23 @@ public:
 		Vector3 power = Vector3(1, 1, 1);
 		float saturation = 1.0;
 		bool gamut_mapping = true;
+		// Mariner F3b: night vision (Purkinje shift): towards the rod response below `night_vision_start` scene
+		// luminance (before the exposure), fully at `night_vision_end`.
+		float night_vision = 0.0;
+		Color night_vision_tint = Color(0.70, 0.85, 1.35);
+		float night_vision_start = 0.05;
+		float night_vision_end = 0.0005;
+		// Mariner F3c: channel mixer (rows: the input weights of the output red, green, blue), contrast around the
+		// middle grey in ACEScct, vibrance (saturation weighted towards the less saturated colors), per channel curves
+		// (power below the mid point, linear slope above it, continuous there).
+		Vector3 mixer_red = Vector3(1, 0, 0);
+		Vector3 mixer_green = Vector3(0, 1, 0);
+		Vector3 mixer_blue = Vector3(0, 0, 1);
+		float contrast = 1.0;
+		float vibrance = 1.0;
+		Vector3 curves_shadow_gamma = Vector3(1, 1, 1);
+		Vector3 curves_mid_point = Vector3(0.18, 0.18, 0.18);
+		Vector3 curves_highlight_scale = Vector3(1, 1, 1);
 	};
 
 	union TonemapParameters {
@@ -90,6 +107,26 @@ private:
 	static RendererEnvironmentStorage *singleton;
 
 	// Environment
+public:
+	// Mariner G1a: the depth of the scene from above around the camera (Environment.overhead_map_*), for the sky
+	// occlusion of the ambient light and reflections (CryEngine HeightMapAO), rain and snow cover.
+	struct OverheadMapSettings {
+		bool enabled = false;
+		float size = 512.0; // Meters, square.
+		float height = 256.0; // Meters, from the bottom to the top of the box.
+		int resolution = 1024; // Texels per side.
+		uint32_t cull_mask = 0xFFFFF;
+		float sky_occlusion = 1.0;
+		float sky_occlusion_radius = 16.0; // Meters.
+		float bias = 0.3; // Meters.
+	};
+
+	// The box of the map for a camera: the center snapped to whole texels (no shimmering when the camera moves), half
+	// the height above and half below the camera, the top snapped to whole meters. Points above or below the box get
+	// no occlusion.
+	static void overhead_map_region(const Vector3 &p_camera, float p_size, float p_height, int p_resolution, Vector3 &r_min, Vector3 &r_max);
+
+private:
 	struct Environment {
 		// Note, we capture and store all environment parameters received from Godot here.
 		// Not all renderers support all effects and should just ignore the bits they don't support.
@@ -245,6 +282,12 @@ private:
 		bool ddgi_sea = false;
 		float ddgi_sea_level = 0.0;
 		Color ddgi_sea_color = Color(0.02, 0.08, 0.1);
+
+		// Overhead map (Mariner G1a).
+		OverheadMapSettings overhead_map;
+
+		float wetness = 0.0; // Mariner G4.
+		float snow = 0.0; // Mariner G4b.
 	};
 
 	mutable RID_Owner<Environment, true> environment_owner;
@@ -384,6 +427,9 @@ public:
 	// Mariner F3.
 	void environment_set_color_grading(RID p_env, bool p_enable, float p_temperature, float p_tint, const Color &p_shadows, const Color &p_midtones, const Color &p_highlights, const Vector4 &p_tonal_ranges, const Vector3 &p_slope, const Vector3 &p_offset, const Vector3 &p_power, float p_saturation, bool p_gamut_mapping);
 	ColorGrading environment_get_color_grading(RID p_env) const;
+	void environment_set_color_grading_night_vision(RID p_env, float p_amount, const Color &p_tint, float p_start, float p_end); // Mariner F3b.
+	void environment_set_color_grading_channel_mixer(RID p_env, const Vector3 &p_red, const Vector3 &p_green, const Vector3 &p_blue); // Mariner F3c.
+	void environment_set_color_grading_curves(RID p_env, float p_contrast, float p_vibrance, const Vector3 &p_shadow_gamma, const Vector3 &p_mid_point, const Vector3 &p_highlight_scale); // Mariner F3c.
 
 	// SSIL
 	void environment_set_ssil(RID p_env, bool p_enable, float p_radius, float p_intensity, float p_sharpness, float p_normal_rejection);
@@ -450,4 +496,14 @@ public:
 	bool environment_get_ddgi_sea(RID p_env) const;
 	float environment_get_ddgi_sea_level(RID p_env) const;
 	Color environment_get_ddgi_sea_color(RID p_env) const;
+
+	// Overhead map (Mariner G1a).
+	void environment_set_overhead_map(RID p_env, bool p_enable, float p_size, float p_height, int p_resolution, uint32_t p_cull_mask, float p_sky_occlusion, float p_sky_occlusion_radius, float p_bias);
+	OverheadMapSettings environment_get_overhead_map(RID p_env) const;
+
+	// Wetness of the world (Mariner G4).
+	void environment_set_wetness(RID p_env, float p_wetness);
+	float environment_get_wetness(RID p_env) const;
+	void environment_set_snow(RID p_env, float p_snow);
+	float environment_get_snow(RID p_env) const;
 };

@@ -102,6 +102,7 @@ public:
 		RSE::MultimeshTransformFormat _transform_format = RSE::MULTIMESH_TRANSFORM_3D;
 		bool _use_colors = false;
 		bool _use_custom_data = false;
+		bool _use_custom_data2 = false; // Mariner E14c.
 
 		// The stride of the buffer in floats.
 		int _stride = 0;
@@ -129,7 +130,7 @@ public:
 	virtual void multimesh_initialize(RID p_rid);
 	virtual void multimesh_free(RID p_rid);
 
-	virtual void multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors = false, bool p_use_custom_data = false, bool p_use_indirect = false);
+	virtual void multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors = false, bool p_use_custom_data = false, bool p_use_indirect = false, bool p_use_custom_data2 = false);
 
 	virtual int multimesh_get_instance_count(RID p_multimesh) const;
 
@@ -148,6 +149,9 @@ public:
 	virtual Transform2D multimesh_instance_get_transform_2d(RID p_multimesh, int p_index) const;
 	virtual Color multimesh_instance_get_color(RID p_multimesh, int p_index) const;
 	virtual Color multimesh_instance_get_custom_data(RID p_multimesh, int p_index) const;
+	virtual void multimesh_instance_set_custom_data2(RID p_multimesh, int p_index, const Color &p_color); // Mariner E14c.
+	virtual Color multimesh_instance_get_custom_data2(RID p_multimesh, int p_index) const;
+	virtual bool multimesh_uses_custom_data2(RID p_multimesh) const;
 
 	virtual void multimesh_set_buffer(RID p_multimesh, const Vector<float> &p_buffer);
 	virtual RID multimesh_get_command_buffer_rd_rid(RID p_multimesh) const;
@@ -177,7 +181,7 @@ public:
 	virtual void _multimesh_initialize(RID p_rid) = 0;
 	virtual void _multimesh_free(RID p_rid) = 0;
 
-	virtual void _multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors = false, bool p_use_custom_data = false, bool p_use_indirect = false) = 0;
+	virtual void _multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors = false, bool p_use_custom_data = false, bool p_use_indirect = false, bool p_use_custom_data2 = false) = 0;
 
 	virtual int _multimesh_get_instance_count(RID p_multimesh) const = 0;
 
@@ -196,6 +200,9 @@ public:
 	virtual Transform2D _multimesh_instance_get_transform_2d(RID p_multimesh, int p_index) const = 0;
 	virtual Color _multimesh_instance_get_color(RID p_multimesh, int p_index) const = 0;
 	virtual Color _multimesh_instance_get_custom_data(RID p_multimesh, int p_index) const = 0;
+	virtual void _multimesh_instance_set_custom_data2(RID p_multimesh, int p_index, const Color &p_color) = 0; // Mariner E14c.
+	virtual Color _multimesh_instance_get_custom_data2(RID p_multimesh, int p_index) const = 0;
+	virtual bool _multimesh_uses_custom_data2(RID p_multimesh) const = 0;
 
 	virtual void _multimesh_set_buffer(RID p_multimesh, const Vector<float> &p_buffer) = 0;
 	virtual RID _multimesh_get_command_buffer_rd_rid(RID p_multimesh) const = 0;

@@ -34,6 +34,7 @@ TEST_FORCE_LINK(test_mariner_fixes)
 
 #include "core/object/callable_mp.h"
 #include "core/os/os.h"
+#include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/rendering_device.h"
 
 #ifdef VULKAN_ENABLED
@@ -49,6 +50,14 @@ TEST_FORCE_LINK(test_mariner_fixes)
 //    without freeing it) and lost it until the mesh was set again. The MeshStorage path needs a full renderer; it is
 //    checked by the exit leak report of RenderingDevice::finalize() (engine/README.md, "Engine fixes"), here only the new
 //    RenderingDevice::buffer_is_valid() it relies on.
+// 3. Directional soft shadows (PCSS, G0a in docs/engine_gap_g.md): the penumbra came from tan of the whole angular
+//    diameter (twice the light's size), the blocker search counted every texel of its disk (a halo around thin objects:
+//    the whole pole for a point at its foot) with the perspective divisor, its radii were all at the edge of the disk
+//    (the search radius is negative there, the light direction points to the light) and the kernel compared one depth
+//    on tilted receivers (self-shadowing). The shaders are checked by engine/tests/e20/sun_shadow.gd (maps against ray
+//    traced shadows and the physics), here only the radius per unit of distance.
+// 4. EditorDock::current_layout was uninitialized: test_mariner_fixes_editor.cpp (volk's X11 Window clashes with
+//    Godot's Window in this file).
 // The Vulkan cases run on any Vulkan driver (on the build server Mesa lavapipe); GODOT_MARINER_TEST_NO_VULKAN=1 skips them.
 
 namespace TestMarinerFixes {
@@ -172,5 +181,15 @@ TEST_CASE("[Mariner][fixes] RenderingDevice::buffer_is_valid()") {
 }
 
 #endif // VULKAN_ENABLED
+
+TEST_CASE("[Mariner][fixes] Directional soft shadows: penumbra radius from half the angular diameter") {
+	using RendererRD::LightStorage;
+	CHECK(LightStorage::directional_penumbra_tan(0.0f) == 0.0f);
+	// The sun (0.53 deg): 4.6 mm of penumbra radius per meter to the occluder.
+	CHECK(LightStorage::directional_penumbra_tan(0.53f) == doctest::Approx(0.004625).epsilon(0.001));
+	// 4 deg (engine/tests/e20/sun_shadow.gd): tan 2 deg.
+	CHECK(LightStorage::directional_penumbra_tan(4.0f) == doctest::Approx(Math::tan(Math::deg_to_rad(2.0))).epsilon(1e-6));
+	CHECK(LightStorage::directional_penumbra_tan(4.0f) < 0.5f * Math::tan(Math::deg_to_rad(4.0)) + 1e-4f);
+}
 
 } // namespace TestMarinerFixes

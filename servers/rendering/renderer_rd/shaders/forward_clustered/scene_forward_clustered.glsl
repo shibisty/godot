@@ -216,6 +216,7 @@ uint multimesh_stride() {
 	uint stride = sc_multimesh_format_2d() ? 2 : 3;
 	stride += sc_multimesh_has_color() ? 1 : 0;
 	stride += sc_multimesh_has_custom_data() ? 1 : 0;
+	stride += sc_multimesh_has_custom_data2() ? 1 : 0; // Mariner E14c.
 	return stride;
 }
 
@@ -234,6 +235,7 @@ void vertex_shader(vec3 vertex_input,
 		in bool is_prev_frame,
 		out vec4 screen_pos) {
 	vec4 instance_custom = vec4(0.0);
+	vec4 instance_custom2 = vec4(0.0); // Mariner E14c.
 #if defined(COLOR_USED)
 	color_interp = color_attrib;
 #endif
@@ -330,6 +332,9 @@ void vertex_shader(vec3 vertex_input,
 
 		if (sc_multimesh_has_custom_data()) {
 			instance_custom = transforms.data[offset];
+		}
+		if (sc_multimesh_has_custom_data2()) {
+			instance_custom2 = transforms.data[offset + 1]; // Mariner E14c.
 		}
 
 #endif
@@ -524,6 +529,11 @@ void vertex_shader(vec3 vertex_input,
 	gl_Position = position;
 #else
 	gl_Position = projection_matrix * vec4(vertex_interp, 1.0);
+#endif
+
+#ifdef USE_CLIP_PLANE
+	// Mariner G6: the camera's clip plane (planar reflections: what is behind the mirror).
+	gl_ClipDistance[0] = dot(vec4(vertex_interp, 1.0), scene_data.clip_plane);
 #endif
 
 #ifdef USE_MULTIVIEW
@@ -1081,6 +1091,16 @@ layout(location = 2) out vec2 motion_vector;
 
 #include "../scene_forward_aa_inc.glsl"
 
+// Mariner M6, F5: written by the material in every pass, read by the lights (scene_forward_lights_inc.glsl).
+#ifdef LIGHT_SHEEN_USED
+vec3 sheen_color = vec3(0.0);
+float sheen_roughness = 0.5;
+#endif
+#ifdef LIGHT_IRIDESCENCE_USED
+float iridescence = 0.0;
+#endif
+#define MARINER_MATERIAL_GLOBALS
+
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 
 // Default to SPECULAR_SCHLICK_GGX.
@@ -1244,12 +1264,19 @@ void fragment_shader(in SceneData scene_data) {
 	float rim_tint = 0.0;
 	float clearcoat = 0.0;
 	float clearcoat_roughness = 0.0;
+#ifdef LIGHT_IRIDESCENCE_USED
+	float iridescence_ior = 1.3; // Mariner F5.
+	float iridescence_thickness = 400.0;
+#endif
 	float anisotropy = 0.0;
 	vec2 anisotropy_flow = vec2(1.0, 0.0);
 	vec3 energy_compensation = vec3(1.0);
 	vec4 fog = vec4(0.0, 0.0, 0.0, 1.0);
 #if defined(CUSTOM_RADIANCE_USED)
 	vec4 custom_radiance = vec4(0.0);
+#endif
+#if defined(CUSTOM_REFLECTION_USED)
+	vec4 custom_reflection = vec4(0.0); // Mariner G6.
 #endif
 #if defined(CUSTOM_IRRADIANCE_USED)
 	vec4 custom_irradiance = vec4(0.0);
@@ -1355,6 +1382,19 @@ void fragment_shader(in SceneData scene_data) {
 #else // !POINT_SIZE_USED
 	vec2 point_coord = vec2(0.5);
 #endif
+#endif
+
+	// Mariner G1b: SKY_OCCLUSION / OVERHEAD_COVER from the overhead map (1 / 0 without one), at the point and its
+	// geometry normal before the fragment function.
+#if defined(SKY_OCCLUSION_USED) || defined(OVERHEAD_COVER_USED)
+	vec3 overhead_builtin_position = (inv_view_matrix * vec4(vertex, 1.0)).xyz;
+	vec3 overhead_builtin_normal = normalize(mat3(inv_view_matrix) * normal_highp);
+#endif
+#ifdef SKY_OCCLUSION_USED
+	float sky_occlusion_builtin = overhead_map_sky_visibility(overhead_builtin_position, overhead_builtin_normal);
+#endif
+#ifdef OVERHEAD_COVER_USED
+	float overhead_cover_builtin = overhead_map_cover(overhead_builtin_position, overhead_builtin_normal);
 #endif
 
 	{
@@ -2059,6 +2099,21 @@ void fragment_shader(in SceneData scene_data) {
 #endif // !USE_LIGHTMAP
 
 #ifndef USE_LIGHTMAP
+	// Mariner G1a: sky occlusion from the overhead map (Environment.overhead_map_*): the sky / color ambient light and
+	// the sky reflection, under roofs, decks, bridges and between walls (CryEngine HeightMapAO). Not where GI applies
+	// (SDFGI, VoxelGI, GI buffers, DDGI: they see the occluders themselves); reflection probes come after and replace
+	// the sky reflection where they apply.
+	if (OVERHEAD_MAP.params.w > 0.5 && !bool((ddgi_block.volumes[DDGI_VOLUME_WORLD].grid_min.w | ddgi_block.volumes[DDGI_VOLUME_LOCAL].grid_min.w) & DDGI_FLAG_ACTIVE) && !bool(instances.data[instance_index].flags & (INSTANCE_FLAGS_USE_SDFGI | INSTANCE_FLAGS_USE_VOXEL_GI | INSTANCE_FLAGS_USE_GI_BUFFERS))) {
+		vec3 overhead_world = (inv_view_matrix * vec4(vertex, 1.0)).xyz;
+		vec3 overhead_normal = normalize(mat3(inv_view_matrix) * normal);
+		float sky_visibility = overhead_map_sky_visibility(overhead_world, overhead_normal);
+		ambient_light *= sky_visibility;
+		indirect_specular_light *= sky_visibility;
+#ifdef LIGHT_CLEARCOAT_USED
+		cc_specular_light *= sky_visibility;
+#endif
+	}
+
 	// Mariner E12: DDGI probes replace the sky / color ambient light (not SDFGI or VoxelGI where those apply). The
 	// probes have no specular part: the sky reflection is darkened where the probes' sky channel sees less light than
 	// the sky gives (interiors, under the deck; lamps inside do not bring the sky reflection back). DG3: the sky and
@@ -2264,6 +2319,9 @@ void fragment_shader(in SceneData scene_data) {
 			indirect_specular_light *= specular_occlusion;
 		}
 #endif // SPECULAR_OCCLUSION_DISABLED
+#ifdef LIGHT_SHEEN_USED
+		sheen_ambient = ambient_light; // Mariner M6.
+#endif
 		ambient_light *= albedo.rgb;
 
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL)) {
@@ -2311,11 +2369,20 @@ void fragment_shader(in SceneData scene_data) {
 	}
 #endif // AMBIENT_LIGHT_DISABLED
 
+#if defined(CUSTOM_REFLECTION_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+	// Mariner G6: the material's own reflection (a planar reflection) over the probes', the sky's and SSR's.
+	indirect_specular_light = mix(indirect_specular_light, custom_reflection.rgb, clamp(custom_reflection.a, 0.0, 1.0));
+#endif
+
 	// convert ao to direct light ao
 	ao = mix(1.0, ao, ao_light_affect);
 
 	//this saves some VGPRs
 	vec3 f0 = F0(metallic, specular, albedo);
+
+#ifdef LIGHT_IRIDESCENCE_USED
+	iridescence_fresnel = iridescence_fresnel_eval(iridescence_ior, clamp(dot(normal, view), 0.0001, 1.0), iridescence_thickness, f0); // Mariner F5.
+#endif
 
 #ifdef LIGHT_CLEARCOAT_USED
 	// The base layer's f0 is computed assuming an interface from air to an IOR
@@ -2339,7 +2406,12 @@ void fragment_shader(in SceneData scene_data) {
 
 		// cheap luminance approximation
 		float f90 = clamp(50.0 * f0.g, metallic, 1.0);
+#ifdef LIGHT_IRIDESCENCE_USED
+		// Mariner F5: the thin film's Fresnel already holds the angle; the split-sum scale stays.
+		indirect_specular_light *= energy_compensation * mix((f90 - f0) * envBRDF.x + f0 * envBRDF.y, iridescence_fresnel * envBRDF.y, iridescence);
+#else
 		indirect_specular_light *= energy_compensation * ((f90 - f0) * envBRDF.x + f0 * envBRDF.y);
+#endif
 
 #ifdef LIGHT_CLEARCOAT_USED
 		float geo_NdotV = max(dot(geo_normal, view), 0.0001); // We want to use geometric normal, not normal_map
@@ -2451,7 +2523,7 @@ void fragment_shader(in SceneData scene_data) {
 							float range_begin = directional_lights.data[i].shadow_range_begin.x;
 							float test_radius = (range_pos - range_begin) * directional_lights.data[i].softshadow_angle;
 							vec2 tex_scale = directional_lights.data[i].uv_scale1 * test_radius;
-							shadow = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, scene_data.taa_frame_count);
+							shadow = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, directional_shadow_depth_gradient(directional_lights.data[i].shadow_matrix1, geo_normal, directional_lights.data[i].uv_scale1, directional_lights.data[i].shadow_z_range.x), scene_data.taa_frame_count);
 							blend_count++;
 						}
 
@@ -2467,7 +2539,7 @@ void fragment_shader(in SceneData scene_data) {
 							float range_begin = directional_lights.data[i].shadow_range_begin.y;
 							float test_radius = (range_pos - range_begin) * directional_lights.data[i].softshadow_angle;
 							vec2 tex_scale = directional_lights.data[i].uv_scale2 * test_radius;
-							float s = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, scene_data.taa_frame_count);
+							float s = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, directional_shadow_depth_gradient(directional_lights.data[i].shadow_matrix2, geo_normal, directional_lights.data[i].uv_scale2, directional_lights.data[i].shadow_z_range.y), scene_data.taa_frame_count);
 
 							if (blend_count == 0) {
 								shadow = s;
@@ -2492,7 +2564,7 @@ void fragment_shader(in SceneData scene_data) {
 							float range_begin = directional_lights.data[i].shadow_range_begin.z;
 							float test_radius = (range_pos - range_begin) * directional_lights.data[i].softshadow_angle;
 							vec2 tex_scale = directional_lights.data[i].uv_scale3 * test_radius;
-							float s = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, scene_data.taa_frame_count);
+							float s = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, directional_shadow_depth_gradient(directional_lights.data[i].shadow_matrix3, geo_normal, directional_lights.data[i].uv_scale3, directional_lights.data[i].shadow_z_range.z), scene_data.taa_frame_count);
 
 							if (blend_count == 0) {
 								shadow = s;
@@ -2517,7 +2589,7 @@ void fragment_shader(in SceneData scene_data) {
 							float range_begin = directional_lights.data[i].shadow_range_begin.w;
 							float test_radius = (range_pos - range_begin) * directional_lights.data[i].softshadow_angle;
 							vec2 tex_scale = directional_lights.data[i].uv_scale4 * test_radius;
-							float s = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, scene_data.taa_frame_count);
+							float s = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, directional_shadow_depth_gradient(directional_lights.data[i].shadow_matrix4, geo_normal, directional_lights.data[i].uv_scale4, directional_lights.data[i].shadow_z_range.w), scene_data.taa_frame_count);
 
 							if (blend_count == 0) {
 								shadow = s;
@@ -3234,6 +3306,21 @@ void fragment_shader(in SceneData scene_data) {
 	// apply metallic
 	diffuse_light *= 1.0 - metallic;
 	ambient_light *= 1.0 - metallic;
+
+#if defined(LIGHT_SHEEN_USED) && !defined(MODE_UNSHADED)
+	{
+		// Mariner M6: the sheen layer takes its directional albedo from the base layer (energy conservation, the cloth
+		// term of the DFG table), then adds its direct light and its ambient light (irradiance; the lobe is wide).
+		float sheen_e = min(prefiltered_dfg(sheen_roughness, clamp(dot(normal, view), 0.0001, 1.0)).z, 1.0);
+		float sheen_scaling = clamp(1.0 - max(sheen_color.r, max(sheen_color.g, sheen_color.b)) * sheen_e, 0.0, 1.0);
+		diffuse_light *= sheen_scaling;
+		ambient_light *= sheen_scaling;
+		direct_specular_light *= sheen_scaling;
+		indirect_specular_light *= sheen_scaling;
+		direct_specular_light += sheen_light * ao;
+		indirect_specular_light += sheen_ambient * sheen_color * sheen_e;
+	}
+#endif
 
 #ifndef FOG_DISABLED
 	//restore fog

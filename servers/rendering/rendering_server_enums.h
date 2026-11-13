@@ -743,7 +743,7 @@ enum EnvironmentFogMode {
 	ENV_FOG_MODE_DEPTH,
 };
 
-// Mariner E5c: path tracer (Forward+, Vulkan with ray query). Same values as NVIDIA's Godot fork.
+// Mariner E5c: path tracer (Forward+, Vulkan or Direct3D 12 with ray query). Same values as NVIDIA's Godot fork.
 enum PathtracingDenoiser {
 	PT_DENOISER_NONE = 0,
 	PT_DENOISER_DLSS_RAY_RECONSTRUCTION = 1, // Reserved: not ported, falls back to PT_DENOISER_NONE.

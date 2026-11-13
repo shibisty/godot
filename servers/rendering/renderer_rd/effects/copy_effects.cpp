@@ -599,6 +599,42 @@ void CopyEffects::copy_depth_rect_to_depth_fb(RID p_source_depth, RID p_dest_dep
 	RD::get_singleton()->draw_list_end();
 }
 
+void CopyEffects::copy_depth_rect_to_depth_fb_shifted(RID p_source_depth, RID p_dest_depth_framebuffer, const Rect2i &p_source_rect, const Rect2i &p_dest_rect, float p_depth_offset) {
+	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
+	ERR_FAIL_NULL(uniform_set_cache);
+	MaterialStorage *material_storage = MaterialStorage::get_singleton();
+	ERR_FAIL_NULL(material_storage);
+
+	const RD::TextureFormat source_format = RD::get_singleton()->texture_get_format(p_source_depth);
+	ERR_FAIL_COND(source_format.width == 0 || source_format.height == 0);
+
+	memset(&copy_to_fb.push_constant, 0, sizeof(CopyToFbPushConstant));
+	copy_to_fb.push_constant.luminance_multiplier = 1.0;
+	// The source texels of the rect, one to one (the draw region is the same rect of the destination).
+	copy_to_fb.push_constant.flags |= COPY_TO_FB_FLAG_USE_SRC_SECTION;
+	copy_to_fb.push_constant.section[0] = float(p_source_rect.position.x) / float(source_format.width);
+	copy_to_fb.push_constant.section[1] = float(p_source_rect.position.y) / float(source_format.height);
+	copy_to_fb.push_constant.section[2] = float(p_source_rect.size.width) / float(source_format.width);
+	copy_to_fb.push_constant.section[3] = float(p_source_rect.size.height) / float(source_format.height);
+	copy_to_fb.push_constant.set_color[0] = p_depth_offset;
+	copy_to_fb.push_constant.set_color[1] = 1.0;
+
+	RID sampler = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+	RD::Uniform u_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ sampler, p_source_depth }));
+
+	CopyToFBMode mode = COPY_TO_FB_COPY_DEPTH;
+	RID shader = copy_to_fb.shader.version_get_shader(copy_to_fb.shader_version, mode);
+	ERR_FAIL_COND(shader.is_null());
+
+	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(p_dest_depth_framebuffer, RD::DRAW_DEFAULT_ALL, Vector<Color>(), 0.0f, 0, p_dest_rect);
+	RD::get_singleton()->draw_list_bind_render_pipeline(draw_list, copy_to_fb.pipelines[mode].get_render_pipeline(RD::INVALID_ID, RD::get_singleton()->framebuffer_get_format(p_dest_depth_framebuffer)));
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 0, u_source), 0);
+	RD::get_singleton()->draw_list_bind_index_array(draw_list, material_storage->get_quad_index_array());
+	RD::get_singleton()->draw_list_set_push_constant(draw_list, &copy_to_fb.push_constant, sizeof(CopyToFbPushConstant));
+	RD::get_singleton()->draw_list_draw(draw_list, true);
+	RD::get_singleton()->draw_list_end();
+}
+
 void CopyEffects::copy_depth_to_rect_and_linearize(RID p_source_rd_texture, RID p_dest_texture, const Rect2i &p_rect, bool p_flip_y, float p_z_near, float p_z_far) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);

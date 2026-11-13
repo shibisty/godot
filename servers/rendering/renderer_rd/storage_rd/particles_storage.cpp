@@ -507,6 +507,24 @@ void ParticlesStorage::particles_set_screen_space_collision(RID p_particles, boo
 	}
 }
 
+void ParticlesStorage::particles_set_overhead_map_collision(RID p_particles, bool p_enable) {
+	Particles *particles = particles_owner.get_or_null(p_particles);
+	ERR_FAIL_NULL(particles);
+	particles->overhead_map_collision = p_enable; // Mariner G1c.
+}
+
+void ParticlesStorage::overhead_collision_set(uint64_t p_frame, uint64_t p_area, RID p_texture, const Vector3 &p_box_min, const Vector3 &p_box_max) {
+	// Mariner G1c: within a frame, a larger view replaces a smaller one (the game view over a minimap).
+	if (overhead_collision.frame == p_frame && p_area <= overhead_collision.area) {
+		return;
+	}
+	overhead_collision.texture = p_texture;
+	overhead_collision.box_min = p_box_min;
+	overhead_collision.box_max = p_box_max;
+	overhead_collision.frame = p_frame;
+	overhead_collision.area = p_area;
+}
+
 RID ParticlesStorage::screen_collision_begin(uint64_t p_frame, uint64_t p_area, const Size2i &p_size) {
 	// Mariner E22: within a frame, a larger view replaces a smaller one (the game view over a minimap).
 	if (screen_collision.frame == p_frame && p_area <= screen_collision.area) {
@@ -1139,8 +1157,33 @@ void ParticlesStorage::_particles_process(Particles *p_particles, double p_delta
 			collision_screen_texture = screen_collision.texture;
 		}
 
+		// Mariner G1c: the overhead map of the last frame as one more collider (world space particles only). transform[0]:
+		// the box minimum and its size, transform[1].x: its height.
+		RID collision_overhead_texture;
+		if (p_particles->overhead_map_collision && overhead_collision.texture.is_valid() && RD::get_singleton()->texture_is_valid(overhead_collision.texture) && overhead_collision.frame + 2 >= RSG::rasterizer->get_frame_number() && !p_particles->use_local_coords && frame_params.collider_count < ParticlesFrameParams::MAX_COLLIDERS) {
+			ParticlesFrameParams::Collider &col = frame_params.colliders[frame_params.collider_count];
+			const Vector3 size = overhead_collision.box_max - overhead_collision.box_min;
+			memset(col.transform, 0, sizeof(col.transform));
+			col.transform[0] = overhead_collision.box_min.x;
+			col.transform[1] = overhead_collision.box_min.y;
+			col.transform[2] = overhead_collision.box_min.z;
+			col.transform[3] = size.x;
+			col.transform[4] = size.y;
+			col.type = ParticlesFrameParams::COLLISION_TYPE_OVERHEAD_MAP;
+			col.extents[0] = size.x;
+			col.extents[1] = size.y;
+			col.extents[2] = size.z;
+			col.texture_index = 0;
+			col.scale = 1.0;
+			frame_params.collider_count++;
+			collision_overhead_texture = overhead_collision.texture;
+		}
+
 		bool different = false;
 		if (collision_screen_texture != p_particles->collision_screen_texture) {
+			different = true;
+		}
+		if (collision_overhead_texture != p_particles->collision_overhead_texture) {
 			different = true;
 		}
 		if (collision_3d_textures_used == p_particles->collision_3d_textures_used) {
@@ -1203,9 +1246,17 @@ void ParticlesStorage::_particles_process(Particles *p_particles, double p_delta
 				u.append_id(collision_screen_texture.is_valid() ? collision_screen_texture : texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_BLACK));
 				uniforms.push_back(u);
 			}
+			{
+				RD::Uniform u;
+				u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+				u.binding = 3; // Mariner G1c.
+				u.append_id(collision_overhead_texture.is_valid() ? collision_overhead_texture : texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_BLACK));
+				uniforms.push_back(u);
+			}
 			p_particles->collision_textures_uniform_set = RD::get_singleton()->uniform_set_create(uniforms, particles_shader.default_shader_rd, 2);
 			p_particles->collision_heightmap_texture = collision_heightmap_texture;
 			p_particles->collision_screen_texture = collision_screen_texture;
+			p_particles->collision_overhead_texture = collision_overhead_texture;
 		}
 	}
 

@@ -35,6 +35,16 @@
 		</method>
 	</methods>
 	<members>
+		<member name="clip_volume_enabled" type="bool" setter="set_clip_volume_enabled" getter="is_clip_volume_enabled" default="false">
+			If [code]true[/code], the light does not shine outside a box in its own space ([member clip_volume_offset], [member clip_volume_size]): a cabin or wheelhouse lamp without shadows does not light the deck, the sea or the next room through the hull and bulkheads (Mariner G3; the idea of CryEngine's clip volumes). The box clips the light's surface lighting and its volumetric fog. Omni, spot and area lights; Forward+ and Mobile.
+			[b]Note:[/b] A light with a clip volume is rasterized even with [member light_restir] (ReSTIR DI traces shadow rays, so walls already stop it there).
+		</member>
+		<member name="clip_volume_offset" type="Vector3" setter="set_clip_volume_offset" getter="get_clip_volume_offset" default="Vector3(0, 0, 0)">
+			The center of the clip box in the light's space (meters): its axes are the light's (a spot light's [code]-Z[/code] is the direction it shines).
+		</member>
+		<member name="clip_volume_size" type="Vector3" setter="set_clip_volume_size" getter="get_clip_volume_size" default="Vector3(4, 3, 4)">
+			The size of the clip box along the light's axes, in meters. Make it the size of the room plus a few centimeters, less than the walls' thickness: the inner faces of the walls are inside, the outer ones outside.
+		</member>
 		<member name="distance_fade_begin" type="float" setter="set_distance_fade_begin" getter="get_distance_fade_begin" default="40.0" keywords="lod_begin">
 			The distance from the camera at which the light begins to fade away (in 3D units).
 			[b]Note:[/b] Only effective for [OmniLight3D] and [SpotLight3D].
@@ -96,7 +106,7 @@
 		</member>
 		<member name="light_restir" type="bool" setter="set_restir" getter="is_restir" default="false">
 			If [code]true[/code] and [member Environment.restir_enabled] is on (Forward+ with raytracing), the opaque pass gets the direct light of this omni or spot light from ReSTIR DI, with a ray traced shadow from every surface; its shadow map is not used, so [member shadow_enabled] can be left off. Many such lights cost about the same as a few. See [member Environment.restir_enabled].
-			For a [DirectionalLight3D] with [member shadow_enabled] (up to two such lights, e.g. the sun and the moon), the light stays rasterized but its shadow in the opaque pass is ray traced instead of read from the shadow maps: one ray per pixel towards a random point of the light disk ([member light_angular_distance]), at any distance (no [member DirectionalLight3D.directional_shadow_max_distance]), denoised with a filter as wide as the penumbra, so contact shadows stay sharp and shadows of far occluders get soft. The late opaque pass ([code]render_mode opaque_late[/code], e.g. water) gets the ray traced shadow too, computed after its depth pre-pass; transparent materials keep the shadow maps.
+			For a [DirectionalLight3D] with [member shadow_enabled] (up to two such lights, e.g. the sun and the moon), the light stays rasterized but its shadow in the opaque pass is ray traced instead of read from the shadow maps: one ray per pixel towards a random point of the light disk ([member light_angular_distance]), at any distance (no [member DirectionalLight3D.directional_shadow_max_distance]), denoised with a filter as wide as the penumbra, so contact shadows stay sharp and shadows of far occluders get soft. The late opaque pass ([code]render_mode opaque_late[/code], e.g. water) gets the ray traced shadow too, computed after its depth pre-pass; transparent materials keep the shadow maps. The shadow rays run the alpha test of [BaseMaterial3D] (alpha scissor at its threshold, alpha hash at 0.5; alpha from the albedo color, texture and vertex color - leaf cards, nets) and let [member GeometryInstance3D.raytracing_opacity] through (Mariner engine patch E20e).
 			[b]Note:[/b] Negative lights stay rasterized. The render layers of [member light_cull_mask], [member light_size] in the specular term and the user [code]light()[/code] shader function do not apply to the ReSTIR light.
 		</member>
 		<member name="light_size" type="float" setter="set_param" getter="get_param" default="0.0" keywords="pcss">

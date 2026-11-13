@@ -98,6 +98,60 @@ RID CameraAttributes::get_rid() const {
 	return camera_attributes;
 }
 
+// Mariner G2.
+void CameraAttributes::_update_auto_exposure_histogram() {
+	RS::get_singleton()->camera_attributes_set_auto_exposure_histogram(get_rid(), auto_exposure_mode == AUTO_EXPOSURE_MODE_HISTOGRAM, auto_exposure_low_percentile, auto_exposure_high_percentile, auto_exposure_center_weight, auto_exposure_speed_dark);
+	emit_changed();
+}
+
+void CameraAttributes::set_auto_exposure_mode(AutoExposureMode p_mode) {
+	auto_exposure_mode = p_mode;
+	_update_auto_exposure_histogram();
+	notify_property_list_changed();
+}
+
+CameraAttributes::AutoExposureMode CameraAttributes::get_auto_exposure_mode() const {
+	return auto_exposure_mode;
+}
+
+void CameraAttributes::set_auto_exposure_low_percentile(float p_percentile) {
+	auto_exposure_low_percentile = CLAMP(p_percentile, 0.0f, 0.99f);
+	auto_exposure_high_percentile = MAX(auto_exposure_high_percentile, auto_exposure_low_percentile + 0.01f);
+	_update_auto_exposure_histogram();
+}
+
+float CameraAttributes::get_auto_exposure_low_percentile() const {
+	return auto_exposure_low_percentile;
+}
+
+void CameraAttributes::set_auto_exposure_high_percentile(float p_percentile) {
+	auto_exposure_high_percentile = CLAMP(p_percentile, 0.01f, 1.0f);
+	auto_exposure_low_percentile = MIN(auto_exposure_low_percentile, auto_exposure_high_percentile - 0.01f);
+	_update_auto_exposure_histogram();
+}
+
+float CameraAttributes::get_auto_exposure_high_percentile() const {
+	return auto_exposure_high_percentile;
+}
+
+void CameraAttributes::set_auto_exposure_center_weight(float p_weight) {
+	auto_exposure_center_weight = CLAMP(p_weight, 0.0f, 1.0f);
+	_update_auto_exposure_histogram();
+}
+
+float CameraAttributes::get_auto_exposure_center_weight() const {
+	return auto_exposure_center_weight;
+}
+
+void CameraAttributes::set_auto_exposure_speed_dark(float p_speed) {
+	auto_exposure_speed_dark = MAX(p_speed, 0.0f);
+	_update_auto_exposure_histogram();
+}
+
+float CameraAttributes::get_auto_exposure_speed_dark() const {
+	return auto_exposure_speed_dark;
+}
+
 void CameraAttributes::_update_motion_blur() {
 	RS::get_singleton()->camera_attributes_set_motion_blur(get_rid(), motion_blur_enabled, motion_blur_intensity, motion_blur_camera_motion, motion_blur_max_length);
 }
@@ -316,6 +370,12 @@ void CameraAttributes::_validate_property(PropertyInfo &p_property) const {
 		p_property.usage = PROPERTY_USAGE_NO_EDITOR | PROPERTY_USAGE_INTERNAL;
 		return;
 	}
+
+	// Mariner G2: the histogram settings with the histogram mode.
+	if ((p_property.name == "auto_exposure_low_percentile" || p_property.name == "auto_exposure_high_percentile" || p_property.name == "auto_exposure_center_weight" || p_property.name == "auto_exposure_speed_dark") && auto_exposure_mode != AUTO_EXPOSURE_MODE_HISTOGRAM) {
+		p_property.usage = PROPERTY_USAGE_NO_EDITOR | PROPERTY_USAGE_INTERNAL;
+		return;
+	}
 }
 
 void CameraAttributes::_bind_methods() {
@@ -339,6 +399,25 @@ void CameraAttributes::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_exposure_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_auto_exposure_enabled", "is_auto_exposure_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_scale", PROPERTY_HINT_RANGE, "0.01,64,0.01"), "set_auto_exposure_scale", "get_auto_exposure_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_speed", PROPERTY_HINT_RANGE, "0.01,64,0.01"), "set_auto_exposure_speed", "get_auto_exposure_speed");
+
+	// Mariner G2.
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_mode", "mode"), &CameraAttributes::set_auto_exposure_mode);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_mode"), &CameraAttributes::get_auto_exposure_mode);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_low_percentile", "percentile"), &CameraAttributes::set_auto_exposure_low_percentile);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_low_percentile"), &CameraAttributes::get_auto_exposure_low_percentile);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_high_percentile", "percentile"), &CameraAttributes::set_auto_exposure_high_percentile);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_high_percentile"), &CameraAttributes::get_auto_exposure_high_percentile);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_center_weight", "weight"), &CameraAttributes::set_auto_exposure_center_weight);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_center_weight"), &CameraAttributes::get_auto_exposure_center_weight);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_speed_dark", "speed"), &CameraAttributes::set_auto_exposure_speed_dark);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_speed_dark"), &CameraAttributes::get_auto_exposure_speed_dark);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "auto_exposure_mode", PROPERTY_HINT_ENUM, "Average,Histogram"), "set_auto_exposure_mode", "get_auto_exposure_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_low_percentile", PROPERTY_HINT_RANGE, "0,0.99,0.01"), "set_auto_exposure_low_percentile", "get_auto_exposure_low_percentile");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_high_percentile", PROPERTY_HINT_RANGE, "0.01,1,0.001"), "set_auto_exposure_high_percentile", "get_auto_exposure_high_percentile");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_center_weight", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_auto_exposure_center_weight", "get_auto_exposure_center_weight");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_speed_dark", PROPERTY_HINT_RANGE, "0.01,64,0.01"), "set_auto_exposure_speed_dark", "get_auto_exposure_speed_dark");
+	BIND_ENUM_CONSTANT(AUTO_EXPOSURE_MODE_AVERAGE);
+	BIND_ENUM_CONSTANT(AUTO_EXPOSURE_MODE_HISTOGRAM);
 
 	ClassDB::bind_method(D_METHOD("set_motion_blur_enabled", "enabled"), &CameraAttributes::set_motion_blur_enabled);
 	ClassDB::bind_method(D_METHOD("is_motion_blur_enabled"), &CameraAttributes::is_motion_blur_enabled);
@@ -412,6 +491,7 @@ void CameraAttributes::_bind_methods() {
 
 CameraAttributes::CameraAttributes() {
 	camera_attributes = RS::get_singleton()->camera_attributes_create();
+	RS::get_singleton()->camera_attributes_set_auto_exposure_histogram(camera_attributes, false, auto_exposure_low_percentile, auto_exposure_high_percentile, auto_exposure_center_weight, auto_exposure_speed_dark); // Mariner G2.
 }
 
 CameraAttributes::~CameraAttributes() {

@@ -70,7 +70,7 @@ MeshStorage::MeshStorage() {
 		const bool rt_setting = GLOBAL_DEF_RST("rendering/raytracing/scene_acceleration_structures", false);
 		raytracing_buffers = rt_setting && rd->has_feature(RD::SUPPORTS_BUFFER_DEVICE_ADDRESS) && (rd->has_feature(RD::SUPPORTS_RAY_QUERY) || rd->has_feature(RD::SUPPORTS_RAYTRACING_PIPELINE));
 		if (rt_setting && !raytracing_buffers) {
-			print_verbose("Raytracing scene: not supported by the current rendering device (needs Vulkan with ray query / ray tracing pipeline and buffer device address).");
+			print_verbose("Raytracing scene: not supported by the current rendering device (needs Vulkan or Direct3D 12 with ray query / ray tracing pipeline and buffer device address).");
 		}
 	}
 
@@ -1768,11 +1768,13 @@ void MeshStorage::_multimesh_update_command_buffer(MultiMesh *multimesh) {
 	multimesh->command_buffer = RD::get_singleton()->storage_buffer_create(commands.size(), commands, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
 }
 
-void MeshStorage::_multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors, bool p_use_custom_data, bool p_use_indirect) {
+void MeshStorage::_multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors, bool p_use_custom_data, bool p_use_indirect, bool p_use_custom_data2) {
+	// Mariner E14c: the second vec4 needs the first, and 3D transforms (the canvas reads a fixed stride).
+	ERR_FAIL_COND_MSG(p_use_custom_data2 && (!p_use_custom_data || p_transform_format == RSE::MULTIMESH_TRANSFORM_2D), "MultiMesh: The second custom data needs the first and 3D transforms.");
 	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
 	ERR_FAIL_NULL(multimesh);
 
-	if (multimesh->instances == p_instances && multimesh->xform_format == p_transform_format && multimesh->uses_colors == p_use_colors && multimesh->uses_custom_data == p_use_custom_data && multimesh->indirect == p_use_indirect) {
+	if (multimesh->instances == p_instances && multimesh->xform_format == p_transform_format && multimesh->uses_colors == p_use_colors && multimesh->uses_custom_data == p_use_custom_data && multimesh->indirect == p_use_indirect && multimesh->uses_custom_data2 == p_use_custom_data2) {
 		return;
 	}
 
@@ -1804,7 +1806,8 @@ void MeshStorage::_multimesh_allocate_data(RID p_multimesh, int p_instances, RSE
 	multimesh->color_offset_cache = p_transform_format == RSE::MULTIMESH_TRANSFORM_2D ? 8 : 12;
 	multimesh->uses_custom_data = p_use_custom_data;
 	multimesh->custom_data_offset_cache = multimesh->color_offset_cache + (p_use_colors ? 4 : 0);
-	multimesh->stride_cache = multimesh->custom_data_offset_cache + (p_use_custom_data ? 4 : 0);
+	multimesh->uses_custom_data2 = p_use_custom_data2;
+	multimesh->stride_cache = multimesh->custom_data_offset_cache + (p_use_custom_data ? 4 : 0) + (p_use_custom_data2 ? 4 : 0);
 	multimesh->buffer_set = false;
 
 	multimesh->indirect = p_use_indirect;
@@ -2318,6 +2321,47 @@ Color MeshStorage::_multimesh_instance_get_custom_data(RID p_multimesh, int p_in
 	}
 
 	return c;
+}
+
+// Mariner E14c: the second vec4 of custom data, after the first.
+
+void MeshStorage::_multimesh_instance_set_custom_data2(RID p_multimesh, int p_index, const Color &p_color) {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL(multimesh);
+	ERR_FAIL_INDEX(p_index, multimesh->instances);
+	ERR_FAIL_COND(!multimesh->uses_custom_data2);
+
+	_multimesh_make_local(multimesh);
+	_multimesh_update_motion_vectors_data_cache(multimesh);
+
+	{
+		float *w = multimesh->data_cache.ptrw();
+		float *dataptr = w + (multimesh->motion_vectors_current_offset + p_index) * multimesh->stride_cache + multimesh->custom_data_offset_cache + 4;
+		dataptr[0] = p_color.r;
+		dataptr[1] = p_color.g;
+		dataptr[2] = p_color.b;
+		dataptr[3] = p_color.a;
+	}
+
+	_multimesh_mark_dirty(multimesh, p_index, false);
+}
+
+Color MeshStorage::_multimesh_instance_get_custom_data2(RID p_multimesh, int p_index) const {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL_V(multimesh, Color());
+	ERR_FAIL_INDEX_V(p_index, multimesh->instances, Color());
+	ERR_FAIL_COND_V(!multimesh->uses_custom_data2, Color());
+
+	_multimesh_make_local(multimesh);
+
+	const float *dataptr = multimesh->data_cache.ptr() + (multimesh->motion_vectors_current_offset + p_index) * multimesh->stride_cache + multimesh->custom_data_offset_cache + 4;
+	return Color(dataptr[0], dataptr[1], dataptr[2], dataptr[3]);
+}
+
+bool MeshStorage::_multimesh_uses_custom_data2(RID p_multimesh) const {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL_V(multimesh, false);
+	return multimesh->uses_custom_data2;
 }
 
 void MeshStorage::_multimesh_set_buffer(RID p_multimesh, const Vector<float> &p_buffer) {

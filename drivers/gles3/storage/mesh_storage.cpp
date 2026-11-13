@@ -1597,11 +1597,11 @@ void MeshStorage::_multimesh_free(RID p_rid) {
 	multimesh_owner.free(p_rid);
 }
 
-void MeshStorage::_multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors, bool p_use_custom_data, bool p_use_indirect) {
+void MeshStorage::_multimesh_allocate_data(RID p_multimesh, int p_instances, RSE::MultimeshTransformFormat p_transform_format, bool p_use_colors, bool p_use_custom_data, bool p_use_indirect, bool p_use_custom_data2) {
 	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
 	ERR_FAIL_NULL(multimesh);
 
-	if (multimesh->instances == p_instances && multimesh->xform_format == p_transform_format && multimesh->uses_colors == p_use_colors && multimesh->uses_custom_data == p_use_custom_data) {
+	if (multimesh->instances == p_instances && multimesh->xform_format == p_transform_format && multimesh->uses_colors == p_use_colors && multimesh->uses_custom_data == p_use_custom_data && multimesh->uses_custom_data2 == (p_use_custom_data && p_use_custom_data2)) {
 		return;
 	}
 
@@ -1627,6 +1627,7 @@ void MeshStorage::_multimesh_allocate_data(RID p_multimesh, int p_instances, RSE
 	multimesh->uses_colors = p_use_colors;
 	multimesh->color_offset_cache = p_transform_format == RSE::MULTIMESH_TRANSFORM_2D ? 8 : 12;
 	multimesh->uses_custom_data = p_use_custom_data;
+	multimesh->uses_custom_data2 = p_use_custom_data && p_use_custom_data2; // Mariner E14c.
 	multimesh->custom_data_offset_cache = multimesh->color_offset_cache + color_and_custom_strides;
 	multimesh->stride_cache = multimesh->custom_data_offset_cache + color_and_custom_strides;
 	multimesh->buffer_set = false;
@@ -2049,6 +2050,7 @@ void MeshStorage::_multimesh_set_buffer(RID p_multimesh, const Vector<float> &p_
 		uint32_t old_stride = multimesh->xform_format == RSE::MULTIMESH_TRANSFORM_2D ? 8 : 12;
 		old_stride += multimesh->uses_colors ? 4 : 0;
 		old_stride += multimesh->uses_custom_data ? 4 : 0;
+		old_stride += multimesh->uses_custom_data2 ? 4 : 0; // Mariner E14c: skipped.
 		ERR_FAIL_COND(p_buffer.size() != (multimesh->instances * (int)old_stride));
 
 		multimesh->data_cache = p_buffer;
@@ -2134,6 +2136,12 @@ RID MeshStorage::_multimesh_get_buffer_rd_rid(RID p_multimesh) const {
 	ERR_FAIL_V_MSG(RID(), "GLES3 does not contain a Rid for the multimesh buffer.");
 }
 
+bool MeshStorage::_multimesh_uses_custom_data2(RID p_multimesh) const {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL_V(multimesh, false);
+	return multimesh->uses_custom_data2;
+}
+
 Vector<float> MeshStorage::_multimesh_get_buffer(RID p_multimesh) const {
 	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
 	ERR_FAIL_NULL_V(multimesh, Vector<float>());
@@ -2158,9 +2166,10 @@ Vector<float> MeshStorage::_multimesh_get_buffer(RID p_multimesh) const {
 		uint32_t new_stride = multimesh->xform_format == RSE::MULTIMESH_TRANSFORM_2D ? 8 : 12;
 		new_stride += multimesh->uses_colors ? 4 : 0;
 		new_stride += multimesh->uses_custom_data ? 4 : 0;
+		new_stride += multimesh->uses_custom_data2 ? 4 : 0; // Mariner E14c: zeros.
 
 		Vector<float> decompressed;
-		decompressed.resize(multimesh->instances * (int)new_stride);
+		decompressed.resize_initialized(multimesh->instances * (int)new_stride);
 		float *w = decompressed.ptrw();
 		const float *r = ret.ptr();
 

@@ -124,6 +124,18 @@ if (
     )
     sys.exit(255)
 
+# Mariner E5d: ray tracing (PR #118654) needs the godot-nir-static build with DXIL libraries and ray queries
+# (`raytracing-rel`); the stock 25.3 package compiles too, but its NIR to DXIL crashes on ray tracing shaders.
+mesa_dxil_container = Path(mesa_absdir + "/src/microsoft/compiler/dxil_container.h")
+if not mesa_dxil_container.is_file() or "dxil_runtime_data_resource" not in mesa_dxil_container.read_text(
+    errors="ignore"
+):
+    print_error(
+        "The Direct3D 12 rendering driver's Mesa NIR is not the ray tracing build (godot-nir-static `raytracing-rel`).\n"
+        f"Re-install it by running `python {os.path.join('misc', 'scripts', 'install_d3d12_sdk_windows.py')}`.\n"
+    )
+    sys.exit(255)
+
 # These defines are inspired by the Meson build scripts in the original repo.
 extra_defines += [
     "__STDC_CONSTANT_MACROS",
@@ -176,12 +188,51 @@ env_thirdparty.Prepend(
 )
 
 env_thirdparty.add_source_files(thirdparty_obj, "#thirdparty/d3d12ma/D3D12MemAlloc.cpp")
+
+# Mariner E7b: SPIRV-Cross (SPIR-V to HLSL for mesh pipelines, compiled to DXIL by DXC at runtime; the DXC API header
+# comes with Mesa). SPIRV-Cross reports errors with exceptions, so it and its wrapper are built with them.
+thirdparty_spirv_cross_dir = "#thirdparty/spirv-cross/"
+env_d3d12_rdd.Prepend(
+    CPPPATH=[
+        thirdparty_spirv_cross_dir,
+        thirdparty_spirv_cross_dir + "include",
+        "#thirdparty/spirv-headers/include/spirv/unified1",
+    ]
+)
+env_exceptions = env_d3d12_rdd.Clone()
+if env.msvc:
+    env_exceptions["CPPDEFINES"] = [
+        d
+        for d in env_exceptions["CPPDEFINES"]
+        if not (d == "_HAS_EXCEPTIONS" or (isinstance(d, (tuple, list)) and d[0] == "_HAS_EXCEPTIONS"))
+    ]
+    env_exceptions.AppendUnique(CXXFLAGS=["/EHsc"])
+else:
+    if "-fno-exceptions" in env_exceptions["CXXFLAGS"]:
+        env_exceptions["CXXFLAGS"].remove("-fno-exceptions")
+    env_exceptions.Append(CXXFLAGS=["-fexceptions"])
+
+env_spirv_cross = env_exceptions.Clone()
+env_spirv_cross.disable_warnings()
+spirv_cross_sources = [
+    "spirv_cfg.cpp",
+    "spirv_cross.cpp",
+    "spirv_cross_parsed_ir.cpp",
+    "spirv_cross_util.cpp",
+    "spirv_glsl.cpp",
+    "spirv_hlsl.cpp",
+    "spirv_parser.cpp",
+]
+env_spirv_cross.add_source_files(thirdparty_obj, [thirdparty_spirv_cross_dir + f for f in spirv_cross_sources])
 env.drivers_sources += thirdparty_obj
 
 # Godot source files.
 
 driver_obj = []
-env_d3d12_rdd.add_source_files(driver_obj, "*.cpp")
+env_d3d12_rdd.add_source_files(
+    driver_obj, [f for f in Glob("*.cpp") if os.path.basename(str(f)) != "d3d12_spirv_to_hlsl.cpp"]
+)
+env_exceptions.add_source_files(driver_obj, ["d3d12_spirv_to_hlsl.cpp"])
 env.drivers_sources += driver_obj
 
 # Needed to force rebuilding the driver files when the thirdparty code is updated.

@@ -215,7 +215,7 @@
 ///////////////////////////////////////////////
 
 
-layout (set = 0, binding = 1000) uniform sampler s_LinearClamp;
+layout (set = 0, binding = 900) uniform sampler s_LinearClamp;
 
   ///////////////////////////////////////////////
  // declare SRVs and SRV accessors

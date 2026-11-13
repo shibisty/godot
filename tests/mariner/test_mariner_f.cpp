@@ -86,9 +86,9 @@ TEST_CASE("[Mariner][F3] White balance matrix") {
 	const Vector3 warm = RendererRD::ToneMapper::white_balance_matrix(10000.0, 0.0).xform(Vector3(1, 1, 1));
 	CHECK(warm.x > warm.z);
 	// A white point near 6500 K hardly changes anything.
-	const Vector3 near = RendererRD::ToneMapper::white_balance_matrix(6600.0, 0.0).xform(Vector3(1, 1, 1));
-	CHECK(near.is_equal_approx(Vector3(1, 1, 1)) == false);
-	CHECK(near.distance_to(Vector3(1, 1, 1)) < 0.05);
+	const Vector3 near_white = RendererRD::ToneMapper::white_balance_matrix(6600.0, 0.0).xform(Vector3(1, 1, 1));
+	CHECK(near_white.is_equal_approx(Vector3(1, 1, 1)) == false);
+	CHECK(near_white.distance_to(Vector3(1, 1, 1)) < 0.05);
 	// Positive tint: magenta (green down, red and blue up).
 	const Vector3 magenta = RendererRD::ToneMapper::white_balance_matrix(6500.0, 0.5).xform(Vector3(1, 1, 1));
 	CHECK(magenta.y < magenta.x);

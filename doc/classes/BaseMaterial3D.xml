@@ -24,6 +24,13 @@
 				Returns [code]true[/code] if the specified [param flag] is enabled.
 			</description>
 		</method>
+		<method name="get_metal_albedo" qualifiers="static">
+			<return type="Color" />
+			<param index="0" name="metal" type="int" enum="BaseMaterial3D.Metal" />
+			<description>
+				Mariner M8. Returns the measured reflectance at normal incidence (F0) of a pure metal, in sRGB, to use as [member albedo_color] with [member metallic] 1. The values come from spectral optical constants (as tabulated in [i]Real-Time Rendering[/i], 4th ed.). Oxidized, rusty or painted metal is not a metal for shading.
+			</description>
+		</method>
 		<method name="get_texture" qualifiers="const">
 			<return type="Texture2D" />
 			<param index="0" name="param" type="int" enum="BaseMaterial3D.TextureParam" />
@@ -180,6 +187,9 @@
 			Texture that specifies the per-pixel normal of the detail overlay. The [member detail_normal] texture only uses the red and green channels; the blue and alpha channels are ignored. The normal read from [member detail_normal] is oriented around the surface normal provided by the [Mesh].
 			[b]Note:[/b] Godot expects the normal map to use X+, Y+, and Z+ coordinates. See [url=http://wiki.polycount.com/wiki/Normal_Map_Technical_Details#Common_Swizzle_Coordinates]this page[/url] for a comparison of normal map coordinates expected by popular engines.
 		</member>
+		<member name="detail_normal_rnm" type="bool" setter="set_detail_normal_rnm" getter="is_detail_normal_rnm" default="false">
+			Mariner M4. If [code]true[/code], the [member detail_normal] is combined with the base normal map by reoriented normal mapping (Barre-Brisebois and Hill 2012): the detail is rotated onto the base normal instead of being averaged with it, so the base relief keeps its depth under the detail.
+		</member>
 		<member name="detail_uv_layer" type="int" setter="set_detail_uv" getter="get_detail_uv" enum="BaseMaterial3D.DetailUV" default="0">
 			Specifies whether to use [code]UV[/code] or [code]UV2[/code] for the detail layer.
 		</member>
@@ -197,6 +207,25 @@
 		</member>
 		<member name="disable_specular_occlusion" type="bool" setter="set_flag" getter="get_flag" default="false">
 			If [code]true[/code], disables specular occlusion even if [member ProjectSettings.rendering/reflections/specular_occlusion/enabled] is [code]false[/code].
+		</member>
+		<member name="displacement_enabled" type="bool" setter="set_feature" getter="get_feature" default="false">
+			If [code]true[/code], the vertices move along their normals by the height in [member displacement_texture] (true displacement, in the vertex shader). The mesh needs vertices dense enough for the relief: tessellate it with [MeshTessellator], which also makes its LODs on the displaced shape. Not with the billboard modes or [member uv1_triplanar].
+			[b]Note:[/b] The vertices leave the mesh's bounding box: set [member ArrayMesh.custom_aabb] ([MeshTessellator] does) or [member GeometryInstance3D.extra_cull_margin] to keep the surface from being culled.
+		</member>
+		<member name="displacement_midlevel" type="float" setter="set_displacement_midlevel" getter="get_displacement_midlevel" default="0.0">
+			The height (0 to 1) that stays in place: below it the surface sinks, above it rises.
+		</member>
+		<member name="displacement_normal" type="bool" setter="set_displacement_normal" getter="is_displacement_normal_enabled" default="true">
+			If [code]true[/code], the normal of the displaced surface is built per pixel from the height map's slope (the surface gradient), so the relief is shaded at the texture's resolution, finer than the vertices - on a coarse mesh too. If [code]false[/code], the mesh's normals are kept.
+		</member>
+		<member name="displacement_scale" type="float" setter="set_displacement_scale" getter="get_displacement_scale" default="0.1">
+			The displacement of height 1 above [member displacement_midlevel], in the mesh's units (meters). Negative values push the surface in.
+		</member>
+		<member name="displacement_texture" type="Texture2D" setter="set_texture" getter="get_texture">
+			The height map of the displacement (red channel, linear; white is high). Read with the UV after [member uv1_scale] and [member uv1_offset].
+		</member>
+		<member name="displacement_texture_lod" type="float" setter="set_displacement_texture_lod" getter="get_displacement_texture_lod" default="0.0">
+			The mipmap level the vertex shader reads [member displacement_texture] at (the vertex shader has no screen derivatives): raise it when the vertices are sparser than the texels, to keep the displacement from aliasing.
 		</member>
 		<member name="distance_fade_max_distance" type="float" setter="set_distance_fade_max_distance" getter="get_distance_fade_max_distance" default="10.0">
 			Distance at which the object appears fully opaque.
@@ -264,6 +293,12 @@
 			If [code]true[/code], interprets the height map texture as a depth map, with brighter values appearing to be "lower" in altitude compared to darker values.
 			This can be enabled for compatibility with some materials authored for Godot 3.x. This is not necessary if the Invert import option was used to invert the depth map in Godot 3.x, in which case [member heightmap_flip_texture] should remain [code]false[/code].
 		</member>
+		<member name="heightmap_impostor" type="bool" setter="set_heightmap_impostor" getter="is_heightmap_impostor_enabled">
+			Mariner G5b. If [code]true[/code], the deep parallax works for the faces of a box impostor (see [BoxImpostorBaker]): the true view ray (no offset limiting), orthographic views (the sun's shadow maps) along the camera's axis, the crossing found by a binary search on the relief read texel by texel (nearest filtering), and the silhouette from the relief - a ray that leaves its face's rectangle of the atlas ([code]CUSTOM0[/code] of the mesh: min U, min V, max U, max V) or reaches the bottom of the relief draws nothing. The albedo, normal map, relief and window mask are read with the gradients of the face's UV. Needs [member heightmap_deep_parallax].
+		</member>
+		<member name="heightmap_impostor_faces" type="PackedVector4Array" setter="set_heightmap_impostor_faces" getter="get_heightmap_impostor_faces">
+			Mariner G5c. The faces of a box impostor for its visual hull, set by [BoxImpostorBaker] (with [member BoxImpostorBaker.hull]): 4 vectors per face in the order +X, -X, +Z, -Z, +Y, -Y - the face's atlas U, V and relief depth as linear functions of the object-space position ([code]dot(p, v.xyz) + v.w[/code]) and the face's tangent with the bitangent's sign (0: the face was not baked) - then the box's minimum and maximum: 26 vectors. With them (and [member heightmap_impostor]) the view ray is traced through the box in object space against all the faces' reliefs at once - a point is solid where it lies behind the surface every face sees - and the color, normal and depth come from the face that sees the hit. Inner corners and walls a single face sees edge-on (L-shaped buildings, niches) are then right; costs about 5 relief reads per step. Fewer vectors: each face traces its own relief.
+		</member>
 		<member name="heightmap_max_layers" type="int" setter="set_heightmap_deep_parallax_max_layers" getter="get_heightmap_deep_parallax_max_layers">
 			The number of layers to use for parallax occlusion mapping when the camera is up close to the material. Higher values result in a more convincing depth effect, especially in materials that have steep height changes. Higher values have a significant cost on the GPU, so it should only be increased on materials where it makes a significant visual difference.
 			[b]Note:[/b] Only effective if [member heightmap_deep_parallax] is [code]true[/code].
@@ -286,6 +321,66 @@
 			The texture to use as a height map. See also [member heightmap_enabled].
 			For best results, the texture should be normalized (with [member heightmap_scale] reduced to compensate). In [url=https://gimp.org]GIMP[/url], this can be done using [b]Colors &gt; Auto &gt; Equalize[/b]. If the texture only uses a small part of its available range, the parallax effect may look strange, especially when the camera moves.
 			[b]Note:[/b] To reduce memory usage and improve loading times, you may be able to use a lower-resolution heightmap texture as most heightmaps are only comprised of low-frequency data.
+		</member>
+		<member name="interior_atlas_size" type="Vector2i" setter="set_interior_atlas_size" getter="get_interior_atlas_size" default="Vector2i(1, 1)">
+			The number of rooms in [member interior_texture]: columns and rows of equal tiles. Every window shows a random one (mirrored for every other window).
+		</member>
+		<member name="interior_back_wall" type="float" setter="set_interior_back_wall" getter="get_interior_back_wall" default="0.5">
+			The share of a room image taken by the back wall (in both directions): how the images of [member interior_texture] were made - a perspective view from the window, the side walls, ceiling and floor around the back wall. [code]0.5[/code]: the back wall is the middle half of the image.
+		</member>
+		<member name="interior_blinds" type="float" setter="set_interior_blinds" getter="get_interior_blinds" default="0.0">
+			The share of the windows with blinds, after those with curtains ([member interior_curtains]): lowered from the top of the window to a random height (a quarter to all of it), the slats more or less closed, in [member interior_curtain_color].
+		</member>
+		<member name="interior_brightness" type="float" setter="set_interior_brightness" getter="get_interior_brightness" default="1.0">
+			The light of the rooms without their lamps (the daylight in them): the room images are seen as emission times this. Lower it at night.
+		</member>
+		<member name="interior_curtain_color" type="Color" setter="set_interior_curtain_color" getter="get_interior_curtain_color" default="Color(0.75, 0.7, 0.6, 1)">
+			The color of the curtains and the blinds.
+		</member>
+		<member name="interior_curtains" type="float" setter="set_interior_curtains" getter="get_interior_curtains" default="0.0">
+			The share of the windows with curtains, 15 cm behind the glass (Mariner G5d): drawn from both sides to a random width (from 12.5 % on each side to closed), folded, in [member interior_curtain_color]; lit from the room behind them when its lamps are on ([member interior_lit_fraction]).
+		</member>
+		<member name="interior_enabled" type="bool" setter="set_feature" getter="get_feature" default="false">
+			If [code]true[/code], fake interiors are seen through the windows (interior mapping, Mariner G5a): a box room behind every window of the UV grid ([member interior_rooms]), drawn from [member interior_texture] with the right perspective from any angle, without geometry inside. The glass ([member interior_mask_texture]) is dark and smooth and reflects the world; the room shows through it as emission, less at grazing angles. Needs the mesh's tangents (as normal mapping); not with triplanar mapping.
+		</member>
+		<member name="interior_light_color" type="Color" setter="set_interior_light_color" getter="get_interior_light_color" default="Color(1, 0.8, 0.55, 1)">
+			The color of the lamps in lit rooms (see [member interior_lights]).
+		</member>
+		<member name="interior_lights" type="float" setter="set_interior_lights" getter="get_interior_lights" default="0.0">
+			The lamps in the rooms: in lit rooms (see [member interior_lit_fraction]) the room images are brightened by this times [member interior_light_color]. [code]0[/code] by day; raise it at dusk for lit windows.
+		</member>
+		<member name="interior_lit_fraction" type="float" setter="set_interior_lit_fraction" getter="get_interior_lit_fraction" default="0.3">
+			The share of rooms whose lamps are on (see [member interior_lights]), a random choice per window and per instance.
+		</member>
+		<member name="interior_mask_texture" type="Texture2D" setter="set_texture" getter="get_texture">
+			Where the windows' glass is (red channel, [code]1[/code] glass): the rest of the surface keeps the material. Without a texture the whole surface is glass.
+		</member>
+		<member name="interior_room_size" type="Vector3" setter="set_interior_room_size" getter="get_interior_room_size" default="Vector3(4, 3, 4)">
+			The size of a room in meters: width (along U), height (along V) and depth. The width and height should match the window grid on the surface ([member interior_rooms]); the depth sets how far the rooms go in.
+		</member>
+		<member name="interior_rooms" type="Vector2" setter="set_interior_rooms" getter="get_interior_rooms" default="Vector2(1, 1)">
+			The number of windows (rooms) along U and V of the UV range [code]0..1[/code]: the window grid. A random room per window.
+		</member>
+		<member name="interior_texture" type="Texture2D" setter="set_texture" getter="get_texture">
+			The room images (an atlas of [member interior_atlas_size] rooms): every one a view of a room from its window, the back wall in the middle ([member interior_back_wall]), the side walls left and right, the ceiling above and the floor below.
+		</member>
+		<member name="iridescence" type="float" setter="set_iridescence" getter="get_iridescence" default="1.0">
+			Strength of the thin-film effect: how much its Fresnel replaces the plain one. The texture's red channel multiplies it.
+		</member>
+		<member name="iridescence_enabled" type="bool" setter="set_feature" getter="get_feature" default="false">
+			Mariner F5. If [code]true[/code], a thin film over the surface colors its specular reflection by interference (Belcour and Barla 2017): oil on water, soap bubbles, heat tint on steel. Sets the [code]IRIDESCENCE[/code], [code]IRIDESCENCE_IOR[/code] and [code]IRIDESCENCE_THICKNESS[/code] fragment built-ins. Forward+ and Mobile.
+		</member>
+		<member name="iridescence_ior" type="float" setter="set_iridescence_ior" getter="get_iridescence_ior" default="1.3">
+			Index of refraction of the film. A film with the same index as the air does nothing.
+		</member>
+		<member name="iridescence_texture" type="Texture2D" setter="set_texture" getter="get_texture">
+			Texture for the thin film: red multiplies [member iridescence], green picks the thickness between [member iridescence_thickness_min] and [member iridescence_thickness_max].
+		</member>
+		<member name="iridescence_thickness_max" type="float" setter="set_iridescence_thickness_max" getter="get_iridescence_thickness_max" default="400.0">
+			Film thickness in nanometers where the texture's green channel is 1 (and everywhere without a texture).
+		</member>
+		<member name="iridescence_thickness_min" type="float" setter="set_iridescence_thickness_min" getter="get_iridescence_thickness_min" default="100.0">
+			Film thickness in nanometers where the texture's green channel is 0. Visible colors come from about 100 to 1200 nm; 0 removes the film.
 		</member>
 		<member name="metallic" type="float" setter="set_metallic" getter="get_metallic" default="0.0">
 			A high value makes the material appear more like a metal. Non-metals use their albedo as the diffuse color and add diffuse to the specular reflection. With non-metals, the reflection appears on top of the albedo color. Metals use their albedo as a multiplier to the specular reflection and set the diffuse color to black resulting in a tinted reflection. Materials work better when fully metal or fully non-metal, values between [code]0[/code] and [code]1[/code] should only be used for blending between metal and non-metal sections. To alter the amount of reflection use [member roughness].
@@ -333,6 +428,18 @@
 		<member name="particles_anim_v_frames" type="int" setter="set_particles_anim_v_frames" getter="get_particles_anim_v_frames">
 			The number of vertical frames in the particle sprite sheet. Only enabled when using [constant BILLBOARD_PARTICLES]. See [member billboard_mode].
 		</member>
+		<member name="planar_reflection_amount" type="float" setter="set_planar_reflection_amount" getter="get_planar_reflection_amount" default="1.0">
+			How much of the planar reflection replaces the indirect specular light (the reflection probes', the sky's and screen-space reflections'). [code]1[/code]: all of it.
+		</member>
+		<member name="planar_reflection_distortion" type="float" setter="set_planar_reflection_distortion" getter="get_planar_reflection_distortion" default="0.03">
+			How far the normal map tilts the reflection (in screen units, at full normal map depth): ripples on water, a dented deck.
+		</member>
+		<member name="planar_reflection_enabled" type="bool" setter="set_feature" getter="get_feature" default="false">
+			If [code]true[/code], the material shows the planar reflection of the [PlanarReflection3D] it is under (Mariner G6): the scene seen by the camera mirrored in the node's plane, read in screen space ([code]REFLECTION[/code] in the shader) - sharp for a smooth surface, blurred by [member roughness], tilted by the normal map ([member planar_reflection_distortion]). The node sets [member planar_reflection_texture]; a material shared with surfaces under another plane would show the wrong reflection. Not for unshaded materials.
+		</member>
+		<member name="planar_reflection_texture" type="Texture2D" setter="set_texture" getter="get_texture">
+			The planar reflection's image, set by the [PlanarReflection3D] above the surface.
+		</member>
 		<member name="point_size" type="float" setter="set_point_size" getter="get_point_size" default="1.0">
 			The point size in pixels. See [member use_point_size].
 		</member>
@@ -342,9 +449,21 @@
 		<member name="proximity_fade_enabled" type="bool" setter="set_proximity_fade_enabled" getter="is_proximity_fade_enabled" default="false">
 			If [code]true[/code], the proximity fade effect is enabled. The proximity fade effect fades out each pixel based on its distance to another object.
 		</member>
+		<member name="refraction_absorption_color" type="Color" setter="set_refraction_absorption_color" getter="get_refraction_absorption_color" default="Color(1, 1, 1, 1)">
+			Color that light keeps after traveling [member refraction_absorption_distance] inside the material, when [member refraction_physical] is on. White: no absorption.
+		</member>
+		<member name="refraction_absorption_distance" type="float" setter="set_refraction_absorption_distance" getter="get_refraction_absorption_distance" default="1.0">
+			Distance in meters at which the light inside has the [member refraction_absorption_color].
+		</member>
 		<member name="refraction_enabled" type="bool" setter="set_feature" getter="get_feature" default="false">
 			If [code]true[/code], the refraction effect is enabled. Distorts transparency based on light from behind the object.
 			[b]Note:[/b] Refraction is implemented using the screen texture. Only opaque materials will appear in the refraction, since transparent materials do not appear in the screen texture.
+		</member>
+		<member name="refraction_ior" type="float" setter="set_refraction_ior" getter="get_refraction_ior" default="1.5">
+			Index of refraction of the material when [member refraction_physical] is on (glass 1.5, water 1.33).
+		</member>
+		<member name="refraction_physical" type="bool" setter="set_refraction_physical" getter="is_refraction_physical" default="false">
+			Mariner F6. If [code]true[/code], [member refraction_enabled] refracts physically instead of offsetting the screen by the normal: the view ray bends by [member refraction_ior] through a slab of [member refraction_thickness], the light inside is absorbed by distance ([member refraction_absorption_color] at [member refraction_absorption_distance], as KHR_materials_volume), the transmitted share is reduced by the Fresnel of the interface and tinted by the albedo, and the specular follows the index of refraction. The albedo's alpha still sets how much passes through. For bridge windows, portholes, bottles.
 		</member>
 		<member name="refraction_scale" type="float" setter="set_refraction" getter="get_refraction" default="0.05">
 			The strength of the refraction effect.
@@ -354,6 +473,9 @@
 		</member>
 		<member name="refraction_texture_channel" type="int" setter="set_refraction_texture_channel" getter="get_refraction_texture_channel" enum="BaseMaterial3D.TextureChannel" default="0">
 			Specifies the channel of the [member refraction_texture] in which the refraction information is stored. This is useful when you store the information for multiple effects in a single texture. For example if you stored refraction in the red channel, roughness in the blue, and ambient occlusion in the green you could reduce the number of textures you use.
+		</member>
+		<member name="refraction_thickness" type="float" setter="set_refraction_thickness" getter="get_refraction_thickness" default="0.05">
+			Thickness in meters the refracted ray travels inside, when [member refraction_physical] is on. [code]0[/code] is a thin pane: no offset and no absorption.
 		</member>
 		<member name="rim" type="float" setter="set_rim" getter="get_rim" default="1.0">
 			Sets the strength of the rim lighting effect.
@@ -382,6 +504,36 @@
 		</member>
 		<member name="shadow_to_opacity" type="bool" setter="set_flag" getter="get_flag" default="false">
 			If [code]true[/code], enables the "shadow to opacity" render mode where lighting modifies the alpha so shadowed areas are opaque and non-shadowed areas are transparent. Useful for overlaying shadows onto a camera feed in AR.
+		</member>
+		<member name="sheen_color" type="Color" setter="set_sheen_color" getter="get_sheen_color" default="Color(1, 1, 1, 1)">
+			Color of the sheen lobe (its reflectance at grazing angles). The texture's RGB multiplies it.
+		</member>
+		<member name="sheen_enabled" type="bool" setter="set_feature" getter="get_feature" default="false">
+			Mariner M6. If [code]true[/code], a sheen (cloth) lobe is added: the Charlie distribution of Estevez and Kulla 2017 with the Neubelt visibility, strongest at grazing angles, as on velvet, sail canvas, tarpaulin or flags. Energy is taken from the base layer by the sheen's directional albedo. Sets the [code]SHEEN[/code] and [code]SHEEN_ROUGHNESS[/code] fragment built-ins. Forward+ and Mobile.
+		</member>
+		<member name="sheen_roughness" type="float" setter="set_sheen_roughness" getter="get_sheen_roughness" default="0.5">
+			Roughness of the sheen lobe: low values give a thin bright rim, high values a soft haze over the surface. The texture's alpha multiplies it.
+		</member>
+		<member name="sheen_texture" type="Texture2D" setter="set_texture" getter="get_texture">
+			Texture for the sheen: RGB multiplies [member sheen_color], alpha multiplies [member sheen_roughness].
+		</member>
+		<member name="snow_amount" type="float" setter="set_snow_amount" getter="get_snow_amount" default="1.0">
+			How much of the world's snow ([member Environment.snow]) this material takes: [code]0.0[/code] none (a warm roof, a hull in the spray), [code]1.0[/code] all.
+		</member>
+		<member name="snow_color" type="Color" setter="set_snow_color" getter="get_snow_color" default="Color(0.9, 0.92, 0.95, 1)">
+			The color of the snow.
+		</member>
+		<member name="snow_enabled" type="bool" setter="set_feature" getter="get_feature" default="false">
+			If [code]true[/code], snow lies on the material as [member Environment.snow] says: on what faces up (with the normal map's detail, so the upper sides of planks and bricks hold it first), up to [member snow_max_slope], and nowhere under cover from above (the overhead map, [member Environment.overhead_map_enabled]). Snow takes [member snow_color] and [member snow_roughness], is not metallic and smooths the normal map. With a height map, the low places fill first ([member snow_relief]). All three renderers.
+		</member>
+		<member name="snow_max_slope" type="float" setter="set_snow_max_slope" getter="get_snow_max_slope" default="55.0">
+			The steepest slope, in degrees from the horizontal, that holds snow when the world's snow is deep; steeper faces stay bare. Less snow lies on less steep faces only.
+		</member>
+		<member name="snow_relief" type="float" setter="set_snow_relief" getter="get_snow_relief" default="0.5">
+			With height mapping on: how much the low places of [member heightmap_texture] fill before the high ones (between planks, in the joints of a pavement).
+		</member>
+		<member name="snow_roughness" type="float" setter="set_snow_roughness" getter="get_snow_roughness" default="0.8">
+			The roughness of the snow.
 		</member>
 		<member name="specular_mode" type="int" setter="set_specular_mode" getter="get_specular_mode" enum="BaseMaterial3D.SpecularMode" default="0">
 			The method for rendering the specular blob.
@@ -495,6 +647,18 @@
 		<member name="vertex_color_use_as_albedo" type="bool" setter="set_flag" getter="get_flag" default="false">
 			If [code]true[/code], the vertex color is used as albedo color.
 		</member>
+		<member name="wetness_amount" type="float" setter="set_wetness_amount" getter="get_wetness_amount" default="1.0">
+			How wet the material gets with the world's wetness ([code]0.0[/code]: never, e.g. under a tarpaulin; [code]1.0[/code]: fully).
+		</member>
+		<member name="wetness_enabled" type="bool" setter="set_feature" getter="get_feature" default="false">
+			If [code]true[/code], the material gets wet with [member Environment.wetness] (Mariner G4): porous surfaces darken ([member wetness_porosity]), a film of water makes them smoother (less on steep faces, where it runs off), and with a height map ([member heightmap_enabled]) puddles stand on flat ground where it is low ([member wetness_puddles]). Under cover ([code]OVERHEAD_COVER[/code], the overhead map of [Environment]) the material stays dry.
+		</member>
+		<member name="wetness_porosity" type="float" setter="set_wetness_porosity" getter="get_wetness_porosity" default="0.5">
+			How much water the surface soaks up: [code]0.0[/code] for metal, glass and paint (only the film, no darkening), [code]1.0[/code] for concrete, wood, fabric (darker, less film). Wet porous albedo is down to [code]0.45[/code] of the dry one.
+		</member>
+		<member name="wetness_puddles" type="float" setter="set_wetness_puddles" getter="get_wetness_puddles" default="0.0">
+			The water level for puddles on the height map ([code]0.0[/code]: none; [code]0.5[/code]: the lower half of the height map is under water when fully wet; rises with the wetness). Puddles are smooth (roughness [code]0.02[/code]), flatten the normal map, and are not metallic. Needs [member heightmap_enabled] (not triplanar).
+		</member>
 		<member name="z_clip_scale" type="float" setter="set_z_clip_scale" getter="get_z_clip_scale" default="1.0">
 			Scales the object being rendered towards the camera to avoid clipping into things like walls. This is intended to be used for objects that are fixed with respect to the camera like player arms, tools, etc. Lighting and shadows will continue to work correctly when this setting is adjusted, but screen-space effects like SSAO and SSR may break with lower scales. Therefore, try to keep this setting as close to [code]1.0[/code] as possible.
 		</member>
@@ -517,6 +681,24 @@
 		</constant>
 		<constant name="TEXTURE_BENT_NORMAL" value="18" enum="TextureParam">
 			Texture specifying per-pixel bent normal vector.
+		</constant>
+		<constant name="TEXTURE_SHEEN" value="19" enum="TextureParam">
+			Texture specifying the sheen color (RGB) and roughness (alpha).
+		</constant>
+		<constant name="TEXTURE_IRIDESCENCE" value="20" enum="TextureParam">
+			Texture specifying the thin-film strength (red) and thickness (green).
+		</constant>
+		<constant name="TEXTURE_INTERIOR" value="21" enum="TextureParam">
+			Texture specifying the room images of fake interiors. Used by [member interior_texture].
+		</constant>
+		<constant name="TEXTURE_INTERIOR_MASK" value="22" enum="TextureParam">
+			Texture specifying where the windows' glass is. Used by [member interior_mask_texture].
+		</constant>
+		<constant name="TEXTURE_PLANAR_REFLECTION" value="23" enum="TextureParam">
+			Texture of the planar reflection. Used by [member planar_reflection_texture].
+		</constant>
+		<constant name="TEXTURE_DISPLACEMENT" value="24" enum="TextureParam">
+			Texture specifying the height of the displacement. Used by [member displacement_texture].
 		</constant>
 		<constant name="TEXTURE_RIM" value="5" enum="TextureParam">
 			Texture specifying per-pixel rim value.
@@ -557,7 +739,7 @@
 		<constant name="TEXTURE_ORM" value="17" enum="TextureParam">
 			Texture holding ambient occlusion, roughness, and metallic.
 		</constant>
-		<constant name="TEXTURE_MAX" value="19" enum="TextureParam">
+		<constant name="TEXTURE_MAX" value="25" enum="TextureParam">
 			Represents the size of the [enum TextureParam] enum.
 		</constant>
 		<constant name="TEXTURE_FILTER_NEAREST" value="0" enum="TextureFilter">
@@ -656,8 +838,71 @@
 		<constant name="FEATURE_BENT_NORMAL_MAPPING" value="12" enum="Feature">
 			Constant for setting [member bent_normal_enabled].
 		</constant>
-		<constant name="FEATURE_MAX" value="13" enum="Feature">
+		<constant name="FEATURE_SHEEN" value="13" enum="Feature">
+			Constant for setting [member sheen_enabled].
+		</constant>
+		<constant name="FEATURE_IRIDESCENCE" value="14" enum="Feature">
+			Constant for setting [member iridescence_enabled].
+		</constant>
+		<constant name="FEATURE_WETNESS" value="15" enum="Feature">
+			Constant for setting [member wetness_enabled] (Mariner G4).
+		</constant>
+		<constant name="FEATURE_INTERIOR" value="16" enum="Feature">
+			Constant for setting [member interior_enabled].
+		</constant>
+		<constant name="FEATURE_PLANAR_REFLECTION" value="17" enum="Feature">
+			Constant for setting [member planar_reflection_enabled].
+		</constant>
+		<constant name="FEATURE_DISPLACEMENT" value="18" enum="Feature">
+			Constant for setting [member displacement_enabled].
+		</constant>
+		<constant name="FEATURE_SNOW" value="19" enum="Feature">
+			Constant for setting [member snow_enabled].
+		</constant>
+		<constant name="FEATURE_MAX" value="20" enum="Feature">
 			Represents the size of the [enum Feature] enum.
+		</constant>
+		<constant name="METAL_ALUMINUM" value="0" enum="Metal">
+			Aluminum.
+		</constant>
+		<constant name="METAL_BRASS" value="1" enum="Metal">
+			Brass.
+		</constant>
+		<constant name="METAL_CHROMIUM" value="2" enum="Metal">
+			Chromium.
+		</constant>
+		<constant name="METAL_COPPER" value="3" enum="Metal">
+			Copper.
+		</constant>
+		<constant name="METAL_GOLD" value="4" enum="Metal">
+			Gold.
+		</constant>
+		<constant name="METAL_IRON" value="5" enum="Metal">
+			Iron. Steel is close to iron.
+		</constant>
+		<constant name="METAL_MERCURY" value="6" enum="Metal">
+			Mercury.
+		</constant>
+		<constant name="METAL_NICKEL" value="7" enum="Metal">
+			Nickel.
+		</constant>
+		<constant name="METAL_PALLADIUM" value="8" enum="Metal">
+			Palladium.
+		</constant>
+		<constant name="METAL_PLATINUM" value="9" enum="Metal">
+			Platinum.
+		</constant>
+		<constant name="METAL_SILVER" value="10" enum="Metal">
+			Silver.
+		</constant>
+		<constant name="METAL_TITANIUM" value="11" enum="Metal">
+			Titanium.
+		</constant>
+		<constant name="METAL_ZINC" value="12" enum="Metal">
+			Zinc.
+		</constant>
+		<constant name="METAL_MAX" value="13" enum="Metal">
+			Represents the size of the [enum Metal] enum.
 		</constant>
 		<constant name="BLEND_MODE_MIX" value="0" enum="BlendMode">
 			Default blend mode. The color of the object is blended over the background based on the object's alpha value.

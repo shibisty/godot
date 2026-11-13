@@ -43,6 +43,7 @@
 #include "scene/3d/physics/static_body_3d.h"
 #include "scene/gui/aspect_ratio_container.h"
 #include "scene/gui/box_container.h"
+#include "scene/gui/check_box.h"
 #include "scene/gui/dialogs.h"
 #include "scene/gui/menu_button.h"
 #include "scene/gui/spin_box.h"
@@ -52,6 +53,7 @@
 #include "scene/resources/3d/concave_polygon_shape_3d.h"
 #include "scene/resources/3d/convex_polygon_shape_3d.h"
 #include "scene/resources/3d/cylinder_shape_3d.h"
+#include "scene/resources/3d/mesh_tessellator.h"
 #include "scene/resources/3d/primitive_meshes.h"
 #include "scene/resources/3d/sphere_shape_3d.h"
 
@@ -445,6 +447,9 @@ void MeshInstance3DEditor::_menu_option(int p_option) {
 		case MENU_OPTION_CREATE_OUTLINE_MESH: {
 			outline_dialog->popup_centered(Vector2(200, 90));
 		} break;
+		case MENU_OPTION_TESSELLATE: {
+			tessellate_dialog->popup_centered(Vector2(260, 150));
+		} break;
 		case MENU_OPTION_CREATE_DEBUG_TANGENTS: {
 			EditorUndoRedoManager *ur = EditorUndoRedoManager::get_singleton();
 			ur->create_action(TTR("Create Debug Tangents"));
@@ -736,6 +741,46 @@ void MeshInstance3DEditor::_create_navigation_mesh() {
 	ur->commit_action();
 }
 
+void MeshInstance3DEditor::_tessellate_mesh() {
+	Ref<Mesh> mesh = node->get_mesh();
+	if (mesh.is_null() || mesh->get_surface_count() == 0) {
+		err_dialog->set_text(TTR("MeshInstance3D lacks a Mesh."));
+		err_dialog->popup_centered();
+		return;
+	}
+
+	Ref<MeshTessellator> tessellator;
+	tessellator.instantiate();
+	tessellator->set_target_edge_length(tessellate_edge_length->get_value());
+	tessellator->set_phong_enabled(tessellate_phong->is_pressed());
+	tessellator->set_phong_shape(tessellate_phong_shape->get_value());
+	tessellator->set_generate_lods(tessellate_lods->is_pressed());
+	// The LODs follow the displacement of the material the node draws the mesh with.
+	Ref<Material> material = node->get_material_override();
+	if (material.is_null() && mesh->get_surface_count() == 1) {
+		material = node->get_surface_override_material(0);
+	}
+	Ref<ArrayMesh> tessellated = tessellator->tessellate(mesh, material);
+	if (tessellated.is_null()) {
+		err_dialog->set_text(TTR("Could not tessellate the mesh."));
+		err_dialog->popup_centered();
+		return;
+	}
+
+	EditorUndoRedoManager *ur = EditorUndoRedoManager::get_singleton();
+	ur->create_action(TTR("Tessellate Mesh"));
+	ur->add_do_method(node, "set_mesh", tessellated);
+	ur->add_undo_method(node, "set_mesh", mesh);
+	// Mariner G7c: the displacement read at the mipmap of about one texel per edge (no aliasing).
+	Ref<BaseMaterial3D> displaced = material.is_valid() ? material : mesh->surface_get_material(0);
+	const float lod = MeshTessellator::get_displacement_texture_lod(tessellated, displaced, tessellator->get_target_edge_length());
+	if (lod >= 0.0f) {
+		ur->add_do_method(displaced.ptr(), "set_displacement_texture_lod", lod);
+		ur->add_undo_method(displaced.ptr(), "set_displacement_texture_lod", displaced->get_displacement_texture_lod());
+	}
+	ur->commit_action();
+}
+
 void MeshInstance3DEditor::_create_outline_mesh() {
 	Ref<Mesh> mesh = node->get_mesh();
 	if (mesh.is_null()) {
@@ -808,6 +853,8 @@ MeshInstance3DEditor::MeshInstance3DEditor() {
 	options->get_popup()->add_item(TTR("Create Outline Mesh..."), MENU_OPTION_CREATE_OUTLINE_MESH);
 	options->get_popup()->set_item_tooltip(options->get_popup()->get_item_count() - 1, TTR("Creates a static outline mesh. The outline mesh will have its normals flipped automatically.\nThis can be used instead of the StandardMaterial Grow property when using that property isn't possible."));
 	options->get_popup()->add_item(TTR("Create Debug Tangents"), MENU_OPTION_CREATE_DEBUG_TANGENTS);
+	options->get_popup()->add_item(TTR("Tessellate Mesh..."), MENU_OPTION_TESSELLATE);
+	options->get_popup()->set_item_tooltip(options->get_popup()->get_item_count() - 1, TTR("Splits the triangles until no edge is longer than the given length, for the material's displacement.\nThe LODs are made on the displaced shape."));
 	options->get_popup()->add_separator();
 	options->get_popup()->add_item(TTR("View UV1"), MENU_OPTION_DEBUG_UV1);
 	options->get_popup()->add_item(TTR("View UV2"), MENU_OPTION_DEBUG_UV2);
@@ -833,6 +880,36 @@ MeshInstance3DEditor::MeshInstance3DEditor() {
 
 	add_child(outline_dialog);
 	outline_dialog->connect(SceneStringName(confirmed), callable_mp(this, &MeshInstance3DEditor::_create_outline_mesh));
+
+	tessellate_dialog = memnew(ConfirmationDialog);
+	tessellate_dialog->set_title(TTR("Tessellate Mesh"));
+	tessellate_dialog->set_ok_button_text(TTR("Tessellate"));
+	VBoxContainer *tessellate_vbc = memnew(VBoxContainer);
+	tessellate_dialog->add_child(tessellate_vbc);
+	tessellate_edge_length = memnew(SpinBox);
+	tessellate_edge_length->set_accessibility_name(TTRC("Target Edge Length:"));
+	tessellate_edge_length->set_min(0.001);
+	tessellate_edge_length->set_max(1000);
+	tessellate_edge_length->set_step(0.001);
+	tessellate_edge_length->set_value(0.25);
+	tessellate_edge_length->set_suffix("m");
+	tessellate_vbc->add_margin_child(TTR("Target Edge Length:"), tessellate_edge_length);
+	tessellate_phong = memnew(CheckBox);
+	tessellate_phong->set_text(TTR("Phong Smoothing"));
+	tessellate_vbc->add_child(tessellate_phong);
+	tessellate_phong_shape = memnew(SpinBox);
+	tessellate_phong_shape->set_accessibility_name(TTRC("Phong Shape:"));
+	tessellate_phong_shape->set_min(0.0);
+	tessellate_phong_shape->set_max(1.0);
+	tessellate_phong_shape->set_step(0.01);
+	tessellate_phong_shape->set_value(0.75);
+	tessellate_vbc->add_margin_child(TTR("Phong Shape:"), tessellate_phong_shape);
+	tessellate_lods = memnew(CheckBox);
+	tessellate_lods->set_text(TTR("Generate LODs"));
+	tessellate_lods->set_pressed(true);
+	tessellate_vbc->add_child(tessellate_lods);
+	add_child(tessellate_dialog);
+	tessellate_dialog->connect(SceneStringName(confirmed), callable_mp(this, &MeshInstance3DEditor::_tessellate_mesh));
 
 	shape_dialog = memnew(ConfirmationDialog);
 	shape_dialog->set_title(TTR("Create Collision Shape"));

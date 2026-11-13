@@ -31,6 +31,7 @@
 #pragma once
 
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
+#include "servers/rendering/renderer_rd/shaders/effects/luminance_histogram.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/luminance_reduce.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/luminance_reduce_raster.glsl.gen.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
@@ -86,6 +87,36 @@ private:
 		PipelineCacheRD pipelines[LUMINANCE_REDUCE_FRAGMENT_MAX];
 	} luminance_reduce_raster;
 
+	// Mariner G2: histogram of the log luminance (compute only).
+	enum LuminanceHistogramMode {
+		LUMINANCE_HISTOGRAM_BUILD,
+		LUMINANCE_HISTOGRAM_RESOLVE,
+		LUMINANCE_HISTOGRAM_MAX
+	};
+
+	struct LuminanceHistogramPushConstant {
+		int32_t source_size[2];
+		float log_min;
+		float log_range;
+
+		float center_weight;
+		float low_percentile;
+		float high_percentile;
+		float min_luminance;
+
+		float max_luminance;
+		float adapt_bright;
+		float adapt_dark;
+		uint32_t set_immediate;
+	};
+	static_assert(sizeof(LuminanceHistogramPushConstant) == 48);
+
+	struct LuminanceHistogram {
+		LuminanceHistogramShaderRD shader;
+		RID shader_version;
+		RID pipelines[LUMINANCE_HISTOGRAM_MAX];
+	} luminance_histogram;
+
 public:
 	class LuminanceBuffers : public RenderBufferCustomDataRD {
 		GDCLASS(LuminanceBuffers, RenderBufferCustomDataRD);
@@ -96,6 +127,7 @@ public:
 	public:
 		Vector<RID> reduce;
 		RID current;
+		RID histogram; // Mariner G2: 64 uint bins and their offsets, created on first use.
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override;
 		virtual void free_data() override;
@@ -106,6 +138,14 @@ public:
 	Ref<LuminanceBuffers> get_luminance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers);
 	RID get_current_luminance_buffer(Ref<RenderSceneBuffersRD> p_render_buffers);
 	void luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set = false);
+
+	// Mariner G2: the same result (the adapted luminance in the 1x1 current buffer) from a histogram of the log luminance
+	// between two percentiles, center weighted, with separate adaptation speeds; false if unsupported (raster effects).
+	static constexpr int HISTOGRAM_BINS = 64;
+	bool is_histogram_supported() const { return !prefer_raster_effects; }
+	void luminance_histogram_exposure(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_low_percentile, float p_high_percentile, float p_center_weight, float p_adapt_bright, float p_adapt_dark, bool p_set);
+	// The log2 span of the bins for a luminance clamp range: the range and 2 stops on either side.
+	static void histogram_log_range(float p_min_luminance, float p_max_luminance, float &r_log_min, float &r_log_range);
 
 	Luminance(bool p_prefer_raster_effects);
 	~Luminance();

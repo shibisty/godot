@@ -33,7 +33,7 @@ else:
 # Mesa NIR
 # Sync with `drivers/d3d12/SCsub` when updating Mesa.
 # Check for latest version: https://github.com/godotengine/godot-nir-static/releases/latest
-mesa_version = "25.3.1-3"
+mesa_version = "raytracing-rel"
 # WinPixEventRuntime
 # Check for latest version: https://www.nuget.org/api/v2/package/WinPixEventRuntime (check downloaded filename)
 pix_version = "1.0.240308001"
@@ -46,13 +46,19 @@ pix_folder = os.path.join(deps_folder, "pix")
 agility_sdk_version = "1.618.5"
 agility_sdk_archive = os.path.join(deps_folder, f"Agility_SDK_{agility_sdk_version}.nupkg")
 agility_sdk_folder = os.path.join(deps_folder, "agility_sdk")
+# DirectX Shader Compiler (Mariner E7b: mesh shaders on D3D12)
+# Check for latest version: https://github.com/microsoft/DirectXShaderCompiler/releases/latest
+dxc_version = "v1.8.2505.1"
+dxc_filename = "dxc_2025_07_14.zip"
+dxc_archive = os.path.join(deps_folder, dxc_filename)
+dxc_folder = os.path.join(deps_folder, "dxc")
 
 # Create dependencies folder
 if not os.path.exists(deps_folder):
     os.makedirs(deps_folder)
 
 # Mesa NIR
-color_print(f"{Ansi.BOLD}[1/3] Mesa NIR")
+color_print(f"{Ansi.BOLD}[1/4] Mesa NIR")
 for arch in [
     "arm64-llvm",
     "arm64-msvc",
@@ -71,7 +77,7 @@ for arch in [
         os.remove(mesa_archive)
     print(f"Downloading Mesa NIR {mesa_filename} ...")
     urllib.request.urlretrieve(
-        f"https://github.com/godotengine/godot-nir-static/releases/download/{mesa_version}/{mesa_filename}",
+        f"https://github.com/blueskythlikesclouds/godot-nir-static/releases/download/{mesa_version}/{mesa_filename}",
         mesa_archive,
     )
     if os.path.exists(mesa_folder):
@@ -94,7 +100,7 @@ gendef = shutil.which("x86_64-w64-mingw32-gendef", path=pathstr) or shutil.which
 dlltool = shutil.which("x86_64-w64-mingw32-dlltool", path=pathstr) or shutil.which("dlltool", path=pathstr) or ""
 has_mingw = gendef != "" and dlltool != ""
 
-color_print(f"{Ansi.BOLD}[2/3] WinPixEventRuntime")
+color_print(f"{Ansi.BOLD}[2/4] WinPixEventRuntime")
 if os.path.isfile(pix_archive):
     os.remove(pix_archive)
 print(f"Downloading WinPixEventRuntime {pix_version} ...")
@@ -127,7 +133,7 @@ else:
 print(f"WinPixEventRuntime {pix_version} installed successfully.\n")
 
 # DirectX 12 Agility SDK
-color_print(f"{Ansi.BOLD}[3/3] DirectX 12 Agility SDK")
+color_print(f"{Ansi.BOLD}[3/4] DirectX 12 Agility SDK")
 if os.path.isfile(agility_sdk_archive):
     os.remove(agility_sdk_archive)
 print(f"Downloading DirectX 12 Agility SDK {agility_sdk_version} ...")
@@ -141,6 +147,22 @@ print(f"Extracting DirectX 12 Agility SDK {agility_sdk_version} to {agility_sdk_
 shutil.unpack_archive(agility_sdk_archive, agility_sdk_folder, "zip")
 os.remove(agility_sdk_archive)
 print(f"DirectX 12 Agility SDK {agility_sdk_version} installed successfully.\n")
+
+# DirectX Shader Compiler
+color_print(f"{Ansi.BOLD}[4/4] DirectX Shader Compiler")
+if os.path.isfile(dxc_archive):
+    os.remove(dxc_archive)
+print(f"Downloading DirectX Shader Compiler {dxc_version} ...")
+urllib.request.urlretrieve(
+    f"https://github.com/microsoft/DirectXShaderCompiler/releases/download/{dxc_version}/{dxc_filename}", dxc_archive
+)
+if os.path.exists(dxc_folder):
+    print(f"Removing existing local DirectX Shader Compiler installation in {dxc_folder} ...")
+    shutil.rmtree(dxc_folder)
+print(f"Extracting DirectX Shader Compiler {dxc_version} to {dxc_folder} ...")
+shutil.unpack_archive(dxc_archive, dxc_folder, "zip")
+os.remove(dxc_archive)
+print(f"DirectX Shader Compiler {dxc_version} installed successfully.\n")
 
 # Complete message
 color_print(f'{Ansi.GREEN}All Direct3D 12 SDK components were installed to "{deps_folder}" successfully!')

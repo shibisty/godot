@@ -102,6 +102,7 @@ private:
 			COLLISION_TYPE_HEIGHT_FIELD,
 			COLLISION_TYPE_2D_SDF,
 			COLLISION_TYPE_SCREEN_DEPTH, // Mariner E22.
+			COLLISION_TYPE_OVERHEAD_MAP, // Mariner G1c.
 
 		};
 
@@ -178,6 +179,7 @@ private:
 		bool use_local_coords = false;
 		bool has_collision_cache = false;
 		bool screen_space_collision = false; // Mariner E22.
+		bool overhead_map_collision = false; // Mariner G1c.
 
 		bool has_sdf_collision = false;
 		Transform2D sdf_collision_transform;
@@ -214,6 +216,7 @@ private:
 		uint32_t collision_3d_textures_used = 0;
 		RID collision_heightmap_texture;
 		RID collision_screen_texture; // Mariner E22.
+		RID collision_overhead_texture; // Mariner G1c.
 
 		RID particles_sort_buffer;
 		RID particles_sort_uniform_set;
@@ -473,6 +476,7 @@ public:
 	virtual void particles_set_fractional_delta(RID p_particles, bool p_enable) override;
 	virtual void particles_set_collision_base_size(RID p_particles, real_t p_size) override;
 	virtual void particles_set_screen_space_collision(RID p_particles, bool p_enable) override;
+	virtual void particles_set_overhead_map_collision(RID p_particles, bool p_enable) override; // Mariner G1c.
 
 	// Mariner E22: the depth and normal of the largest perspective camera view drawn in a frame, read by the
 	// particles of the next frame. The renderer asks whether a view should write it and gives what it wrote with.
@@ -491,9 +495,23 @@ public:
 	void screen_collision_end(const Projection &p_view_projection, const Vector3 &p_camera_position);
 	const ScreenCollision &screen_collision_get() const { return screen_collision; }
 
+	// Mariner G1c: the overhead map (Environment.overhead_map_*) of the largest view drawn in a frame, read by the
+	// particles of the next frame (GPUParticles3D.collision_overhead_map). The texture belongs to the view's render
+	// buffers: checked for validity at use.
+	struct OverheadCollision {
+		RID texture; // RG16 UNORM heights with mipmaps (OverheadMap::Buffers::height).
+		Vector3 box_min;
+		Vector3 box_max;
+		uint64_t frame = 0;
+		uint64_t area = 0;
+	};
+	void overhead_collision_set(uint64_t p_frame, uint64_t p_area, RID p_texture, const Vector3 &p_box_min, const Vector3 &p_box_max);
+	const OverheadCollision &overhead_collision_get() const { return overhead_collision; }
+
 private:
 	ScreenCollision screen_collision; // Mariner E22.
 	uint32_t screen_collision_users = 0;
+	OverheadCollision overhead_collision; // Mariner G1c.
 
 public:
 	virtual void particles_set_transform_align(RID p_particles, RSE::ParticlesTransformAlign p_transform_align) override;

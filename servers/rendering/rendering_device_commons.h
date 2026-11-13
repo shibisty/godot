@@ -1074,6 +1074,8 @@ public:
 		SUPPORTS_MESH_SHADER,
 		// Mariner E7: GPU-side draw count (draw_list_draw_mesh_tasks_indirect_count).
 		SUPPORTS_MESH_SHADER_INDIRECT_COUNT,
+		// Mariner G6: user clip distances in vertex shaders (gl_ClipDistance).
+		SUPPORTS_CLIP_DISTANCE,
 	};
 
 	enum SubgroupOperations {
@@ -1162,9 +1164,12 @@ public:
 		uint32_t binding = 0;
 		BitField<ShaderStage> stages = {};
 		uint32_t length = 0; // Size of arrays (in total elements), or ubos (in bytes * total elements). 0 if unbounded.
+		// Mariner E5d: storage buffers declared as an array (`buffer B { ... } b[N];`) - the number of buffers bound
+		// (`length` stays the size of one block). 1 for everything else.
+		uint32_t array_count = 1;
 
 		bool operator!=(const ShaderUniform &p_other) const {
-			return binding != p_other.binding || type != p_other.type || writable != p_other.writable || unbounded != p_other.unbounded || stages != p_other.stages || length != p_other.length;
+			return binding != p_other.binding || type != p_other.type || writable != p_other.writable || unbounded != p_other.unbounded || stages != p_other.stages || length != p_other.length || array_count != p_other.array_count;
 		}
 
 		bool operator<(const ShaderUniform &p_other) const {
@@ -1179,6 +1184,9 @@ public:
 			}
 			if (unbounded != p_other.unbounded) {
 				return unbounded < p_other.unbounded;
+			}
+			if (array_count != p_other.array_count) {
+				return array_count < p_other.array_count;
 			}
 			if (stages != p_other.stages) {
 				return stages < p_other.stages;

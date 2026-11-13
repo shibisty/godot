@@ -49,6 +49,9 @@ half get_omni_attenuation(float distance, float inv_range, float decay) {
 
 void light_process_omni_vertex(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, half roughness,
 		inout hvec3 diffuse_light, inout hvec3 specular_light) {
+	if (!light_clip_inside(omni_lights.data[idx].clip_x, omni_lights.data[idx].clip_y, omni_lights.data[idx].clip_z, omni_lights.data[idx].clip, vertex)) { // Mariner G3.
+		return;
+	}
 	vec3 light_rel_vec = omni_lights.data[idx].position - vertex;
 	float light_length = length(light_rel_vec);
 	hvec3 light_rel_vec_norm = hvec3(light_rel_vec / light_length);
@@ -63,6 +66,9 @@ void light_process_omni_vertex(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 norma
 void light_process_spot_vertex(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, half roughness,
 		inout hvec3 diffuse_light,
 		inout hvec3 specular_light) {
+	if (!light_clip_inside(spot_lights.data[idx].clip_x, spot_lights.data[idx].clip_y, spot_lights.data[idx].clip_z, spot_lights.data[idx].clip, vertex)) { // Mariner G3.
+		return;
+	}
 	vec3 light_rel_vec = spot_lights.data[idx].position - vertex;
 	float light_length = length(light_rel_vec);
 	hvec3 light_rel_vec_norm = hvec3(light_rel_vec / light_length);

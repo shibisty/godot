@@ -427,6 +427,23 @@
 				Loads an image from the binary contents of a WebP file.
 			</description>
 		</method>
+		<method name="normal_map_to_cavity" qualifiers="const">
+			<return type="Image" />
+			<param index="0" name="depth" type="float" default="1.0" />
+			<param index="1" name="radius" type="int" default="16" />
+			<param index="2" name="invert_green" type="bool" default="false" />
+			<description>
+				Mariner M5. Returns the cavity occlusion (format [constant FORMAT_L8], 1 = open) of the relief of this normal map, for materials without an ambient occlusion map, as in "Material Advances in Call of Duty: WWII" (Chan 2018): the height field of [method normal_map_to_height] is searched for its horizon in 8 directions up to [param radius] texels, and the cosine-weighted visible part of the sky is averaged. [param depth] scales the relief.
+			</description>
+		</method>
+		<method name="normal_map_to_height" qualifiers="const">
+			<return type="Image" />
+			<param index="0" name="depth" type="float" default="1.0" />
+			<param index="1" name="invert_green" type="bool" default="false" />
+			<description>
+				Mariner M5. Returns the height field (format [constant FORMAT_RF], zero mean, in texels times [param depth]) of the relief that this tangent-space normal map describes: its slopes are integrated by solving the Poisson equation with relaxation from coarse to fine levels; the texture is taken to tile. [param invert_green] reads a normal map with green pointing down (DirectX convention).
+			</description>
+		</method>
 		<method name="normal_map_to_xy">
 			<return type="void" />
 			<description>
