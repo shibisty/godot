@@ -139,6 +139,7 @@ private:
 	ShadowCacheMode shadow_cache_mode = SHADOW_CACHE_MODE_AUTO;
 	RaytracingMode raytracing_mode = RAYTRACING_MODE_DEFAULT;
 	float raytracing_opacity = 1.0;
+	float raytracing_scattering = 0.0; // Mariner DG-M.
 	bool shadow_translucent = false; // Mariner E21.
 	bool gpu_static = false; // Mariner E25a.
 	Ref<Material> material_override;
@@ -183,6 +184,8 @@ public:
 	RaytracingMode get_raytracing_mode() const;
 	void set_raytracing_opacity(float p_opacity);
 	float get_raytracing_opacity() const;
+	void set_raytracing_scattering(float p_opacity); // Mariner DG-M.
+	float get_raytracing_scattering() const;
 
 	void set_shadow_translucent(bool p_enabled);
 	bool is_shadow_translucent() const;

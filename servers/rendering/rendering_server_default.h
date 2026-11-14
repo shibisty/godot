@@ -1029,6 +1029,7 @@ public:
 	FUNC2(instance_geometry_set_cast_shadows_setting, RID, RSE::ShadowCastingSetting)
 	FUNC2(instance_geometry_set_shadow_cache_mode, RID, RSE::ShadowCacheMode)
 	FUNC3(instance_geometry_set_raytracing, RID, RSE::RaytracingMode, float)
+	FUNC2(instance_geometry_set_raytracing_scattering, RID, float)
 	FUNC2(instance_geometry_set_shadow_translucent, RID, bool)
 	FUNC2(instance_geometry_set_gpu_static, RID, bool)
 	FUNC1RC(bool, instance_geometry_is_gpu_static_active, RID)

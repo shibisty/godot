@@ -753,6 +753,7 @@ void RendererSceneCull::instance_set_base(RID p_instance, RID p_base) {
 
 				ERR_FAIL_NULL(geom->geometry_instance);
 				geom->geometry_instance->set_raytracing_data(instance->raytracing_mode == RSE::RAYTRACING_MODE_ONLY, instance->raytracing_opacity); // Mariner E12 DG-F.
+				geom->geometry_instance->set_raytracing_scattering(instance->raytracing_scattering); // Mariner DG-M.
 				geom->geometry_instance->set_ignore_occlusion_culling(instance->ignore_occlusion_culling); // Mariner E25b.
 
 				geom->geometry_instance->set_skeleton(instance->skeleton);
@@ -1394,6 +1395,21 @@ void RendererSceneCull::instance_geometry_set_shadow_cache_mode(RID p_instance, 
 	// The static set of the cascades changes: count it as a change of the instance.
 	instance->version++;
 	instance->version_frame = RSG::rasterizer->get_frame_number();
+}
+
+// Mariner DG-M: a scattering medium for DDGI (a canopy stand-in). Share of the light of a probe ray the instance stops
+// (raytracing_opacity) that goes on, scattered by the leaves, instead of ending at the stand-in's surface.
+void RendererSceneCull::instance_geometry_set_raytracing_scattering(RID p_instance, float p_opacity) {
+	Instance *instance = instance_owner.get_or_null(p_instance);
+	ERR_FAIL_NULL(instance);
+	_gpu_static_touch(instance); // Mariner E25a: batch key.
+	instance->raytracing_scattering = CLAMP(p_opacity, 0.0f, 1.0f);
+	if (((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) && instance->base_data) {
+		InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(instance->base_data);
+		if (geom->geometry_instance) {
+			geom->geometry_instance->set_raytracing_scattering(instance->raytracing_scattering);
+		}
+	}
 }
 
 void RendererSceneCull::instance_geometry_set_raytracing(RID p_instance, RSE::RaytracingMode p_mode, float p_opacity) {
@@ -5000,7 +5016,7 @@ void RendererSceneCull::_update_dirty_instance(Instance *p_instance) const {
 /* Mariner E25a: GPU static batches */
 
 bool RendererSceneCull::GPUStaticKey::operator==(const GPUStaticKey &p_other) const {
-	return mesh == p_other.mesh && material_override == p_other.material_override && material_overlay == p_other.material_overlay && materials == p_other.materials && layer_mask == p_other.layer_mask && cast_shadows == p_other.cast_shadows && shadow_cache_mode == p_other.shadow_cache_mode && raytracing_mode == p_other.raytracing_mode && raytracing_opacity == p_other.raytracing_opacity && lod_bias == p_other.lod_bias && sorting_offset == p_other.sorting_offset && use_aabb_center == p_other.use_aabb_center && baked_light == p_other.baked_light && dynamic_gi == p_other.dynamic_gi && ignore_occlusion_culling == p_other.ignore_occlusion_culling && shadow_translucent == p_other.shadow_translucent && visibility_range_begin == p_other.visibility_range_begin && visibility_range_end == p_other.visibility_range_end && visibility_range_begin_margin == p_other.visibility_range_begin_margin && visibility_range_end_margin == p_other.visibility_range_end_margin;
+	return mesh == p_other.mesh && material_override == p_other.material_override && material_overlay == p_other.material_overlay && materials == p_other.materials && layer_mask == p_other.layer_mask && cast_shadows == p_other.cast_shadows && shadow_cache_mode == p_other.shadow_cache_mode && raytracing_mode == p_other.raytracing_mode && raytracing_opacity == p_other.raytracing_opacity && raytracing_scattering == p_other.raytracing_scattering && lod_bias == p_other.lod_bias && sorting_offset == p_other.sorting_offset && use_aabb_center == p_other.use_aabb_center && baked_light == p_other.baked_light && dynamic_gi == p_other.dynamic_gi && ignore_occlusion_culling == p_other.ignore_occlusion_culling && shadow_translucent == p_other.shadow_translucent && visibility_range_begin == p_other.visibility_range_begin && visibility_range_end == p_other.visibility_range_end && visibility_range_begin_margin == p_other.visibility_range_begin_margin && visibility_range_end_margin == p_other.visibility_range_end_margin;
 }
 
 uint32_t RendererSceneCull::GPUStaticKey::hash() const {
@@ -5013,6 +5029,7 @@ uint32_t RendererSceneCull::GPUStaticKey::hash() const {
 	h = hash_murmur3_one_32(layer_mask, h);
 	h = hash_murmur3_one_32(uint32_t(cast_shadows) | (uint32_t(shadow_cache_mode) << 4) | (uint32_t(raytracing_mode) << 8) | (uint32_t(use_aabb_center) << 12) | (uint32_t(baked_light) << 13) | (uint32_t(dynamic_gi) << 14) | (uint32_t(ignore_occlusion_culling) << 15) | (uint32_t(shadow_translucent) << 16), h);
 	h = hash_murmur3_one_float(raytracing_opacity, h);
+	h = hash_murmur3_one_float(raytracing_scattering, h);
 	h = hash_murmur3_one_float(lod_bias, h);
 	h = hash_murmur3_one_float(sorting_offset, h);
 	h = hash_murmur3_one_float(visibility_range_begin, h);
@@ -5041,6 +5058,7 @@ void RendererSceneCull::_gpu_static_make_key(const Instance *p_instance, GPUStat
 	r_key.shadow_cache_mode = p_instance->shadow_cache_mode;
 	r_key.raytracing_mode = p_instance->raytracing_mode;
 	r_key.raytracing_opacity = p_instance->raytracing_opacity;
+	r_key.raytracing_scattering = p_instance->raytracing_scattering;
 	r_key.lod_bias = p_instance->lod_bias;
 	r_key.sorting_offset = p_instance->sorting_offset;
 	r_key.use_aabb_center = p_instance->use_aabb_center;
@@ -5199,6 +5217,7 @@ void RendererSceneCull::_gpu_static_flush() const {
 			self->instance_geometry_set_lod_bias(instance, k.lod_bias);
 			self->instance_geometry_set_shadow_cache_mode(instance, k.shadow_cache_mode);
 			self->instance_geometry_set_raytracing(instance, k.raytracing_mode, k.raytracing_opacity);
+			self->instance_geometry_set_raytracing_scattering(instance, k.raytracing_scattering);
 			self->instance_geometry_set_shadow_translucent(instance, k.shadow_translucent);
 			self->instance_set_pivot_data(instance, k.sorting_offset, k.use_aabb_center);
 			self->instance_set_scenario(instance, scenario->self);

@@ -3368,6 +3368,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("instance_geometry_set_cast_shadows_setting", "instance", "shadow_casting_setting"), &RenderingServer::instance_geometry_set_cast_shadows_setting);
 	ClassDB::bind_method(D_METHOD("instance_geometry_set_shadow_cache_mode", "instance", "mode"), &RenderingServer::instance_geometry_set_shadow_cache_mode);
 	ClassDB::bind_method(D_METHOD("instance_geometry_set_raytracing", "instance", "mode", "opacity"), &RenderingServer::instance_geometry_set_raytracing);
+	ClassDB::bind_method(D_METHOD("instance_geometry_set_raytracing_scattering", "instance", "scattering"), &RenderingServer::instance_geometry_set_raytracing_scattering); // Mariner DG-M.
 	ClassDB::bind_method(D_METHOD("instance_geometry_set_shadow_translucent", "instance", "enabled"), &RenderingServer::instance_geometry_set_shadow_translucent);
 	ClassDB::bind_method(D_METHOD("instance_geometry_set_gpu_static", "instance", "enabled"), &RenderingServer::instance_geometry_set_gpu_static);
 	ClassDB::bind_method(D_METHOD("instance_geometry_is_gpu_static_active", "instance"), &RenderingServer::instance_geometry_is_gpu_static_active);

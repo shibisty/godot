@@ -2260,6 +2260,14 @@
 				Sets how the instance takes part in raytracing scenes and the share of rays it stops, see [member GeometryInstance3D.raytracing_mode] and [member GeometryInstance3D.raytracing_opacity].
 			</description>
 		</method>
+		<method name="instance_geometry_set_raytracing_scattering">
+			<return type="void" />
+			<param index="0" name="instance" type="RID" />
+			<param index="1" name="scattering" type="float" />
+			<description>
+				Sets the share of the stopped light the instance scatters onward for DDGI, see [member GeometryInstance3D.raytracing_scattering].
+			</description>
+		</method>
 		<method name="instance_geometry_set_shader_parameter">
 			<return type="void" />
 			<param index="0" name="instance" type="RID" />

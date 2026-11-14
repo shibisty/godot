@@ -407,6 +407,15 @@ float GeometryInstance3D::get_raytracing_opacity() const {
 	return raytracing_opacity;
 }
 
+void GeometryInstance3D::set_raytracing_scattering(float p_opacity) {
+	raytracing_scattering = CLAMP(p_opacity, 0.0f, 1.0f);
+	RS::get_singleton()->instance_geometry_set_raytracing_scattering(get_instance(), raytracing_scattering);
+}
+
+float GeometryInstance3D::get_raytracing_scattering() const {
+	return raytracing_scattering;
+}
+
 void GeometryInstance3D::set_shadow_translucent(bool p_enabled) {
 	shadow_translucent = p_enabled;
 	RS::get_singleton()->instance_geometry_set_shadow_translucent(get_instance(), p_enabled);
@@ -610,6 +619,8 @@ void GeometryInstance3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_raytracing_mode"), &GeometryInstance3D::get_raytracing_mode);
 	ClassDB::bind_method(D_METHOD("set_raytracing_opacity", "opacity"), &GeometryInstance3D::set_raytracing_opacity);
 	ClassDB::bind_method(D_METHOD("get_raytracing_opacity"), &GeometryInstance3D::get_raytracing_opacity);
+	ClassDB::bind_method(D_METHOD("set_raytracing_scattering", "scattering"), &GeometryInstance3D::set_raytracing_scattering);
+	ClassDB::bind_method(D_METHOD("get_raytracing_scattering"), &GeometryInstance3D::get_raytracing_scattering);
 	ClassDB::bind_method(D_METHOD("set_shadow_translucent", "enabled"), &GeometryInstance3D::set_shadow_translucent);
 	ClassDB::bind_method(D_METHOD("is_shadow_translucent"), &GeometryInstance3D::is_shadow_translucent);
 	ClassDB::bind_method(D_METHOD("set_gpu_static", "enabled"), &GeometryInstance3D::set_gpu_static);
@@ -672,6 +683,7 @@ void GeometryInstance3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "gpu_static"), "set_gpu_static", "is_gpu_static");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "raytracing_mode", PROPERTY_HINT_ENUM, "Default,Raytracing Only,Disabled"), "set_raytracing_mode", "get_raytracing_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "raytracing_opacity", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_raytracing_opacity", "get_raytracing_opacity");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "raytracing_scattering", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_raytracing_scattering", "get_raytracing_scattering");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "extra_cull_margin", PROPERTY_HINT_RANGE, "0,16384,0.01,suffix:m"), "set_extra_cull_margin", "get_extra_cull_margin");
 	ADD_PROPERTY(PropertyInfo(Variant::AABB, "custom_aabb", PROPERTY_HINT_NONE, "suffix:m"), "set_custom_aabb", "get_custom_aabb");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_bias", PROPERTY_HINT_RANGE, "0.001,128,0.001"), "set_lod_bias", "get_lod_bias");

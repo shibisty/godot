@@ -84,6 +84,9 @@
 		<member name="raytracing_opacity" type="float" setter="set_raytracing_opacity" getter="get_raytracing_opacity" default="1.0">
 			Share of the rays this instance stops in the raytracing scene, per surface crossed and decided per ray: [code]1.0[/code] opaque, [code]0.5[/code] lets half of the rays through (a canopy stand-in, nets, rigging, railings). Values below [code]1.0[/code] make ray queries test the instance's triangles one by one, which costs more. Mariner engine patch E12.
 		</member>
+		<member name="raytracing_scattering" type="float" setter="set_raytracing_scattering" getter="get_raytracing_scattering" default="0.0">
+			Makes the instance a scattering medium for DDGI (a canopy stand-in): the share of the light of a probe ray stopped by the instance (see [member raytracing_opacity]) that goes on, scattered by the leaves and tinted by the hue of the albedo, instead of ending at the stand-in's surface. Up to three scattering events per probe ray. [code]0.0[/code]: an ordinary surface. Kept in 16 steps. Mariner engine patch DG-M.
+		</member>
 		<member name="shadow_cache_mode" type="int" setter="set_shadow_cache_mode" getter="get_shadow_cache_mode" enum="GeometryInstance3D.ShadowCacheMode" default="0">
 			How this instance takes part in the directional shadow cache (Forward+, [member ProjectSettings.rendering/lights_and_shadows/directional_shadow/cache]). [constant SHADOW_CACHE_MODE_AUTO] fits most objects; use [constant SHADOW_CACHE_MODE_DYNAMIC] for an object that moves in jumps, and [constant SHADOW_CACHE_MODE_STATIC] for wind-animated vegetation whose swaying shadow is not needed.
 			[b]Note:[/b] Mariner fork (patch E10).

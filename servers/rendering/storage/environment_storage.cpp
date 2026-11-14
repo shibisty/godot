@@ -30,6 +30,8 @@
 
 #include "environment_storage.h"
 
+#include "core/math/math_funcs_binary.h" // Mariner G1: next_power_of_2 (release builds do not get it through os.h).
+
 #ifdef DEBUG_ENABLED
 #include "core/os/os.h"
 #endif

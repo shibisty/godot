@@ -166,9 +166,11 @@ enum {
 };
 
 // Mariner E12 DG-F: RT_InstanceData::layer_mask holds the render layers in bits 0-19 and the share of rays an instance
-// lets through (1 - GeometryInstance3D.raytracing_opacity, 0..255) in bits 24-31.
+// lets through (1 - GeometryInstance3D.raytracing_opacity, 0..255) in bits 24-31. Mariner DG-M: bits 20-23 - the share
+// of the stopped light that is scattered onward (GeometryInstance3D.raytracing_scattering, 0..15).
 enum {
 	RT_LAYER_MASK_LAYERS = 0xFFFFFu,
+	RT_LAYER_MASK_SCATTERING_SHIFT = 20u,
 	RT_LAYER_MASK_TRANSMISSION_SHIFT = 24u,
 };
 

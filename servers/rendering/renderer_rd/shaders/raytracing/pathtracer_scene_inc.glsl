@@ -50,6 +50,8 @@ const uint GEOM_FLAG_MULTIMESH_INSTANCE = 16u;
 const uint GEOM_FLAG_RAYTRACING_ONLY = 32u; // Mariner E12 DG-F: stand-in that is not drawn.
 // GeometryData.layer_mask: render layers in bits 0-19, share of rays let through (0..255) in bits 24-31 (DG-F).
 const uint GEOM_TRANSMISSION_SHIFT = 24u;
+// Mariner DG-M: share of the stopped light an instance scatters onward (a medium: canopy; 0..15), bits 20-23.
+const uint GEOM_SCATTERING_SHIFT = 20u;
 
 const uint MAT_FLAG_HAS_NORMAL_MAP = 1u;
 const uint MAT_FLAG_HAS_EMISSION_TEX = 2u;

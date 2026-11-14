@@ -115,6 +115,7 @@ public:
 	virtual void instance_geometry_set_cast_shadows_setting(RID p_instance, RSE::ShadowCastingSetting p_shadow_casting_setting) = 0;
 	virtual void instance_geometry_set_shadow_cache_mode(RID p_instance, RSE::ShadowCacheMode p_mode) = 0; // Mariner E10.
 	virtual void instance_geometry_set_raytracing(RID p_instance, RSE::RaytracingMode p_mode, float p_opacity) = 0; // Mariner E12 DG-F.
+	virtual void instance_geometry_set_raytracing_scattering(RID p_instance, float p_opacity) = 0; // Mariner DG-M.
 	virtual void instance_geometry_set_shadow_translucent(RID p_instance, bool p_enabled) = 0; // Mariner E21.
 	// Mariner E25a: GPU static batches.
 	virtual void instance_geometry_set_gpu_static(RID p_instance, bool p_enabled) = 0;

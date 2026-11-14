@@ -63,6 +63,8 @@ public:
 	virtual void set_cast_double_sided_shadows(bool p_enable) = 0;
 	// Mariner E12 DG-F: only in the raytracing scene (not drawn); share of rays the instance stops there (1: opaque).
 	virtual void set_raytracing_data(bool p_only, float p_opacity) {}
+	// Mariner DG-M: share of the light the instance stops that is scattered onward (a scattering medium: canopy).
+	virtual void set_raytracing_scattering(float p_opacity) {}
 	// Mariner E25b: GeometryInstance3D.ignore_occlusion_culling, for the occlusion culling done by the renderer.
 	virtual void set_ignore_occlusion_culling(bool p_enable) {}
 	// Mariner E25c: visibility range (fade disabled) applied per instance by the renderer's GPU culling of an indirect
@@ -116,6 +118,7 @@ public:
 	float parent_fade_alpha = 1.0;
 	float force_alpha = 1.0;
 	float raytracing_opacity = 1.0; // Mariner E12 DG-F.
+	float raytracing_scattering = 0.0; // Mariner DG-M.
 	bool raytracing_only = false;
 	bool ignore_occlusion_culling = false; // Mariner E25b.
 	float gpu_visibility_range[4] = {}; // Mariner E25c: begin, end, begin margin, end margin.
@@ -162,6 +165,9 @@ public:
 	virtual void set_raytracing_data(bool p_only, float p_opacity) override {
 		raytracing_only = p_only;
 		raytracing_opacity = p_opacity;
+	}
+	virtual void set_raytracing_scattering(float p_opacity) override {
+		raytracing_scattering = p_opacity;
 	}
 	virtual void set_ignore_occlusion_culling(bool p_enable) override {
 		ignore_occlusion_culling = p_enable;

@@ -322,6 +322,64 @@ vec3 direct_diffuse(vec3 p, vec3 n) {
 	return sum;
 }
 
+// Light a surface hit sends back along the ray: the sky channel (bounced ambient / probes) and the lights channel
+// (direct light of the scene lights, emission, bounced light of the lights channel). r_albedo: the surface colour.
+void shade_surface(HitData h, MaterialData mat, vec3 dir, out vec3 radiance, out vec3 radiance_lights, out vec3 r_albedo) {
+	vec2 uv = h.uv * mat.uv1_scale + mat.uv1_offset;
+	const float lod = 3.0;
+	vec3 albedo = mat.albedo_color.rgb;
+	if (mat.albedo_texture_idx != 0u) {
+		albedo *= sample_material_texture(mat.albedo_texture_idx, uv, mat.flags, lod).rgb;
+	}
+	if ((mat.flags & MAT_FLAG_USE_VERTEX_COLOR) != 0u) {
+		albedo *= h.color.rgb;
+	}
+	float metallic = mat.metallic;
+	if (mat.orm_texture_idx != 0u) {
+		metallic *= sample_material_texture(mat.orm_texture_idx, uv, mat.flags, lod).b;
+	}
+	vec3 emissive = mat.emission_color * mat.emission_strength;
+	if ((mat.flags & MAT_FLAG_HAS_EMISSION_TEX) != 0u) {
+		emissive *= sample_material_texture(mat.emission_texture_idx, uv, mat.flags, lod).rgb;
+	}
+	emissive *= scene_data_block.data.emissive_exposure_normalization;
+	vec3 diffuse_albedo = albedo * (1.0 - clamp(metallic, 0.0, 1.0));
+	vec3 n = h.shading_normal;
+
+	radiance = vec3(0.0);
+	radiance_lights = emissive;
+	if ((mat.flags & MAT_FLAG_UNSHADED) != 0u) {
+		radiance_lights = albedo;
+	} else {
+		vec3 light = direct_diffuse(h.hit_pos, n);
+		vec3 indirect = ambient_radiance(n, 1.0);
+		vec3 indirect_lights = vec3(0.0);
+		if ((params.flags & DDGI_TRACE_FLAG_MULTI_BOUNCE) != 0u) {
+			// Inside the grid the probes give the bounce light, also while they have none yet (they start dark
+			// and gather the light bounce by bounce, instead of starting at the sky light and taking many
+			// frames to lose it indoors); outside it, the sky / ambient light. Each channel bounces in itself.
+			float amount;
+			indirect = ddgi_apply(indirect, h.hit_pos, n, -dir, true, amount, indirect_lights);
+		}
+		radiance = diffuse_albedo * indirect;
+		radiance_lights += diffuse_albedo * (light + indirect_lights);
+	}
+	r_albedo = albedo;
+}
+
+// Mariner DG-M: a direction scattered by leaves - any direction, more often onward than back.
+vec3 scatter_direction(vec3 dir, inout uint rng) {
+	vec2 u = rand2(rng);
+	float z = 1.0 - 2.0 * u.x;
+	float r = sqrt(max(1.0 - z * z, 0.0));
+	float phi = 6.28318530718 * u.y;
+	vec3 v = vec3(r * cos(phi), r * sin(phi), z);
+	if (dot(v, dir) < 0.0 && rand(rng) < 0.5) {
+		v = -v;
+	}
+	return v;
+}
+
 void main() {
 	const uint ray_index = gl_GlobalInvocationID.x;
 	if (gl_GlobalInvocationID.y >= params.slot_count) {
@@ -406,46 +464,41 @@ void main() {
 			radiance_lights = (1.0 - fresnel) * body * direct_diffuse(h.hit_pos, vec3(0.0, 1.0, 0.0));
 			dist = r.t;
 		} else {
-			vec2 uv = h.uv * mat.uv1_scale + mat.uv1_offset;
-			const float lod = 3.0;
-			vec3 albedo = mat.albedo_color.rgb;
-			if (mat.albedo_texture_idx != 0u) {
-				albedo *= sample_material_texture(mat.albedo_texture_idx, uv, mat.flags, lod).rgb;
-			}
-			if ((mat.flags & MAT_FLAG_USE_VERTEX_COLOR) != 0u) {
-				albedo *= h.color.rgb;
-			}
-			float metallic = mat.metallic;
-			if (mat.orm_texture_idx != 0u) {
-				metallic *= sample_material_texture(mat.orm_texture_idx, uv, mat.flags, lod).b;
-			}
-			vec3 emissive = mat.emission_color * mat.emission_strength;
-			if ((mat.flags & MAT_FLAG_HAS_EMISSION_TEX) != 0u) {
-				emissive *= sample_material_texture(mat.emission_texture_idx, uv, mat.flags, lod).rgb;
-			}
-			emissive *= scene_data_block.data.emissive_exposure_normalization;
-			vec3 diffuse_albedo = albedo * (1.0 - clamp(metallic, 0.0, 1.0));
-			vec3 n = h.shading_normal;
-
-			radiance = vec3(0.0);
-			radiance_lights = emissive;
-			if ((mat.flags & MAT_FLAG_UNSHADED) != 0u) {
-				radiance_lights = albedo;
-			} else {
-				vec3 light = direct_diffuse(h.hit_pos, n);
-				vec3 indirect = ambient_radiance(n, 1.0);
-				vec3 indirect_lights = vec3(0.0);
-				if ((params.flags & DDGI_TRACE_FLAG_MULTI_BOUNCE) != 0u) {
-					// Inside the grid the probes give the bounce light, also while they have none yet (they start dark
-					// and gather the light bounce by bounce, instead of starting at the sky light and taking many
-					// frames to lose it indoors); outside it, the sky / ambient light. Each channel bounces in itself.
-					float amount;
-					indirect = ddgi_apply(indirect, h.hit_pos, n, -dir, true, amount, indirect_lights);
-				}
-				radiance = diffuse_albedo * indirect;
-				radiance_lights += diffuse_albedo * (light + indirect_lights);
-			}
+			vec3 albedo;
+			shade_surface(h, mat, dir, radiance, radiance_lights, albedo);
 			dist = r.t;
+			// Mariner DG-M: a scattering medium (GeometryInstance3D.raytracing_scattering: a canopy stand-in). The
+			// leaves that stopped the ray send a share of its light on, tinted by their hue: the ray goes on from the
+			// hit in a scattered direction (up to three events) and adds what it finds - the sky, the next surface.
+			uint scattering = (geometries[r.instance].layer_mask >> GEOM_SCATTERING_SHIFT) & 0xFu;
+			vec3 throughput = vec3(1.0);
+			vec3 at = h.hit_pos;
+			vec3 from_dir = dir;
+			uint rng = pt_transmission_seed ^ 0x5bd1e995u;
+			for (int event = 0; event < 3 && scattering != 0u; event++) {
+				throughput *= (float(scattering) / 15.0) * albedo / max(max(albedo.r, albedo.g), max(albedo.b, 1e-3));
+				vec3 v = scatter_direction(from_dir, rng);
+				pt_transmission_seed = pcg_hash(pt_transmission_seed + 0x9E3779B9u);
+				vec3 o = at + v * 0.05;
+				RayHit rs = trace_closest_two_sided(o, v, params.ray_length);
+				if (!rs.hit) {
+					radiance += throughput * ambient_radiance(v, 0.5);
+					break;
+				}
+				HitData hs = compute_hit_data(rs, o, v);
+				MaterialData ms = materials[hs.geometry_idx];
+				if ((ms.flags & MAT_FLAG_DIELECTRIC) != 0u || (!rs.front_face && ms.cull_mode != 0u)) {
+					break; // Water, the inside of closed geometry: nothing more (as dark as before).
+				}
+				vec3 sky_s;
+				vec3 lights_s;
+				shade_surface(hs, ms, v, sky_s, lights_s, albedo);
+				radiance += throughput * sky_s;
+				radiance_lights += throughput * lights_s;
+				scattering = (geometries[rs.instance].layer_mask >> GEOM_SCATTERING_SHIFT) & 0xFu;
+				at = hs.hit_pos;
+				from_dir = v;
+			}
 		}
 	}
 	radiance = clamp(radiance, vec3(0.0), vec3(65000.0));

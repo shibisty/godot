@@ -349,6 +349,7 @@ public:
 		RSE::ShadowCacheMode shadow_cache_mode = RSE::SHADOW_CACHE_MODE_AUTO;
 		RSE::RaytracingMode raytracing_mode = RSE::RAYTRACING_MODE_DEFAULT;
 		float raytracing_opacity = 1.0;
+		float raytracing_scattering = 0.0; // Mariner DG-M.
 		float lod_bias = 1.0;
 		float sorting_offset = 0.0;
 		bool use_aabb_center = true;
@@ -542,6 +543,7 @@ public:
 		RSE::RaytracingMode raytracing_mode = RSE::RAYTRACING_MODE_DEFAULT;
 		bool shadow_translucent = false; // Mariner E21.
 		float raytracing_opacity = 1.0;
+		float raytracing_scattering = 0.0; // Mariner DG-M: share of the light it stops that is scattered onward (a medium: canopy).
 		// Mariner E25a: asked to be drawn by a GPU static batch; the batch and slot it is in (null: drawn on its own).
 		bool gpu_static = false;
 		GPUStaticBatch *gpu_batch = nullptr;
@@ -1223,6 +1225,7 @@ public:
 	virtual void instance_geometry_set_shadow_cache_mode(RID p_instance, RSE::ShadowCacheMode p_mode); // Mariner E10.
 	static void _update_instance_data_raytracing_flags(const Instance *p_instance, InstanceData &r_idata);
 	virtual void instance_geometry_set_raytracing(RID p_instance, RSE::RaytracingMode p_mode, float p_opacity); // Mariner E12 DG-F.
+	virtual void instance_geometry_set_raytracing_scattering(RID p_instance, float p_opacity); // Mariner DG-M.
 	virtual void instance_geometry_set_shadow_translucent(RID p_instance, bool p_enabled); // Mariner E21.
 
 	// Mariner E25a.

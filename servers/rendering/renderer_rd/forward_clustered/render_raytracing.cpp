@@ -1262,7 +1262,9 @@ void RenderRaytracing::build_scene(const RenderDataRD *p_render_data) {
 		// Mariner E12 DG-F: stand-ins only for rays and partly transparent instances (canopies, nets) give candidates
 		// to the ray queries (stochastic transmission in pt_alpha_test()).
 		const uint32_t transmission = uint32_t(Math::round(CLAMP(1.0f - inst->raytracing_opacity, 0.0f, 1.0f) * 255.0f));
-		const uint32_t rt_layer_mask = (inst->layer_mask & RT_LAYER_MASK_LAYERS) | (transmission << RT_LAYER_MASK_TRANSMISSION_SHIFT);
+		// Mariner DG-M: scattering medium (only ddgi_trace.glsl reads it).
+		const uint32_t gi_pass = uint32_t(Math::round(CLAMP(inst->raytracing_scattering, 0.0f, 1.0f) * 15.0f));
+		const uint32_t rt_layer_mask = (inst->layer_mask & RT_LAYER_MASK_LAYERS) | (gi_pass << RT_LAYER_MASK_SCATTERING_SHIFT) | (transmission << RT_LAYER_MASK_TRANSMISSION_SHIFT);
 		const uint32_t rt_geom_flags = inst->raytracing_only ? uint32_t(RT_GEOM_FLAG_RAYTRACING_ONLY) : 0u;
 		const bool rt_candidates = inst->raytracing_only || transmission > 0;
 		auto rt_inst_flags = [rt_candidates](uint32_t p_flags) -> uint32_t {
