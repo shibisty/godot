@@ -250,6 +250,7 @@ public:
 		bool uses_alpha_clip = false;
 		bool uses_alpha_antialiasing = false;
 		bool uses_alpha_fringe = false; // Mariner AA: render_mode alpha_fringe (also drawn in the alpha list: the edge)
+		bool uses_surface_decal = false; // Mariner GB2: render_mode surface_decal is Forward+ only - not drawn here
 		bool uses_depth_prepass_alpha = false;
 		bool uses_discard = false;
 		bool uses_roughness = false;

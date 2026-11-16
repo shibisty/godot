@@ -12,6 +12,7 @@
 #define SCENE_DATA_FLAGS_USE_PANCAKE_SHADOWS (1 << 6)
 #define SCENE_DATA_FLAGS_IN_SHADOW_PASS (1 << 7)
 #define SCENE_DATA_FLAGS_TRANSLUCENT_SHADOW_PASS (1 << 8) // Mariner E21.
+#define SCENE_DATA_FLAGS_SURFACE_DECALS (1 << 9) // Mariner GB3: the opaque pass reads the decal buffer.
 
 struct SceneData {
 	mat4 projection_matrix;

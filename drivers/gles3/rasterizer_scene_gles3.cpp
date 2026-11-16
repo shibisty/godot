@@ -266,6 +266,10 @@ void RasterizerSceneGLES3::_geometry_instance_add_surface_with_material(Geometry
 		flags |= GeometryInstanceSurface::FLAG_PASS_DEPTH;
 		flags |= GeometryInstanceSurface::FLAG_PASS_SHADOW;
 	}
+	if (p_material->shader_data->uses_surface_decal) {
+		// Mariner GB2: surface decals are Forward+ only - here the box is not drawn at all.
+		flags &= ~uint32_t(GeometryInstanceSurface::FLAG_PASS_DEPTH | GeometryInstanceSurface::FLAG_PASS_OPAQUE | GeometryInstanceSurface::FLAG_PASS_ALPHA | GeometryInstanceSurface::FLAG_PASS_SHADOW);
+	}
 
 	if (p_material->shader_data->stencil_enabled) {
 		if (p_material->shader_data->stencil_flags & GLES3::SceneShaderData::STENCIL_FLAG_READ) {

@@ -601,6 +601,9 @@
 		<member name="subsurf_scatter_transmittance_texture" type="Texture2D" setter="set_texture" getter="get_texture">
 			The texture to use for multiplying the intensity of the subsurface scattering transmittance intensity. See also [member subsurf_scatter_texture]. Ignored if [member subsurf_scatter_skin_mode] is [code]true[/code].
 		</member>
+		<member name="surface_class" type="int" setter="set_surface_class" getter="get_surface_class" default="0">
+			The surface class written to the thin G-buffer of the Forward+ depth prepass ([member CompositorEffect.needs_gbuffer]): what kind of surface this is for effects that read it, such as surface decals (mud, snow, metal...). [code]0[/code] is generic. Custom shaders set it with the [code]SURFACE_CLASS[/code] built-in. Mobile and Compatibility have no thin G-buffer.
+		</member>
 		<member name="texture_filter" type="int" setter="set_texture_filter" getter="get_texture_filter" enum="BaseMaterial3D.TextureFilter" default="3">
 			Filter flags for the texture.
 			[b]Note:[/b] [member heightmap_texture] is always sampled with linear filtering, even if nearest-neighbor filtering is selected here. This is to ensure the heightmap effect looks as intended. If you need sharper height transitions between pixels, resize the heightmap texture in an image editor with nearest-neighbor filtering.

@@ -1288,6 +1288,15 @@ MaterialStorage::MaterialStorage() {
 		actions.renames["ALPHA_TEXTURE_COORDINATE"] = "alpha_texture_coordinate";
 		actions.renames["ALPHA_FRINGE_COORDINATE"] = "alpha_fringe_coordinate"; // Mariner AA (Forward+ and Mobile).
 		actions.renames["ALPHA_FRINGE_FAR"] = "alpha_fringe_far";
+		actions.renames["SURFACE_CLASS"] = "surface_class"; // Mariner GB1.
+		actions.renames["WET_FILM"] = "wet_film"; // Mariner G4c (Forward+; declared and ignored on Mobile and Compatibility).
+		actions.renames["DECAL_POSITION"] = "decal_position"; // Mariner GB2 (render_mode surface_decal).
+		actions.renames["DECAL_SURFACE_CLASS"] = "decal_surface_class";
+		actions.renames["DECAL_SURFACE_ALBEDO"] = "decal_surface_albedo";
+		actions.renames["DECAL_SURFACE_NORMAL"] = "decal_surface_normal";
+		actions.renames["DECAL_HEIGHT"] = "decal_height";
+		actions.renames["DECAL_WETNESS"] = "decal_wetness";
+		actions.renames["DECAL_ROUGHNESS"] = "decal_roughness";
 
 		//builtins
 
@@ -3047,6 +3056,7 @@ void SceneShaderData::set_code(const String &p_code) {
 	uses_alpha_clip = false;
 	uses_blend_alpha = false;
 	uses_depth_prepass_alpha = false;
+	uses_surface_decal = false;
 	uses_discard = false;
 	uses_roughness = false;
 	uses_normal = false;
@@ -3136,6 +3146,7 @@ void SceneShaderData::set_code(const String &p_code) {
 	// This prevents sorting issues inherent to alpha blending and allows such materials to cast shadows.
 	actions.usage_flag_pointers["ALPHA_HASH_SCALE"] = &uses_alpha_clip;
 	actions.render_mode_flags["depth_prepass_alpha"] = &uses_depth_prepass_alpha;
+	actions.render_mode_flags["surface_decal"] = &uses_surface_decal; // Mariner GB2.
 
 	actions.usage_flag_pointers["SSS_STRENGTH"] = &uses_sss;
 	actions.usage_flag_pointers["SSS_TRANSMITTANCE_DEPTH"] = &uses_transmittance;

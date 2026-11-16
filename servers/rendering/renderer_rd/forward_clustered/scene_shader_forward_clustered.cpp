@@ -66,6 +66,7 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	uses_depth_prepass_alpha = false;
 	uses_transparent_motion_vectors = false;
 	uses_opaque_late = false;
+	uses_surface_decal = false;
 	uses_alpha_fringe = false;
 	uses_discard = false;
 	uses_roughness = false;
@@ -134,6 +135,7 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	actions.render_mode_flags["depth_prepass_alpha"] = &uses_depth_prepass_alpha;
 	actions.render_mode_flags["motion_vectors_transparent"] = &uses_transparent_motion_vectors;
 	actions.render_mode_flags["opaque_late"] = &uses_opaque_late;
+	actions.render_mode_flags["surface_decal"] = &uses_surface_decal; // Mariner GB2.
 	actions.render_mode_flags["alpha_fringe"] = &uses_alpha_fringe;
 	actions.usage_flag_pointers["PREVIOUS_FRAME"] = &uses_time; // animated: include in the motion pass
 
@@ -307,6 +309,16 @@ uint16_t SceneShaderForwardClustered::ShaderData::_get_shader_version(PipelineVe
 			return ShaderVersion::SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL + ubershader_base;
 		case PIPELINE_VERSION_DEPTH_PASS_WITH_SDF:
 			return ShaderVersion::SHADER_VERSION_DEPTH_PASS_WITH_SDF + ubershader_base;
+		case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER: // Mariner GB1.
+			return ShaderVersion::SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER + ubershader_base;
+		case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER:
+			return ShaderVersion::SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER + ubershader_base;
+		case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER_MULTIVIEW:
+			return ShaderVersion::SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER_MULTIVIEW + ubershader_base;
+		case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER_MULTIVIEW:
+			return ShaderVersion::SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER_MULTIVIEW + ubershader_base;
+		case PIPELINE_VERSION_SURFACE_DECAL: // Mariner GB2.
+			return ShaderVersion::SHADER_VERSION_SURFACE_DECAL + ubershader_base;
 		case PIPELINE_VERSION_COLOR_PASS: {
 			int shader_flags = 0;
 
@@ -493,6 +505,39 @@ void SceneShaderForwardClustered::ShaderData::_create_pipeline(PipelineKey p_pip
 			case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_MULTIVIEW:
 				blend_state = blend_state_depth_normal_roughness_giprobe;
 				break;
+			case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER: // Mariner GB1: + the thin G-buffer.
+			case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER_MULTIVIEW:
+				blend_state = RD::PipelineColorBlendState::create_disabled(2);
+				break;
+			case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER:
+			case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER_MULTIVIEW:
+				blend_state = RD::PipelineColorBlendState::create_disabled(3);
+				break;
+			case PIPELINE_VERSION_SURFACE_DECAL: {
+				// Mariner GB2: the decal buffer - 0 added up (heights, wetness, roughness offsets), 1 the albedo blended over
+				// black with the coverage accumulated (1 - product of (1 - alpha)).
+				blend_state = RD::PipelineColorBlendState::create_disabled(2);
+				RD::PipelineColorBlendState::Attachment &add = blend_state.attachments.write[0];
+				add.enable_blend = true;
+				add.color_blend_op = RD::BLEND_OP_ADD;
+				add.alpha_blend_op = RD::BLEND_OP_ADD;
+				add.src_color_blend_factor = RD::BLEND_FACTOR_ONE;
+				add.dst_color_blend_factor = RD::BLEND_FACTOR_ONE;
+				add.src_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+				add.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+				RD::PipelineColorBlendState::Attachment &mix = blend_state.attachments.write[1];
+				mix.enable_blend = true;
+				mix.color_blend_op = RD::BLEND_OP_ADD;
+				mix.alpha_blend_op = RD::BLEND_OP_ADD;
+				mix.src_color_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
+				mix.dst_color_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+				mix.src_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+				mix.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+				// The box's far faces (the camera may be inside it), no depth: the surface point comes from the depth texture.
+				raster_state.cull_mode = RD::POLYGON_CULL_FRONT;
+				depth_stencil_state.enable_depth_test = false;
+				depth_stencil_state.enable_depth_write = false;
+			} break;
 			case PIPELINE_VERSION_DEPTH_PASS_WITH_MATERIAL:
 				// Writes to normal and roughness in opaque way.
 				blend_state = RD::PipelineColorBlendState::create_disabled(5);
@@ -680,6 +725,12 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_ADVANCED_MULTIVIEW, base_define + "\n#define USE_MULTIVIEW\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n#define MODE_RENDER_VOXEL_GI\n", false)); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_MULTIVIEW
 			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_ADVANCED, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_MATERIAL\n", false)); // SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL
 			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_ADVANCED, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_SDF\n", false)); // SHADER_VERSION_DEPTH_PASS_WITH_SDF
+			// Mariner GB1: the prepass with the thin G-buffer (albedo, surface class).
+			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_GBUFFER, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n#define MODE_RENDER_GBUFFER\n", false)); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER
+			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_GBUFFER, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n#define MODE_RENDER_VOXEL_GI\n#define MODE_RENDER_GBUFFER\n", false)); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER
+			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_GBUFFER_MULTIVIEW, base_define + "\n#define USE_MULTIVIEW\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n#define MODE_RENDER_GBUFFER\n", false)); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER_MULTIVIEW
+			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_GBUFFER_MULTIVIEW, base_define + "\n#define USE_MULTIVIEW\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n#define MODE_RENDER_VOXEL_GI\n#define MODE_RENDER_GBUFFER\n", false)); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER_MULTIVIEW
+			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_GBUFFER, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_SURFACE_DECAL\n", false)); // SHADER_VERSION_SURFACE_DECAL (Mariner GB2)
 		}
 
 		Vector<String> color_pass_flags = {
@@ -759,6 +810,15 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.renames["ALPHA_TEXTURE_COORDINATE"] = "alpha_texture_coordinate";
 		actions.renames["ALPHA_FRINGE_COORDINATE"] = "alpha_fringe_coordinate";
 		actions.renames["ALPHA_FRINGE_FAR"] = "alpha_fringe_far";
+		actions.renames["SURFACE_CLASS"] = "surface_class"; // Mariner GB1.
+		actions.renames["WET_FILM"] = "wet_film"; // Mariner G4c (Forward+; declared and ignored on Mobile and Compatibility).
+		actions.renames["DECAL_POSITION"] = "decal_position"; // Mariner GB2 (render_mode surface_decal).
+		actions.renames["DECAL_SURFACE_CLASS"] = "decal_surface_class";
+		actions.renames["DECAL_SURFACE_ALBEDO"] = "decal_surface_albedo";
+		actions.renames["DECAL_SURFACE_NORMAL"] = "decal_surface_normal";
+		actions.renames["DECAL_HEIGHT"] = "decal_height";
+		actions.renames["DECAL_WETNESS"] = "decal_wetness";
+		actions.renames["DECAL_ROUGHNESS"] = "decal_roughness";
 
 		//builtins
 
@@ -1082,6 +1142,18 @@ void SceneShaderForwardClustered::enable_advanced_shader_group(bool p_needs_mult
 		shader.enable_group(SHADER_GROUP_ADVANCED_MULTIVIEW);
 	}
 	shader.enable_group(SHADER_GROUP_ADVANCED);
+}
+
+void SceneShaderForwardClustered::enable_gbuffer_shader_group(bool p_needs_multiview) {
+	// Mariner GB1: the prepass with the thin G-buffer, compiled when an effect first asks for it.
+	if (p_needs_multiview || RendererCompositorRD::get_singleton()->is_xr_enabled()) {
+		shader.enable_group(SHADER_GROUP_GBUFFER_MULTIVIEW);
+	}
+	shader.enable_group(SHADER_GROUP_GBUFFER);
+}
+
+bool SceneShaderForwardClustered::is_gbuffer_shader_group_enabled(bool p_multiview) const {
+	return shader.is_group_enabled(p_multiview ? SHADER_GROUP_GBUFFER_MULTIVIEW : SHADER_GROUP_GBUFFER);
 }
 
 bool SceneShaderForwardClustered::is_multiview_shader_group_enabled() const {

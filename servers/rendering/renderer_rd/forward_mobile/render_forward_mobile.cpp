@@ -2933,6 +2933,10 @@ void RenderForwardMobile::_geometry_instance_add_surface_with_material(GeometryI
 			flags |= GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA_FRINGE; // Mariner AA.
 		}
 	}
+	if (p_material->shader_data->uses_surface_decal) {
+		// Mariner GB2: surface decals are Forward+ only - here the box is not drawn at all.
+		flags &= ~uint32_t(GeometryInstanceSurfaceDataCache::FLAG_PASS_DEPTH | GeometryInstanceSurfaceDataCache::FLAG_PASS_OPAQUE | GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA | GeometryInstanceSurfaceDataCache::FLAG_PASS_SHADOW | GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA_FRINGE);
+	}
 
 	if (p_material->shader_data->uses_particle_trails) {
 		flags |= GeometryInstanceSurfaceDataCache::FLAG_USES_PARTICLE_TRAILS;

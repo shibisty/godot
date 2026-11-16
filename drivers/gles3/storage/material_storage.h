@@ -315,6 +315,7 @@ struct SceneShaderData : public ShaderData {
 	bool uses_alpha_clip;
 	bool uses_blend_alpha;
 	bool uses_depth_prepass_alpha;
+	bool uses_surface_decal; // Mariner GB2: render_mode surface_decal is Forward+ only - not drawn here.
 	bool uses_discard;
 	bool uses_roughness;
 	bool uses_normal;

@@ -186,6 +186,23 @@ ShaderTypes::ShaderTypes() {
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["WETNESS"] = constt(ShaderLanguage::TYPE_FLOAT);
 	// Mariner G4b: the snow on the world (Environment.snow, 0 none .. 1 deep).
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["SNOW"] = constt(ShaderLanguage::TYPE_FLOAT);
+	// Mariner G4c: the wet film (0..1, written by the material): the share of the micro-relief a film of water covers.
+	// After the fragment the engine smooths the roughness the way water does on rough ground (Forward+).
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["WET_FILM"] = ShaderLanguage::TYPE_FLOAT;
+	// Mariner GB1: the surface class (0..255) written to the thin G-buffer (how surface decals treat it: mud, snow,
+	// metal...). 0 - generic.
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["SURFACE_CLASS"] = ShaderLanguage::TYPE_INT;
+	// Mariner GB2: render_mode surface_decal (Forward+). The mesh is a unit box (-0.5..0.5); each pixel of the surface
+	// under it: its point in the box (DECAL_POSITION; UV = its xz + 0.5), class, albedo and normal (view space; VERTEX
+	// and NORMAL are the surface's too). The decal adds DECAL_HEIGHT (m, the heights of overlapping decals add up),
+	// DECAL_WETNESS and DECAL_ROUGHNESS (an offset), and blends ALBEDO by ALPHA.
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["DECAL_POSITION"] = constt(ShaderLanguage::TYPE_VEC3);
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["DECAL_SURFACE_CLASS"] = constt(ShaderLanguage::TYPE_INT);
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["DECAL_SURFACE_ALBEDO"] = constt(ShaderLanguage::TYPE_VEC3);
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["DECAL_SURFACE_NORMAL"] = constt(ShaderLanguage::TYPE_VEC3);
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["DECAL_HEIGHT"] = ShaderLanguage::TYPE_FLOAT;
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["DECAL_WETNESS"] = ShaderLanguage::TYPE_FLOAT;
+	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["DECAL_ROUGHNESS"] = ShaderLanguage::TYPE_FLOAT;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["AO"] = ShaderLanguage::TYPE_FLOAT;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["AO_LIGHT_AFFECT"] = ShaderLanguage::TYPE_FLOAT;
 	shader_modes[RSE::SHADER_SPATIAL].functions["fragment"].built_ins["EMISSION"] = ShaderLanguage::TYPE_VEC3;
@@ -266,6 +283,7 @@ ShaderTypes::ShaderTypes() {
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("depth_prepass_alpha") });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("motion_vectors_transparent") }); // Mariner: transparent pass writes motion vectors
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("opaque_late") }); // Mariner: late opaque pass, screen/depth textures = scene before it
+		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("surface_decal") }); // Mariner GB2: a surface decal (Forward+), drawn into the decal buffer
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("depth_test"), { "default", "disabled", "inverted" } });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("sss_mode_skin") });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("cull"), "back", "front", "disabled" });

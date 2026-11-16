@@ -595,6 +595,7 @@ void BaseMaterial3D::init_shaders() {
 	shader_names->sheen_color = "sheen_color";
 	shader_names->sheen_roughness = "sheen_roughness";
 	shader_names->wetness_amount = "wetness_amount"; // Mariner G4.
+	shader_names->surface_class = "surface_class_id"; // Mariner GB1.
 	shader_names->wetness_porosity = "wetness_porosity";
 	shader_names->wetness_puddles = "wetness_puddles";
 	shader_names->snow_amount = "snow_amount"; // Mariner G4b.
@@ -1049,6 +1050,9 @@ uniform float msdf_outline_size : hint_range(0.0, 250.0, 1.0);
 
 	code += "uniform ivec2 albedo_texture_size;\n";
 	code += "uniform float point_size : hint_range(0.1, 128.0, 0.1);\n";
+	if (surface_class != 0) {
+		code += "uniform int surface_class_id : hint_range(0, 255); // Mariner GB1.\n";
+	}
 
 	if (!orm) {
 		code += vformat(R"(
@@ -2345,6 +2349,10 @@ void fragment() {)";
 	} else if (alpha_antialiasing_mode != ALPHA_ANTIALIASING_OFF && (transparency == TRANSPARENCY_ALPHA_HASH || transparency == TRANSPARENCY_ALPHA_SCISSOR)) {
 		code += "	ALPHA_ANTIALIASING_EDGE = alpha_antialiasing_edge;\n";
 		code += "	ALPHA_TEXTURE_COORDINATE = UV * vec2(albedo_texture_size);\n";
+	}
+
+	if (surface_class != 0) {
+		code += "	SURFACE_CLASS = surface_class_id; // Mariner GB1: the thin G-buffer.\n";
 	}
 
 	if (wire_aa) {
@@ -4108,6 +4116,23 @@ bool BaseMaterial3D::is_wire_antialiasing() const {
 	return wire_antialiasing;
 }
 
+void BaseMaterial3D::set_surface_class(int p_class) {
+	p_class = CLAMP(p_class, 0, 255);
+	if (surface_class == p_class) {
+		return;
+	}
+	const bool was_used = surface_class != 0;
+	surface_class = p_class;
+	_material_set_param(shader_names->surface_class, surface_class);
+	if (was_used != (surface_class != 0)) {
+		_queue_shader_change();
+	}
+}
+
+int BaseMaterial3D::get_surface_class() const {
+	return surface_class;
+}
+
 void BaseMaterial3D::set_grow_enabled(bool p_enable) {
 	grow_enabled = p_enable;
 	_queue_shader_change();
@@ -4822,6 +4847,8 @@ void BaseMaterial3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_wire_antialiasing", "enable"), &BaseMaterial3D::set_wire_antialiasing);
 	ClassDB::bind_method(D_METHOD("is_wire_antialiasing"), &BaseMaterial3D::is_wire_antialiasing);
+	ClassDB::bind_method(D_METHOD("set_surface_class", "surface_class"), &BaseMaterial3D::set_surface_class); // Mariner GB1.
+	ClassDB::bind_method(D_METHOD("get_surface_class"), &BaseMaterial3D::get_surface_class);
 	ClassDB::bind_method(D_METHOD("set_grow_enabled", "enable"), &BaseMaterial3D::set_grow_enabled);
 	ClassDB::bind_method(D_METHOD("is_grow_enabled"), &BaseMaterial3D::is_grow_enabled);
 
@@ -5134,6 +5161,9 @@ void BaseMaterial3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "z_clip_scale", PROPERTY_HINT_RANGE, "0.01,1.0,0.01"), "set_z_clip_scale", "get_z_clip_scale");
 	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "use_fov_override"), "set_flag", "get_flag", FLAG_USE_FOV_OVERRIDE);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fov_override", PROPERTY_HINT_RANGE, "1,179,0.1,degrees"), "set_fov_override", "get_fov_override");
+
+	ADD_GROUP("Surface Class", "surface_"); // Mariner GB1.
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "surface_class", PROPERTY_HINT_RANGE, "0,255,1"), "set_surface_class", "get_surface_class");
 
 	ADD_GROUP("Proximity Fade", "proximity_fade_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "proximity_fade_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_proximity_fade_enabled", "is_proximity_fade_enabled");

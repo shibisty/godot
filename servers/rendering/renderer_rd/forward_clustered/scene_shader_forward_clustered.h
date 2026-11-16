@@ -48,6 +48,8 @@ public:
 		SHADER_GROUP_ADVANCED,
 		SHADER_GROUP_MULTIVIEW,
 		SHADER_GROUP_ADVANCED_MULTIVIEW,
+		SHADER_GROUP_GBUFFER, // Mariner GB1: the prepass with the thin G-buffer - compiled when it is first asked for.
+		SHADER_GROUP_GBUFFER_MULTIVIEW,
 	};
 
 	// Not an enum because these values are constants that are processed as numbers
@@ -62,7 +64,13 @@ public:
 		constexpr static uint16_t SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_MULTIVIEW = 6;
 		constexpr static uint16_t SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL = 7;
 		constexpr static uint16_t SHADER_VERSION_DEPTH_PASS_WITH_SDF = 8;
-		constexpr static uint16_t SHADER_VERSION_COLOR_PASS = 9;
+		// Mariner GB1: the prepass also writes the thin G-buffer (albedo, surface class).
+		constexpr static uint16_t SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER = 9;
+		constexpr static uint16_t SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER = 10;
+		constexpr static uint16_t SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER_MULTIVIEW = 11;
+		constexpr static uint16_t SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER_MULTIVIEW = 12;
+		constexpr static uint16_t SHADER_VERSION_SURFACE_DECAL = 13; // Mariner GB2: render_mode surface_decal.
+		constexpr static uint16_t SHADER_VERSION_COLOR_PASS = 14;
 	};
 
 	enum ShaderColorPassFlags {
@@ -84,6 +92,11 @@ public:
 		PIPELINE_VERSION_DEPTH_PASS_MULTIVIEW,
 		PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_MULTIVIEW,
 		PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_MULTIVIEW,
+		PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER, // Mariner GB1.
+		PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER,
+		PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER_MULTIVIEW,
+		PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER_MULTIVIEW,
+		PIPELINE_VERSION_SURFACE_DECAL, // Mariner GB2.
 		PIPELINE_VERSION_COLOR_PASS,
 		PIPELINE_VERSION_MAX
 	};
@@ -267,6 +280,7 @@ public:
 		bool uses_time = false;
 		bool uses_transparent_motion_vectors = false; // Mariner: render_mode motion_vectors_transparent
 		bool uses_opaque_late = false; // Mariner: render_mode opaque_late
+		bool uses_surface_decal = false; // Mariner GB2: render_mode surface_decal - drawn only into the decal buffer
 		bool uses_alpha_fringe = false; // Mariner AA: render_mode alpha_fringe (also drawn in the transparent pass: the edge)
 		bool uses_vertex_time = false;
 		bool uses_fragment_time = false;
@@ -390,6 +404,8 @@ public:
 	void set_default_specialization(const ShaderSpecialization &p_specialization);
 	void enable_multiview_shader_group();
 	void enable_advanced_shader_group(bool p_needs_multiview = false);
+	void enable_gbuffer_shader_group(bool p_needs_multiview = false); // Mariner GB1.
+	bool is_gbuffer_shader_group_enabled(bool p_multiview) const;
 	bool is_multiview_shader_group_enabled() const;
 	bool is_advanced_shader_group_enabled(bool p_multiview) const;
 	uint32_t get_pipeline_compilations(RSE::PipelineSource p_source);

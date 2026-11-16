@@ -65,6 +65,10 @@ void CompositorEffect::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_needs_separate_specular"), &CompositorEffect::get_needs_separate_specular);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "needs_separate_specular"), "set_needs_separate_specular", "get_needs_separate_specular");
 
+	ClassDB::bind_method(D_METHOD("set_needs_gbuffer", "enable"), &CompositorEffect::set_needs_gbuffer); // Mariner GB1.
+	ClassDB::bind_method(D_METHOD("get_needs_gbuffer"), &CompositorEffect::get_needs_gbuffer);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "needs_gbuffer"), "set_needs_gbuffer", "get_needs_gbuffer");
+
 	BIND_ENUM_CONSTANT(EFFECT_CALLBACK_TYPE_PRE_OPAQUE)
 	BIND_ENUM_CONSTANT(EFFECT_CALLBACK_TYPE_POST_OPAQUE)
 	BIND_ENUM_CONSTANT(EFFECT_CALLBACK_TYPE_POST_SKY)
@@ -186,6 +190,19 @@ void CompositorEffect::set_needs_separate_specular(bool p_enabled) {
 
 bool CompositorEffect::get_needs_separate_specular() const {
 	return needs_separate_specular;
+}
+
+void CompositorEffect::set_needs_gbuffer(bool p_enabled) {
+	needs_gbuffer = p_enabled;
+	if (rid.is_valid()) {
+		RenderingServer *rs = RenderingServer::get_singleton();
+		ERR_FAIL_NULL(rs);
+		rs->compositor_effect_set_flag(rid, RSE::CompositorEffectFlags::COMPOSITOR_EFFECT_FLAG_NEEDS_GBUFFER, needs_gbuffer);
+	}
+}
+
+bool CompositorEffect::get_needs_gbuffer() const {
+	return needs_gbuffer;
 }
 
 CompositorEffect::CompositorEffect() {

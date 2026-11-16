@@ -1064,11 +1064,26 @@ layout(location = 4) out float depth_output_buffer;
 
 #endif // MODE_RENDER_MATERIAL
 
+#ifdef MODE_SURFACE_DECAL
+// Mariner GB2: the decal buffer - 0 added (height m, wetness, roughness offset), 1 blended (albedo over black, coverage).
+layout(location = 0) out vec4 surface_decal_output0;
+layout(location = 1) out vec4 surface_decal_output1;
+#endif
+
 #ifdef MODE_RENDER_NORMAL_ROUGHNESS
 layout(location = 0) out vec4 normal_roughness_output_buffer;
 
 #ifdef MODE_RENDER_VOXEL_GI
 layout(location = 1) out uvec2 voxel_gi_buffer;
+#endif
+
+#ifdef MODE_RENDER_GBUFFER
+// Mariner GB1: the thin G-buffer - rgb the albedo (sqrt: gamma 2), a the surface class / 255.
+#ifdef MODE_RENDER_VOXEL_GI
+layout(location = 2) out vec4 gbuffer_output_buffer;
+#else
+layout(location = 1) out vec4 gbuffer_output_buffer;
+#endif
 #endif
 
 #endif //MODE_RENDER_NORMAL
@@ -1348,6 +1363,8 @@ void fragment_shader(in SceneData scene_data) {
 	// Mariner AA (render_mode alpha_fringe): ALPHA_FRINGE_COORDINATE, ALPHA_FRINGE_FAR.
 	vec2 alpha_fringe_coordinate = vec2(0.0);
 	vec2 alpha_fringe_far = vec2(0.0, 2.0); // Mariner AA4: the AA bench optimum (leaves 0.083 -> 0.079).
+	int surface_class = 0; // Mariner GB1: SURFACE_CLASS (the thin G-buffer, Forward+).
+	float wet_film = 0.0; // Mariner G4c: WET_FILM (Forward+ applies it; Mobile and Compatibility ignore).
 
 	mat4 inv_view_matrix = transpose(mat4(scene_data.inv_view_matrix[0],
 			scene_data.inv_view_matrix[1],
@@ -1374,6 +1391,42 @@ void fragment_shader(in SceneData scene_data) {
 			scene_data.view_matrix[2],
 			vec4(0.0, 0.0, 0.0, 1.0)));
 	vec2 read_viewport_size = scene_data.viewport_size;
+
+	// Mariner GB2: render_mode surface_decal. The pixel's surface point comes from the depth prepass: VERTEX, NORMAL
+	// and VIEW are the surface's, DECAL_POSITION its point in the unit box (outside it - nothing), DECAL_SURFACE_* its
+	// class, albedo and normal from the thin G-buffer. The decal writes DECAL_HEIGHT / DECAL_WETNESS / DECAL_ROUGHNESS
+	// (added up) and ALBEDO by ALPHA into the decal buffer.
+	vec3 decal_position = vec3(0.0);
+	int decal_surface_class = 0;
+	vec3 decal_surface_albedo = vec3(0.0);
+	vec3 decal_surface_normal = vec3(0.0, 0.0, 1.0);
+	float decal_height = 0.0;
+	float decal_wetness = 0.0;
+	float decal_roughness = 0.0;
+#ifdef MODE_SURFACE_DECAL
+	{
+		ivec2 decal_pixel = ivec2(gl_FragCoord.xy);
+		float decal_depth = texelFetch(sampler2D(depth_buffer, SAMPLER_NEAREST_CLAMP), decal_pixel, 0).r;
+		if (decal_depth <= 0.0) {
+			discard; // The sky (reverse Z).
+		}
+		vec2 decal_screen_uv = (vec2(decal_pixel) + 0.5) / read_viewport_size;
+		vec4 decal_view = inv_projection_matrix * vec4(decal_screen_uv * 2.0 - 1.0, decal_depth, 1.0);
+		vertex = decal_view.xyz / decal_view.w;
+		decal_position = (inverse(read_model_matrix) * (inv_view_matrix * vec4(vertex, 1.0))).xyz;
+		if (any(greaterThan(abs(decal_position), vec3(0.5)))) {
+			discard;
+		}
+		decal_surface_normal = normalize(texelFetch(sampler2D(normal_roughness_buffer, SAMPLER_NEAREST_CLAMP), decal_pixel, 0).xyz * 2.0 - 1.0);
+		vec4 decal_gbuffer = texelFetch(sampler2D(gbuffer_buffer, SAMPLER_NEAREST_CLAMP), decal_pixel, 0);
+		decal_surface_albedo = decal_gbuffer.rgb * decal_gbuffer.rgb;
+		decal_surface_class = int(round(decal_gbuffer.a * 255.0));
+		view_highp = -normalize(vertex);
+#ifdef NORMAL_USED
+		normal_highp = decal_surface_normal;
+#endif
+	}
+#endif // MODE_SURFACE_DECAL
 
 #ifdef POINT_COORD_USED
 #ifdef POINT_SIZE_USED
@@ -1746,6 +1799,52 @@ void fragment_shader(in SceneData scene_data) {
 				}
 			}
 		}
+	}
+
+	// Mariner GB3: the surface decals under this pixel (the decal buffer; bound for the opaque pass, black elsewhere).
+	if (bool(scene_data.flags & SCENE_DATA_FLAGS_SURFACE_DECALS)) {
+		ivec2 sd_pixel = ivec2(gl_FragCoord.xy);
+		ivec2 sd_last = textureSize(sampler2D(surface_decal_buffer0, SAMPLER_NEAREST_CLAMP), 0) - 1;
+		vec4 sd0 = texelFetch(sampler2D(surface_decal_buffer0, SAMPLER_NEAREST_CLAMP), sd_pixel, 0);
+		vec4 sd1 = texelFetch(sampler2D(surface_decal_buffer1, SAMPLER_NEAREST_CLAMP), sd_pixel, 0);
+		// Albedo over the surface's, then the wetness after G4 (porous surfaces darken, a film of water smooths).
+		albedo = albedo * (1.0 - sd1.a) + sd1.rgb;
+		float sd_wet = clamp(sd0.g, 0.0, 1.0);
+		albedo *= mix(1.0, 0.45, sd_wet * 0.6);
+		roughness = clamp(roughness + sd0.b, 0.0, 1.0);
+		wet_film = max(wet_film, sd_wet * 0.7); // The film of water (G4c) smooths the roughness below.
+#ifdef NORMAL_USED
+		// The slope of the added height turns the normal (surface gradient after Mikkelsen 2010, "Bump Mapping
+		// Unparametrized Surfaces on the GPU"): of the two one-pixel differences the smaller one (not across an edge).
+		vec3 sd_dpdx = dFdx(vertex);
+		vec3 sd_dpdy = dFdy(vertex);
+		float sd_hx1 = texelFetch(sampler2D(surface_decal_buffer0, SAMPLER_NEAREST_CLAMP), min(sd_pixel + ivec2(1, 0), sd_last), 0).r - sd0.r;
+		float sd_hx0 = sd0.r - texelFetch(sampler2D(surface_decal_buffer0, SAMPLER_NEAREST_CLAMP), max(sd_pixel - ivec2(1, 0), ivec2(0)), 0).r;
+		float sd_hy1 = texelFetch(sampler2D(surface_decal_buffer0, SAMPLER_NEAREST_CLAMP), min(sd_pixel + ivec2(0, 1), sd_last), 0).r - sd0.r;
+		float sd_hy0 = sd0.r - texelFetch(sampler2D(surface_decal_buffer0, SAMPLER_NEAREST_CLAMP), max(sd_pixel - ivec2(0, 1), ivec2(0)), 0).r;
+		float sd_hx = abs(sd_hx1) < abs(sd_hx0) ? sd_hx1 : sd_hx0;
+		float sd_hy = abs(sd_hy1) < abs(sd_hy0) ? sd_hy1 : sd_hy0;
+		vec3 sd_r1 = cross(sd_dpdy, normal);
+		vec3 sd_r2 = cross(normal, sd_dpdx);
+		float sd_det = dot(sd_dpdx, sd_r1);
+		if (abs(sd_det) > 1e-12) {
+			normal = normalize(abs(sd_det) * normal - sign(sd_det) * (sd_hx * sd_r1 + sd_hy * sd_r2));
+		}
+#endif
+	}
+
+	// Mariner G4c: the wet film. WET_FILM (0..1, the share of the micro-relief a film of water covers; the material sets it,
+	// wet surface decals add) smooths the surface the way water does on rough ground: the film fills the relief only in
+	// part (roughness x0.45, kept within 0.06..0.25, never rougher than before), and toward the horizon the smooth water
+	// surface takes over (Fresnel: roughness toward 0.04 by (1 - N.V)^3).
+	if (wet_film > 0.0) {
+		float wf = clamp(wet_film, 0.0, 1.0);
+		float wf_rough = mix(roughness, min(roughness, clamp(roughness * 0.45, 0.06, 0.25)), wf);
+#ifdef NORMAL_USED
+		float wf_g = 1.0 - clamp(dot(normal, view), 0.0, 1.0);
+		wf_rough = mix(wf_rough, min(wf_rough, 0.04), wf * wf_g * wf_g * wf_g * 0.8);
+#endif
+		roughness = wf_rough;
 	}
 
 	//pack albedo until needed again, saves 2 VGPRs in the meantime
@@ -3340,7 +3439,17 @@ void fragment_shader(in SceneData scene_data) {
 	}
 #endif
 
+#ifdef MODE_RENDER_GBUFFER
+	gbuffer_output_buffer = vec4(sqrt(clamp(albedo, vec3(0.0), vec3(1.0))), float(clamp(surface_class, 0, 255)) * (1.0 / 255.0));
+#endif
+
 #endif //MODE_RENDER_NORMAL_ROUGHNESS
+
+#ifdef MODE_SURFACE_DECAL
+	// Mariner GB2: added up (heights, wetness, roughness offsets of overlapping decals) and blended (albedo).
+	surface_decal_output0 = vec4(decal_height, decal_wetness, decal_roughness, 0.0);
+	surface_decal_output1 = vec4(albedo, clamp(alpha, 0.0, 1.0));
+#endif
 
 //nothing happens, so a tree-ssa optimizer will result in no fragment shader :)
 #else

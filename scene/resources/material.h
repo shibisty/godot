@@ -444,6 +444,7 @@ private:
 
 		// Mariner AA3: the first word of bit fields is full (24 bytes; hashed and compared as bytes, zeroed by memset).
 		uint64_t wire_antialiasing : 1;
+		uint64_t surface_class_used : 1; // Mariner GB1.
 
 		MaterialKey() {
 			memset(this, 0, sizeof(MaterialKey));
@@ -490,6 +491,7 @@ private:
 		mk.deep_parallax = deep_parallax;
 		mk.grow = grow_enabled;
 		mk.wire_antialiasing = wire_antialiasing;
+		mk.surface_class_used = surface_class != 0;
 		mk.proximity_fade = proximity_fade_enabled;
 		mk.distance_fade = distance_fade;
 		mk.emission_op = emission_op;
@@ -560,6 +562,7 @@ private:
 		StringName sheen_color;
 		StringName sheen_roughness;
 		StringName wetness_amount; // Mariner G4.
+		StringName surface_class; // Mariner GB1.
 		StringName wetness_porosity;
 		StringName wetness_puddles;
 		StringName snow_amount; // Mariner G4b.
@@ -662,6 +665,7 @@ private:
 	float alpha_antialiasing_edge = 0.0f;
 	bool grow_enabled = false;
 	bool wire_antialiasing = false; // Mariner AA3.
+	int surface_class = 0; // Mariner GB1: SURFACE_CLASS in the thin G-buffer (0 generic).
 	float ao_light_affect = 0.0f;
 	float grow = 0.0f;
 	int particles_anim_h_frames = 0;
@@ -1060,6 +1064,9 @@ public:
 	// Mariner AA3: thin tubes (wires, cables, thin branches) along the local Y axis, at least a pixel wide.
 	void set_wire_antialiasing(bool p_enable);
 	bool is_wire_antialiasing() const;
+
+	void set_surface_class(int p_class);
+	int get_surface_class() const;
 
 	void set_grow(float p_grow);
 	float get_grow() const;

@@ -2316,6 +2316,16 @@ void main() {
 	// Mariner AA: render_mode alpha_fringe is Forward+ and Mobile; here it is the plain alpha scissor.
 	vec2 alpha_fringe_coordinate = vec2(0.0);
 	vec2 alpha_fringe_far = vec2(0.0, 2.0); // Mariner AA4: the AA bench optimum (leaves 0.083 -> 0.079).
+	int surface_class = 0; // Mariner GB1: SURFACE_CLASS (the thin G-buffer, Forward+).
+	float wet_film = 0.0; // Mariner G4c: WET_FILM (Forward+ applies it; Mobile and Compatibility ignore).
+	// Mariner GB2: render_mode surface_decal is Forward+ only; declared here for the shaders that use it.
+	vec3 decal_position = vec3(0.0);
+	int decal_surface_class = 0;
+	vec3 decal_surface_albedo = vec3(0.0);
+	vec3 decal_surface_normal = vec3(0.0, 0.0, 1.0);
+	float decal_height = 0.0;
+	float decal_wetness = 0.0;
+	float decal_roughness = 0.0;
 
 #ifdef LIGHT_VERTEX_USED
 	vec3 light_vertex = vertex;

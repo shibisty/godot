@@ -625,6 +625,7 @@ enum CompositorEffectFlags {
 	COMPOSITOR_EFFECT_FLAG_NEEDS_MOTION_VECTORS = 4,
 	COMPOSITOR_EFFECT_FLAG_NEEDS_ROUGHNESS = 8,
 	COMPOSITOR_EFFECT_FLAG_NEEDS_SEPARATE_SPECULAR = 16,
+	COMPOSITOR_EFFECT_FLAG_NEEDS_GBUFFER = 32, // Mariner GB1: the thin G-buffer (albedo, surface class).
 };
 
 enum CompositorEffectCallbackType {

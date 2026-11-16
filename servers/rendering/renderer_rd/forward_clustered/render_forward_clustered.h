@@ -62,6 +62,12 @@
 #define RB_TEX_NORMAL_ROUGHNESS_MSAA SNAME("normal_roughness_msaa")
 #define RB_TEX_VOXEL_GI SNAME("voxel_gi")
 #define RB_TEX_VOXEL_GI_MSAA SNAME("voxel_gi_msaa")
+// Mariner GB1: the thin G-buffer from the prepass (rgb albedo, sqrt; a surface class / 255), when asked for.
+#define RB_TEX_GBUFFER SNAME("gbuffer")
+#define RB_TEX_GBUFFER_MSAA SNAME("gbuffer_msaa")
+// Mariner GB2: the decal buffer (0 RGBA16F height, wetness, roughness offset; 1 RGBA8 albedo over black, coverage).
+#define RB_TEX_SURFACE_DECALS_0 SNAME("surface_decals_0")
+#define RB_TEX_SURFACE_DECALS_1 SNAME("surface_decals_1")
 
 namespace RendererSceneRenderImplementation {
 
@@ -95,6 +101,7 @@ class RenderForwardClustered : public RendererSceneRenderRD {
 		RENDER_LIST_ALPHA, //used for transparent objects
 		RENDER_LIST_SECONDARY, //used for shadows and other objects
 		RENDER_LIST_OPAQUE_LATE, // Mariner: opaque objects with render_mode opaque_late, drawn after the opaque pass
+		RENDER_LIST_SURFACE_DECAL, // Mariner GB2: render_mode surface_decal, drawn into the decal buffer after the prepass
 		RENDER_LIST_MAX
 	};
 
@@ -136,7 +143,9 @@ public:
 		enum DepthFrameBufferType {
 			DEPTH_FB,
 			DEPTH_FB_ROUGHNESS,
-			DEPTH_FB_ROUGHNESS_VOXELGI
+			DEPTH_FB_ROUGHNESS_VOXELGI,
+			DEPTH_FB_ROUGHNESS_GBUFFER, // Mariner GB1.
+			DEPTH_FB_ROUGHNESS_VOXELGI_GBUFFER,
 		};
 
 		RID render_sdfgi_uniform_set;
@@ -159,6 +168,13 @@ public:
 		RID get_voxelgi() const { return render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_VOXEL_GI); }
 		RID get_voxelgi(uint32_t p_layer) { return render_buffers->get_texture_slice(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_VOXEL_GI, p_layer, 0); }
 		RID get_voxelgi_msaa(uint32_t p_layer) { return render_buffers->get_texture_slice(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_VOXEL_GI_MSAA, p_layer, 0); }
+
+		void ensure_gbuffer(); // Mariner GB1: the thin G-buffer.
+		bool has_gbuffer() const { return render_buffers->has_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER); }
+		RID get_gbuffer() const { return render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER); }
+		RID get_gbuffer(uint32_t p_layer) { return render_buffers->get_texture_slice(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER, p_layer, 0); }
+		RID get_gbuffer_msaa() const { return render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER_MSAA); }
+		RID get_gbuffer_msaa(uint32_t p_layer) { return render_buffers->get_texture_slice(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER_MSAA, p_layer, 0); }
 
 		void ensure_fsr2(RendererRD::FSR2Effect *p_effect);
 		RendererRD::FSR2Context *get_fsr2_context() const { return fsr2_context; }
@@ -228,6 +244,9 @@ private:
 		PASS_MODE_DEPTH,
 		PASS_MODE_DEPTH_NORMAL_ROUGHNESS,
 		PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI,
+		PASS_MODE_DEPTH_NORMAL_ROUGHNESS_GBUFFER, // Mariner GB1: + the thin G-buffer.
+		PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI_GBUFFER,
+		PASS_MODE_SURFACE_DECAL, // Mariner GB2: the decal buffer.
 		PASS_MODE_DEPTH_MATERIAL,
 		PASS_MODE_SDF,
 		PASS_MODE_MAX
@@ -435,7 +454,7 @@ private:
 		uint32_t max_lightmaps;
 		RID lightmap_buffer;
 
-		MultiUmaBuffer<1u> instance_buffer[RENDER_LIST_MAX] = { MultiUmaBuffer<1u>("RENDER_LIST_OPAQUE"), MultiUmaBuffer<1u>("RENDER_LIST_MOTION"), MultiUmaBuffer<1u>("RENDER_LIST_ALPHA"), MultiUmaBuffer<1u>("RENDER_LIST_SECONDARY"), MultiUmaBuffer<1u>("RENDER_LIST_OPAQUE_LATE") };
+		MultiUmaBuffer<1u> instance_buffer[RENDER_LIST_MAX] = { MultiUmaBuffer<1u>("RENDER_LIST_OPAQUE"), MultiUmaBuffer<1u>("RENDER_LIST_MOTION"), MultiUmaBuffer<1u>("RENDER_LIST_ALPHA"), MultiUmaBuffer<1u>("RENDER_LIST_SECONDARY"), MultiUmaBuffer<1u>("RENDER_LIST_OPAQUE_LATE"), MultiUmaBuffer<1u>("RENDER_LIST_SURFACE_DECAL") };
 		InstanceData *curr_gpu_ptr[RENDER_LIST_MAX] = {};
 
 		LightmapCaptureData *lightmap_captures = nullptr;
@@ -454,6 +473,9 @@ private:
 		bool opaque_late_allowed = false; // Mariner: this render can split opaque_late surfaces into their own pass
 		bool used_opaque_late = false; // Mariner: RENDER_LIST_OPAQUE_LATE is not empty
 		bool opaque_late_blocked = false; // Mariner: opaque_late surfaces went to the regular opaque list
+		bool surface_decals_allowed = false; // Mariner GB2: this render draws surface decals (one view, not a probe)
+		bool used_surface_decals = false; // Mariner GB2: RENDER_LIST_SURFACE_DECAL is not empty
+		bool surface_decals_drawn = false; // Mariner GB3: the decal buffer holds this frame's decals
 
 		struct ShadowPass {
 			uint32_t element_from;
@@ -568,6 +590,7 @@ private:
 			FLAG_USES_STENCIL = 262144,
 			FLAG_PASS_OPAQUE_LATE = 524288, // Mariner: render_mode opaque_late
 			FLAG_PASS_ALPHA_FRINGE = 1048576, // Mariner AA: render_mode alpha_fringe - opaque core plus the edge in the alpha pass
+			FLAG_PASS_SURFACE_DECAL = 2097152, // Mariner GB2: render_mode surface_decal - only the decal pass
 		};
 
 		union {

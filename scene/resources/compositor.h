@@ -59,6 +59,7 @@ private:
 	bool needs_motion_vectors = false;
 	bool needs_normal_roughness = false;
 	bool needs_separate_specular = false;
+	bool needs_gbuffer = false; // Mariner GB1.
 
 protected:
 	static void _bind_methods();
@@ -91,6 +92,8 @@ public:
 
 	void set_needs_separate_specular(bool p_enabled);
 	bool get_needs_separate_specular() const;
+	void set_needs_gbuffer(bool p_enabled);
+	bool get_needs_gbuffer() const;
 
 	CompositorEffect();
 	~CompositorEffect();

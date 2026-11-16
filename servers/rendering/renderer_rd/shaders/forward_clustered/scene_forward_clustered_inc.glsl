@@ -538,6 +538,18 @@ layout(set = 1, binding = 54) uniform texture2D overhead_map_height_texture;
 #define DDGI_SAMPLER SAMPLER_LINEAR_CLAMP
 #include "../ddgi_sample_inc.glsl"
 
+// Mariner GB1 / GB2: the thin G-buffer (rgb sqrt(albedo), a class / 255; read by surface decals) and the decal buffer
+// (0: height, wetness, roughness offset; 1: albedo over black, coverage), read by the opaque pass. Black when unused.
+#ifdef USE_MULTIVIEW
+layout(set = 1, binding = 55) uniform texture2DArray gbuffer_buffer;
+layout(set = 1, binding = 56) uniform texture2DArray surface_decal_buffer0;
+layout(set = 1, binding = 57) uniform texture2DArray surface_decal_buffer1;
+#else
+layout(set = 1, binding = 55) uniform texture2D gbuffer_buffer;
+layout(set = 1, binding = 56) uniform texture2D surface_decal_buffer0;
+layout(set = 1, binding = 57) uniform texture2D surface_decal_buffer1;
+#endif
+
 #endif
 
 vec4 normal_roughness_compatibility(vec4 p_normal_roughness) {
