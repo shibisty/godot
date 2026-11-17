@@ -600,8 +600,37 @@ public:
 		bool active = false; // Any volume updated this frame.
 	} ddgi;
 
+	// Mariner L1: screen space probes (Environment.ddgi_screen_probes_enabled) - a probe per tile of pixels on the
+	// visible surface, tracing a hemisphere in the raytracing scene, temporally reprojected, integrated to L1 SH.
+	struct DDGIScreenProbes {
+		RID trace; // RGBA16F, 8x8 texels per probe: this frame's radiance (world octahedral directions).
+		RID radiance[2]; // RGBA16F, the same layout: temporally accumulated radiance (current, previous).
+		RID radiance_filled; // L2: this frame's, the texels below each probe's horizon filled (mirror direction).
+		RID radiance_filtered; // L2: that, filtered over the neighbouring probes: rough reflections.
+		RID probes[2]; // Storage buffer: ScreenProbe (position, linear depth; normal, valid) per probe (current, previous).
+		RID sh; // Storage buffer: header + irradiance SH (3 x vec4) per probe, before the spatial filter.
+		RID sh_filtered; // The same, filtered: what the scene shader reads.
+		RID last_color; // RGBA16F, internal size: the lit color of the previous frame (rgb), linear depth (a).
+		// Mariner L2: traced reflections. Half resolution rays (rgb, traced), their accumulation (rgb, linear depth;
+		// current, previous), the filtered full resolution result (rgb, weight) for the scene shader.
+		RID refl_trace;
+		RID refl_accum[2];
+		RID reflection;
+		bool refl_has_history = false;
+		bool refl_active = false; // Traced this frame.
+		Size2i grid; // Probes across and down.
+		Size2i internal_size;
+		uint32_t tile = 0; // Pixels per probe.
+		uint32_t current = 0; // Index of the current radiance / probes.
+		uint32_t frame_index = 0;
+		bool has_history = false;
+		bool has_last_color = false;
+		uint64_t frame = UINT64_MAX; // Frame the probes were last updated in.
+	} ddgi_screen;
+
 	void free_ddgi_volume(uint32_t p_volume);
 	void free_ddgi();
+	void free_ddgi_screen_probes(); // Mariner L1.
 
 	/* Mariner E20: ReSTIR DI state of the viewport (the textures are named textures of the "mariner_restir" context). */
 	struct Restir {

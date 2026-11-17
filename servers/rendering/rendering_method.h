@@ -340,6 +340,8 @@ public:
 	virtual void environment_set_ddgi_update(RID p_env, int p_probes_per_frame, bool p_relocation) = 0;
 	virtual void environment_set_ddgi_channels(RID p_env, float p_sky_energy, float p_lights_energy) = 0;
 	virtual void environment_set_ddgi_sea(RID p_env, bool p_enable, float p_level, const Color &p_color) = 0;
+	virtual void environment_set_ddgi_screen_probes(RID p_env, bool p_enable, int p_size, float p_hysteresis) = 0; // Mariner L1.
+	virtual void environment_set_ddgi_reflections(RID p_env, bool p_enable, float p_max_roughness) = 0; // Mariner L2.
 	virtual void environment_set_overhead_map(RID p_env, bool p_enable, float p_size, float p_height, int p_resolution, uint32_t p_cull_mask, float p_sky_occlusion, float p_sky_occlusion_radius, float p_bias) = 0; // Mariner G1a.
 	virtual void environment_set_wetness(RID p_env, float p_wetness) = 0; // Mariner G4.
 	virtual void environment_set_snow(RID p_env, float p_snow) = 0; // Mariner G4b.

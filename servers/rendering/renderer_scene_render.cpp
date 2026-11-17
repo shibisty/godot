@@ -801,6 +801,14 @@ void RendererSceneRender::environment_set_ddgi_sea(RID p_env, bool p_enable, flo
 	environment_storage.environment_set_ddgi_sea(p_env, p_enable, p_level, p_color);
 }
 
+void RendererSceneRender::environment_set_ddgi_screen_probes(RID p_env, bool p_enable, int p_size, float p_hysteresis) {
+	environment_storage.environment_set_ddgi_screen_probes(p_env, p_enable, p_size, p_hysteresis);
+}
+
+void RendererSceneRender::environment_set_ddgi_reflections(RID p_env, bool p_enable, float p_max_roughness) {
+	environment_storage.environment_set_ddgi_reflections(p_env, p_enable, p_max_roughness);
+}
+
 // Mariner G1a.
 void RendererSceneRender::environment_set_overhead_map(RID p_env, bool p_enable, float p_size, float p_height, int p_resolution, uint32_t p_cull_mask, float p_sky_occlusion, float p_sky_occlusion_radius, float p_bias) {
 	environment_storage.environment_set_overhead_map(p_env, p_enable, p_size, p_height, p_resolution, p_cull_mask, p_sky_occlusion, p_sky_occlusion_radius, p_bias);

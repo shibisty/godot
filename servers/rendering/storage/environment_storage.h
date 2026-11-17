@@ -282,6 +282,11 @@ private:
 		bool ddgi_sea = false;
 		float ddgi_sea_level = 0.0;
 		Color ddgi_sea_color = Color(0.02, 0.08, 0.1);
+		bool ddgi_screen_probes = false; // Mariner L1.
+		int ddgi_screen_probes_size = 16;
+		float ddgi_screen_probes_hysteresis = 0.9;
+		bool ddgi_reflections = false; // Mariner L2.
+		float ddgi_reflections_max_roughness = 0.5;
 
 		// Overhead map (Mariner G1a).
 		OverheadMapSettings overhead_map;
@@ -496,6 +501,13 @@ public:
 	bool environment_get_ddgi_sea(RID p_env) const;
 	float environment_get_ddgi_sea_level(RID p_env) const;
 	Color environment_get_ddgi_sea_color(RID p_env) const;
+	void environment_set_ddgi_screen_probes(RID p_env, bool p_enable, int p_size, float p_hysteresis); // Mariner L1.
+	bool environment_get_ddgi_screen_probes(RID p_env) const;
+	int environment_get_ddgi_screen_probes_size(RID p_env) const;
+	float environment_get_ddgi_screen_probes_hysteresis(RID p_env) const;
+	void environment_set_ddgi_reflections(RID p_env, bool p_enable, float p_max_roughness); // Mariner L2.
+	bool environment_get_ddgi_reflections(RID p_env) const;
+	float environment_get_ddgi_reflections_max_roughness(RID p_env) const;
 
 	// Overhead map (Mariner G1a).
 	void environment_set_overhead_map(RID p_env, bool p_enable, float p_size, float p_height, int p_resolution, uint32_t p_cull_mask, float p_sky_occlusion, float p_sky_occlusion_radius, float p_bias);

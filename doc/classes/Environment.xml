@@ -182,6 +182,12 @@
 		<member name="ddgi_rays_per_probe" type="int" setter="set_ddgi_rays_per_probe" getter="get_ddgi_rays_per_probe" default="128">
 			Rays traced per probe and frame (a multiple of 32, 32 to 256). More rays give less noise at a higher cost.
 		</member>
+		<member name="ddgi_reflections_enabled" type="bool" setter="set_ddgi_reflections_enabled" getter="is_ddgi_reflections_enabled" default="false">
+			If [code]true[/code], opaque surfaces smoother than [member ddgi_reflections_max_roughness] get ray traced reflections: one GGX-sampled ray per 2x2 pixels in the raytracing scene, hits lit like the screen probe rays (the previous frame's lit color where the hit was on screen, else direct light with shadow rays and the probe grids), accumulated over frames and filtered along the surface. They replace the sky / reflection probe light (SSR, where enabled, still goes on top). Rougher surfaces take their reflection from the screen probes (the probes' radiance in the reflection direction) instead of the sky. Needs [member ddgi_screen_probes_enabled]. Mariner engine patch L2.
+		</member>
+		<member name="ddgi_reflections_max_roughness" type="float" setter="set_ddgi_reflections_max_roughness" getter="get_ddgi_reflections_max_roughness" default="0.5">
+			Roughest surface that gets traced reflections; they fade out over the last 0.1 below it into the screen probe reflections.
+		</member>
 		<member name="ddgi_relocation" type="bool" setter="set_ddgi_relocation" getter="is_ddgi_relocation_enabled" default="true">
 			If [code]true[/code], probes move out of geometry: a probe inside a mesh moves through its closest back face, a probe very close to a surface (for example exactly in the plane of a wall or deck) moves away from it, by at most 0.45 probe spacings. Reduces light leaking and stripes along walls; turn off to see the raw grid.
 		</member>
@@ -193,6 +199,15 @@
 		</member>
 		<member name="ddgi_sea_level" type="float" setter="set_ddgi_sea_level" getter="get_ddgi_sea_level" default="0.0">
 			Height of the [member ddgi_sea_enabled] sea plane (world Y, meters). Set it to the mean water level; waves are not modeled in the probe rays.
+		</member>
+		<member name="ddgi_screen_probes_enabled" type="bool" setter="set_ddgi_screen_probes_enabled" getter="is_ddgi_screen_probes_enabled" default="false">
+			If [code]true[/code], the diffuse indirect light of opaque surfaces comes from probes placed on the visible surfaces every frame (one per [member ddgi_screen_probes_size] pixels, Lumen style), each tracing a hemisphere of rays in the raytracing scene: hits that were on screen last frame take their lit color (bounces of every light, the sky and emission, at screen resolution), the others are shaded like the DDGI probe rays. The probes keep the contact light and shadow that the world grid misses: under a ship's flare, in ruts, between rocks and trees, on the leeward side of a dune. Where no screen probe fits a pixel (edges, transparent surfaces, newly visible surfaces) the DDGI grids apply as before. Needs [member ddgi_enabled], a single view and [member Viewport.raytracing_scene_enabled]; forces the depth prepass with normals. Mariner engine patch L1.
+		</member>
+		<member name="ddgi_screen_probes_hysteresis" type="float" setter="set_ddgi_screen_probes_hysteresis" getter="get_ddgi_screen_probes_hysteresis" default="0.9">
+			How much of the screen probes' light of the previous frame is kept (reprojected to where the probe is now). Higher is smoother and slower to react to moving lights; history is dropped where the surface under a probe changed.
+		</member>
+		<member name="ddgi_screen_probes_size" type="int" setter="set_ddgi_screen_probes_size" getter="get_ddgi_screen_probes_size" default="16">
+			Screen pixels per probe: [code]16[/code] or [code]8[/code] (four times the rays, finer contact light). Each probe traces up to 32 rays per frame (the upper half of an 8x8 octahedral map).
 		</member>
 		<member name="ddgi_sky_energy" type="float" setter="set_ddgi_sky_energy" getter="get_ddgi_sky_energy" default="1.0">
 			Multiplier of the DDGI sky channel: light that came from the ambient light / sky, with its bounces (and the sky reflection and the ambient light where no probe grid applies). Acts at once, the probes do not need to converge again: for a lightning flash or quick cloud changes set it every frame. Mariner engine patch E12.

@@ -3185,6 +3185,8 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_update", "env", "probes_per_frame", "relocation"), &RenderingServer::environment_set_ddgi_update);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_channels", "env", "sky_energy", "lights_energy"), &RenderingServer::environment_set_ddgi_channels);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_sea", "env", "enable", "level", "color"), &RenderingServer::environment_set_ddgi_sea);
+	ClassDB::bind_method(D_METHOD("environment_set_ddgi_screen_probes", "env", "enable", "size", "hysteresis"), &RenderingServer::environment_set_ddgi_screen_probes);
+	ClassDB::bind_method(D_METHOD("environment_set_ddgi_reflections", "env", "enable", "max_roughness"), &RenderingServer::environment_set_ddgi_reflections);
 	ClassDB::bind_method(D_METHOD("environment_set_overhead_map", "env", "enable", "size", "height", "resolution", "cull_mask", "sky_occlusion", "sky_occlusion_radius", "bias"), &RenderingServer::environment_set_overhead_map); // Mariner G1a.
 	ClassDB::bind_method(D_METHOD("environment_set_wetness", "env", "wetness"), &RenderingServer::environment_set_wetness); // Mariner G4.
 	ClassDB::bind_method(D_METHOD("environment_set_snow", "env", "snow"), &RenderingServer::environment_set_snow); // Mariner G4b.

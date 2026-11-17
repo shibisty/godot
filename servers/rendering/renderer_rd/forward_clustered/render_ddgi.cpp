@@ -172,6 +172,10 @@ void RenderDDGI::_initialize(RendererSceneRenderRD *p_owner) {
 	Vector<String> variants;
 	variants.push_back("\n");
 	variants.push_back("\n#define USE_RADIANCE_OCTMAP_ARRAY\n");
+	variants.push_back("\n#define MODE_SCREEN_PROBES\n"); // Mariner L1.
+	variants.push_back("\n#define MODE_SCREEN_PROBES\n#define USE_RADIANCE_OCTMAP_ARRAY\n");
+	variants.push_back("\n#define MODE_REFLECTIONS\n"); // Mariner L2.
+	variants.push_back("\n#define MODE_REFLECTIONS\n#define USE_RADIANCE_OCTMAP_ARRAY\n");
 	trace_shader.initialize(variants, defines);
 	trace_version = trace_shader.version_create();
 	for (int i = 0; i < TRACE_MAX; i++) {
@@ -185,6 +189,22 @@ void RenderDDGI::_initialize(RendererSceneRenderRD *p_owner) {
 	update_version = update_shader.version_create();
 	update_shader_rd = update_shader.version_get_shader(update_version, 0);
 	update_pipeline = update_shader_rd.is_valid() ? rd->compute_pipeline_create(update_shader_rd) : RID();
+
+	// Mariner L1.
+	Vector<String> screen_variants;
+	screen_variants.push_back("\n#define MODE_PLACE\n");
+	screen_variants.push_back("\n#define MODE_INTEGRATE\n");
+	screen_variants.push_back("\n#define MODE_FILTER\n");
+	screen_variants.push_back("\n#define MODE_STORE_COLOR\n");
+	screen_variants.push_back("\n#define MODE_REFL_TEMPORAL\n"); // Mariner L2.
+	screen_variants.push_back("\n#define MODE_REFL_RESOLVE\n");
+	screen_variants.push_back("\n#define MODE_FILTER_RADIANCE\n");
+	screen_shader.initialize(screen_variants);
+	screen_version = screen_shader.version_create();
+	for (int i = 0; i < SCREEN_MAX; i++) {
+		screen_shader_rd[i] = screen_shader.version_get_shader(screen_version, i);
+		screen_pipeline[i] = screen_shader_rd[i].is_valid() ? rd->compute_pipeline_create(screen_shader_rd[i]) : RID();
+	}
 }
 
 RID RenderDDGI::get_inactive_params_buffer() {
@@ -275,9 +295,7 @@ bool RenderDDGI::update(RendererSceneRenderRD *p_owner, const RenderDataRD *p_re
 
 	RD *rd = RD::get_singleton();
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
-	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
 	RendererEnvironmentStorage *env_storage = RendererEnvironmentStorage::get_singleton();
-	const RenderSceneBuffersRD::RaytracingScene &rts = rb->raytracing_scene;
 	const RID env = p_render_data->environment;
 
 	// What to update: the world grid around the camera (Environment) and the grid of a DDGIVolume3D (the ship).
@@ -405,15 +423,11 @@ bool RenderDDGI::update(RendererSceneRenderRD *p_owner, const RenderDataRD *p_re
 	push.ray_length = MAX(p_render_data->scene_data->z_far * 2.0f, 1000.0f);
 
 	UniformSetCacheRD *cache = UniformSetCacheRD::get_singleton();
-	RID linear_clamp = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
-	RID linear_repeat = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED);
-	RID nearest_repeat = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED);
-	const RID black = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
-	auto tex = [&](uint32_t p_volume, RID p_texture) -> RID {
-		return setups[p_volume].enabled && p_texture.is_valid() ? p_texture : black;
-	};
-	const RenderSceneBuffersRD::DDGIVolume &w = dd.volumes[RenderSceneBuffersRD::DDGI_VOLUME_WORLD];
-	const RenderSceneBuffersRD::DDGIVolume &l = dd.volumes[RenderSceneBuffersRD::DDGI_VOLUME_LOCAL];
+	frame_trace.scene_uniform_buffer = p_scene_uniform_buffer;
+	frame_trace.radiance = radiance;
+	frame_trace.light_count = light_count;
+	frame_trace.flags = push.flags;
+	frame_trace.ray_length = push.ray_length;
 	RID trace_rd = trace_shader_rd[variant];
 	RID trace_set1 = rb->get_raytracing_texture_uniform_set(trace_rd, 1);
 
@@ -422,29 +436,7 @@ bool RenderDDGI::update(RendererSceneRenderRD *p_owner, const RenderDataRD *p_re
 			continue;
 		}
 		const RenderSceneBuffersRD::DDGIVolume &v = dd.volumes[vi];
-		RID trace_set0 = cache->get_cache(trace_rd, 0,
-				RD::Uniform(RD::UNIFORM_TYPE_ACCELERATION_STRUCTURE, 0, rts.tlas),
-				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, rts.instance_buffer),
-				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 2, rts.material_buffer),
-				RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 3, p_scene_uniform_buffer),
-				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 4, dd.light_buffer),
-				RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 5, dd.params_buffer),
-				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 6, radiance),
-				RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 7, linear_clamp),
-				RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 8, linear_repeat),
-				RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 9, nearest_repeat),
-				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 10, v.rays),
-				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 11, tex(0, w.irradiance)),
-				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 12, tex(0, w.distance)),
-				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 13, tex(0, w.probe_data)),
-				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 14, v.probe_state),
-				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 15, v.slot_list),
-				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 16, tex(1, l.irradiance)),
-				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 17, tex(1, l.distance)),
-				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 18, tex(1, l.probe_data)),
-				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 19, tex(0, w.irradiance_lights)),
-				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 20, tex(1, l.irradiance_lights)),
-				rb->get_raytracing_geometry_buffers_uniform(30)); // Mariner E5d: RT_GEOMETRY_BUFFERS_BINDING.
+		RID trace_set0 = cache->get_cache_vec(trace_rd, 0, _trace_uniforms(rb.ptr(), v.rays, v.probe_state, v.slot_list, TRACE_SET_PROBES));
 		RID update_set = cache->get_cache(update_shader_rd, 0,
 				RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, dd.params_buffer),
 				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, v.rays),
@@ -488,12 +480,428 @@ bool RenderDDGI::update(RendererSceneRenderRD *p_owner, const RenderDataRD *p_re
 	return true;
 }
 
+LocalVector<RD::Uniform> RenderDDGI::_trace_uniforms(RenderSceneBuffersRD *p_rb, RID p_binding_10, RID p_binding_14, RID p_binding_15, TraceSet p_set, RID p_binding_21) const {
+	const bool p_screen = p_set != TRACE_SET_PROBES;
+	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
+	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
+	const RenderSceneBuffersRD::RaytracingScene &rts = p_rb->raytracing_scene;
+	const RenderSceneBuffersRD::DDGI &dd = p_rb->ddgi;
+	RID linear_clamp = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+	RID linear_repeat = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED);
+	RID nearest_repeat = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED);
+	const RID black = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
+	auto tex = [&](RID p_texture) -> RID {
+		return p_texture.is_valid() ? p_texture : black;
+	};
+	const RenderSceneBuffersRD::DDGIVolume &w = dd.volumes[RenderSceneBuffersRD::DDGI_VOLUME_WORLD];
+	const RenderSceneBuffersRD::DDGIVolume &l = dd.volumes[RenderSceneBuffersRD::DDGI_VOLUME_LOCAL];
+	LocalVector<RD::Uniform> u;
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_ACCELERATION_STRUCTURE, 0, rts.tlas));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, rts.instance_buffer));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 2, rts.material_buffer));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 3, frame_trace.scene_uniform_buffer));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 4, dd.light_buffer));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 5, dd.params_buffer));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 6, frame_trace.radiance));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 7, linear_clamp));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 8, linear_repeat));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 9, nearest_repeat));
+	u.push_back(RD::Uniform(p_screen ? RD::UNIFORM_TYPE_IMAGE : RD::UNIFORM_TYPE_STORAGE_BUFFER, 10, p_binding_10));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 11, tex(w.irradiance)));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 12, tex(w.distance)));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 13, tex(w.probe_data)));
+	u.push_back(RD::Uniform(p_set == TRACE_SET_REFLECTIONS ? RD::UNIFORM_TYPE_TEXTURE : RD::UNIFORM_TYPE_STORAGE_BUFFER, 14, p_binding_14));
+	u.push_back(RD::Uniform(p_screen ? RD::UNIFORM_TYPE_TEXTURE : RD::UNIFORM_TYPE_STORAGE_BUFFER, 15, p_binding_15));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 16, tex(l.irradiance)));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 17, tex(l.distance)));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 18, tex(l.probe_data)));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 19, tex(w.irradiance_lights)));
+	u.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 20, tex(l.irradiance_lights)));
+	if (p_set == TRACE_SET_REFLECTIONS) {
+		u.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 21, p_binding_21));
+	}
+	u.push_back(p_rb->get_raytracing_geometry_buffers_uniform(30)); // Mariner E5d: RT_GEOMETRY_BUFFERS_BINDING.
+	return u;
+}
+
+// Mariner L1: screen space probes.
+
+Size2i RenderDDGI::screen_probe_grid(const Size2i &p_internal_size, uint32_t p_tile) {
+	const int tile = int(MAX(p_tile, 1u));
+	return Size2i((p_internal_size.width + tile - 1) / tile, (p_internal_size.height + tile - 1) / tile);
+}
+
+RID RenderDDGI::get_inactive_screen_buffer() {
+	if (inactive_screen_buffer.is_null()) {
+		Vector<uint8_t> data;
+		data.resize(64); // Header (active flag clear) + one SH / one probe.
+		memset(data.ptrw(), 0, data.size());
+		inactive_screen_buffer = RD::get_singleton()->storage_buffer_create(data.size(), data);
+		RD::get_singleton()->set_resource_name(inactive_screen_buffer, "DDGI screen probes (inactive)");
+	}
+	return inactive_screen_buffer;
+}
+
+struct ScreenProbesPushConstant {
+	uint32_t grid_x;
+	uint32_t grid_y;
+	uint32_t tile;
+	uint32_t frame_index;
+	uint32_t width;
+	uint32_t height;
+	float hysteresis;
+	uint32_t has_history;
+};
+
+bool RenderDDGI::update_screen_probes(RendererSceneRenderRD *p_owner, const RenderDataRD *p_render_data, RID p_depth, RID p_normal_roughness) {
+	ERR_FAIL_NULL_V(p_render_data, false);
+	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
+	ERR_FAIL_COND_V(rb.is_null(), false);
+	RenderSceneBuffersRD::DDGIScreenProbes &sp = rb->ddgi_screen;
+	if (!initialized || !rb->ddgi.active || p_depth.is_null() || p_normal_roughness.is_null() || frame_trace.scene_uniform_buffer.is_null()) {
+		return false;
+	}
+	const TraceVariant variant = use_octmap_array ? TRACE_SCREEN_RADIANCE_ARRAY : TRACE_SCREEN_RADIANCE_2D;
+	for (int i = 0; i < SCREEN_MAX; i++) {
+		ERR_FAIL_COND_V(screen_pipeline[i].is_null(), false);
+	}
+	ERR_FAIL_COND_V(trace_pipeline[variant].is_null(), false);
+
+	RD *rd = RD::get_singleton();
+	RendererEnvironmentStorage *env_storage = RendererEnvironmentStorage::get_singleton();
+	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
+	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
+	const RID env = p_render_data->environment;
+	const uint32_t tile = uint32_t(env_storage->environment_get_ddgi_screen_probes_size(env));
+	const Size2i internal_size = rb->get_internal_size();
+	const Size2i grid = screen_probe_grid(internal_size, tile);
+	const uint32_t probe_count = uint32_t(grid.width * grid.height);
+
+	if (sp.trace.is_null() || sp.tile != tile || sp.internal_size != internal_size) {
+		rb->free_ddgi_screen_probes();
+		RD::TextureFormat tf;
+		tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
+		tf.width = grid.width * IRRADIANCE_TEXELS;
+		tf.height = grid.height * IRRADIANCE_TEXELS;
+		tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+		sp.trace = rd->texture_create(tf, RD::TextureView());
+		rd->set_resource_name(sp.trace, "DDGI screen probes trace");
+		for (int i = 0; i < 2; i++) {
+			sp.radiance[i] = rd->texture_create(tf, RD::TextureView());
+			rd->set_resource_name(sp.radiance[i], "DDGI screen probes radiance");
+			rd->texture_clear(sp.radiance[i], Color(0, 0, 0, 0), 0, 1, 0, 1);
+			sp.probes[i] = rd->storage_buffer_create(probe_count * 32);
+			rd->set_resource_name(sp.probes[i], "DDGI screen probes");
+		}
+		sp.radiance_filled = rd->texture_create(tf, RD::TextureView());
+		rd->set_resource_name(sp.radiance_filled, "DDGI screen probes radiance (filled)");
+		sp.radiance_filtered = rd->texture_create(tf, RD::TextureView());
+		rd->set_resource_name(sp.radiance_filtered, "DDGI screen probes radiance (filtered)");
+		sp.sh = rd->storage_buffer_create(16 + probe_count * 48);
+		rd->set_resource_name(sp.sh, "DDGI screen probes SH");
+		sp.sh_filtered = rd->storage_buffer_create(16 + probe_count * 48);
+		rd->set_resource_name(sp.sh_filtered, "DDGI screen probes SH (filtered)");
+		tf.width = internal_size.width;
+		tf.height = internal_size.height;
+		sp.last_color = rd->texture_create(tf, RD::TextureView());
+		rd->set_resource_name(sp.last_color, "DDGI screen probes last color");
+		rd->texture_clear(sp.last_color, Color(0, 0, 0, 0), 0, 1, 0, 1);
+		sp.tile = tile;
+		sp.internal_size = internal_size;
+		sp.grid = grid;
+		sp.current = 0;
+		sp.has_history = false;
+		sp.has_last_color = false;
+	}
+	// History only from the previous frame (a gap in updates drops it).
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	const bool history = sp.has_history && sp.frame + 1 == frame;
+	if (!history) {
+		sp.refl_has_history = false; // L2: a gap in the updates drops the reflection history too.
+	}
+	sp.current ^= 1u;
+	const uint32_t cur = sp.current;
+	const uint32_t prev = cur ^ 1u;
+
+	RD::get_singleton()->draw_command_begin_label("DDGI screen probes (Mariner L1)");
+	UniformSetCacheRD *cache = UniformSetCacheRD::get_singleton();
+	RID nearest = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+	ScreenProbesPushConstant push = {};
+	push.grid_x = grid.width;
+	push.grid_y = grid.height;
+	push.tile = tile;
+	push.frame_index = sp.frame_index;
+	push.width = internal_size.width;
+	push.height = internal_size.height;
+	push.hysteresis = env_storage->environment_get_ddgi_screen_probes_hysteresis(env);
+	push.has_history = history ? 1 : 0;
+	const RID ubo = frame_trace.scene_uniform_buffer;
+
+	// Placement.
+	{
+		RID set = cache->get_cache(screen_shader_rd[SCREEN_PLACE], 0,
+				RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, ubo),
+				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 1, p_depth),
+				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 2, p_normal_roughness),
+				RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 3, nearest),
+				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 4, sp.probes[cur]));
+		RD::ComputeListID cl = rd->compute_list_begin();
+		rd->compute_list_bind_compute_pipeline(cl, screen_pipeline[SCREEN_PLACE]);
+		rd->compute_list_bind_uniform_set(cl, set, 0);
+		rd->compute_list_set_push_constant(cl, &push, sizeof(push));
+		rd->compute_list_dispatch_threads(cl, grid.width, grid.height, 1);
+		rd->compute_list_end();
+	}
+
+	// Rays.
+	{
+		RID trace_rd = trace_shader_rd[variant];
+		const RID black = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
+		RID set0 = cache->get_cache_vec(trace_rd, 0, _trace_uniforms(rb.ptr(), sp.trace, sp.probes[cur], sp.has_last_color ? sp.last_color : black, TRACE_SET_SCREEN));
+		RID set1 = rb->get_raytracing_texture_uniform_set(trace_rd, 1);
+		if (set0.is_null() || set1.is_null()) {
+			RD::get_singleton()->draw_command_end_label();
+			ERR_FAIL_V_MSG(false, "DDGI screen probes: could not create the uniform sets.");
+		}
+		struct {
+			uint32_t light_count;
+			uint32_t flags;
+			float ray_length;
+			uint32_t grid_x;
+			uint32_t grid_y;
+			uint32_t frame_index;
+			uint32_t pad[2];
+		} trace_push = {};
+		trace_push.light_count = frame_trace.light_count;
+		trace_push.flags = frame_trace.flags | (sp.has_last_color ? 4u : 0u); // DDGI_TRACE_FLAG_LAST_COLOR.
+		trace_push.ray_length = frame_trace.ray_length;
+		trace_push.grid_x = grid.width;
+		trace_push.grid_y = grid.height;
+		trace_push.frame_index = sp.frame_index;
+		RD::ComputeListID cl = rd->compute_list_begin();
+		rd->compute_list_bind_compute_pipeline(cl, trace_pipeline[variant]);
+		rd->compute_list_bind_uniform_set(cl, set0, 0);
+		rd->compute_list_bind_uniform_set(cl, set1, 1);
+		rd->compute_list_set_push_constant(cl, &trace_push, sizeof(trace_push));
+		rd->compute_list_dispatch_threads(cl, grid.width * IRRADIANCE_TEXELS, grid.height * IRRADIANCE_TEXELS, 1);
+		rd->compute_list_end();
+	}
+
+	// Temporal accumulation and SH, then the spatial filter.
+	{
+		sp.refl_active = false;
+		uint32_t header[4] = { uint32_t(grid.width), uint32_t(grid.height), tile, 1 };
+		if (env_storage->environment_get_ddgi_reflections(env)) {
+			_update_reflections(rb.ptr(), p_render_data, p_depth, p_normal_roughness);
+			header[3] |= 2u; // L2 on: probe reflections of rough surfaces; the traced ones where refl_active (bound then).
+		} else if (sp.reflection.is_valid()) {
+			RID *rids[] = { &sp.refl_trace, &sp.refl_accum[0], &sp.refl_accum[1], &sp.reflection };
+			for (RID *r : rids) {
+				rd->free_rid(*r);
+				*r = RID();
+			}
+			sp.refl_has_history = false;
+		}
+		rd->buffer_update(sp.sh_filtered, 0, sizeof(header), header);
+		RID set = cache->get_cache(screen_shader_rd[SCREEN_INTEGRATE], 0,
+				RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, ubo),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 1, sp.trace),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 2, sp.radiance[prev]),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 3, sp.radiance[cur]),
+				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 4, sp.probes[cur]),
+				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 5, sp.probes[prev]),
+				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 6, sp.sh),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 7, sp.radiance_filled));
+		RID filter_set = cache->get_cache(screen_shader_rd[SCREEN_FILTER], 0,
+				RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, ubo),
+				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, sp.probes[cur]),
+				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 2, sp.sh),
+				RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 3, sp.sh_filtered));
+		RD::ComputeListID cl = rd->compute_list_begin();
+		rd->compute_list_bind_compute_pipeline(cl, screen_pipeline[SCREEN_INTEGRATE]);
+		rd->compute_list_bind_uniform_set(cl, set, 0);
+		rd->compute_list_set_push_constant(cl, &push, sizeof(push));
+		rd->compute_list_dispatch(cl, grid.width, grid.height, 1);
+		rd->compute_list_add_barrier(cl);
+		rd->compute_list_bind_compute_pipeline(cl, screen_pipeline[SCREEN_FILTER]);
+		rd->compute_list_bind_uniform_set(cl, filter_set, 0);
+		rd->compute_list_set_push_constant(cl, &push, sizeof(push));
+		rd->compute_list_dispatch_threads(cl, grid.width, grid.height, 1);
+		if (header[3] & 2u) {
+			// L2: the filtered radiance of the rough reflections.
+			RID radiance_set = cache->get_cache(screen_shader_rd[SCREEN_FILTER_RADIANCE], 0,
+					RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, ubo),
+					RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, sp.probes[cur]),
+					RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 2, sp.radiance_filled),
+					RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 3, sp.radiance_filtered));
+			rd->compute_list_bind_compute_pipeline(cl, screen_pipeline[SCREEN_FILTER_RADIANCE]);
+			rd->compute_list_bind_uniform_set(cl, radiance_set, 0);
+			rd->compute_list_set_push_constant(cl, &push, sizeof(push));
+			rd->compute_list_dispatch(cl, grid.width, grid.height, 1);
+		}
+		rd->compute_list_end();
+	}
+	RD::get_singleton()->draw_command_end_label();
+
+	sp.has_history = true;
+	sp.frame = frame;
+	sp.frame_index++;
+	return true;
+}
+
+// Mariner L2: the ray traced glossy reflections of the frame (half resolution rays, accumulation, full resolution
+// filter). Uses the trace state of the frame (update()) and the screen probes' last color.
+void RenderDDGI::_update_reflections(RenderSceneBuffersRD *p_rb, const RenderDataRD *p_render_data, RID p_depth, RID p_normal_roughness) {
+	RenderSceneBuffersRD::DDGIScreenProbes &sp = p_rb->ddgi_screen;
+	RD *rd = RD::get_singleton();
+	const TraceVariant variant = use_octmap_array ? TRACE_REFLECTIONS_ARRAY : TRACE_REFLECTIONS_2D;
+	if (trace_pipeline[variant].is_null() || screen_pipeline[SCREEN_REFL_TEMPORAL].is_null() || screen_pipeline[SCREEN_REFL_RESOLVE].is_null()) {
+		return;
+	}
+	const Size2i full = sp.internal_size;
+	const Size2i half((full.width + 1) / 2, (full.height + 1) / 2);
+	if (sp.reflection.is_null()) {
+		RD::TextureFormat tf;
+		tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
+		tf.width = half.width;
+		tf.height = half.height;
+		tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+		sp.refl_trace = rd->texture_create(tf, RD::TextureView());
+		rd->set_resource_name(sp.refl_trace, "DDGI reflections trace");
+		for (int i = 0; i < 2; i++) {
+			sp.refl_accum[i] = rd->texture_create(tf, RD::TextureView());
+			rd->set_resource_name(sp.refl_accum[i], "DDGI reflections accumulation");
+			rd->texture_clear(sp.refl_accum[i], Color(0, 0, 0, 0), 0, 1, 0, 1);
+		}
+		tf.width = full.width;
+		tf.height = full.height;
+		sp.reflection = rd->texture_create(tf, RD::TextureView());
+		rd->set_resource_name(sp.reflection, "DDGI reflections");
+		sp.refl_has_history = false;
+	}
+	const uint32_t cur = sp.current;
+	const uint32_t prev = cur ^ 1u;
+	const float max_roughness = RendererEnvironmentStorage::get_singleton()->environment_get_ddgi_reflections_max_roughness(p_render_data->environment);
+	UniformSetCacheRD *cache = UniformSetCacheRD::get_singleton();
+	RID nearest = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+	const RID black = RendererRD::TextureStorage::get_singleton()->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
+
+	RD::get_singleton()->draw_command_begin_label("DDGI reflections (Mariner L2)");
+	{
+		RID trace_rd = trace_shader_rd[variant];
+		RID set0 = cache->get_cache_vec(trace_rd, 0, _trace_uniforms(p_rb, sp.refl_trace, p_depth, sp.has_last_color ? sp.last_color : black, TRACE_SET_REFLECTIONS, p_normal_roughness));
+		RID set1 = p_rb->get_raytracing_texture_uniform_set(trace_rd, 1);
+		if (set0.is_null() || set1.is_null()) {
+			RD::get_singleton()->draw_command_end_label();
+			ERR_FAIL_MSG("DDGI reflections: could not create the uniform sets.");
+		}
+		struct {
+			uint32_t light_count;
+			uint32_t flags;
+			float ray_length;
+			uint32_t grid_x;
+			uint32_t grid_y;
+			uint32_t frame_index;
+			float max_roughness;
+			uint32_t pad;
+		} push = {};
+		push.light_count = frame_trace.light_count;
+		push.flags = frame_trace.flags | (sp.has_last_color ? 4u : 0u);
+		push.ray_length = frame_trace.ray_length;
+		push.grid_x = half.width;
+		push.grid_y = half.height;
+		push.frame_index = sp.frame_index;
+		push.max_roughness = max_roughness;
+		RD::ComputeListID cl = rd->compute_list_begin();
+		rd->compute_list_bind_compute_pipeline(cl, trace_pipeline[variant]);
+		rd->compute_list_bind_uniform_set(cl, set0, 0);
+		rd->compute_list_bind_uniform_set(cl, set1, 1);
+		rd->compute_list_set_push_constant(cl, &push, sizeof(push));
+		rd->compute_list_dispatch_threads(cl, half.width, half.height, 1);
+		rd->compute_list_end();
+	}
+	{
+		ScreenProbesPushConstant push = {};
+		push.grid_x = half.width;
+		push.grid_y = half.height;
+		push.frame_index = sp.frame_index;
+		push.width = full.width;
+		push.height = full.height;
+		push.hysteresis = max_roughness;
+		push.has_history = sp.refl_has_history ? 1 : 0;
+		const RID ubo = frame_trace.scene_uniform_buffer;
+		RID temporal_set = cache->get_cache(screen_shader_rd[SCREEN_REFL_TEMPORAL], 0,
+				RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, ubo),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 1, sp.refl_trace),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 2, sp.refl_accum[prev]),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 3, sp.refl_accum[cur]),
+				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 4, p_depth),
+				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 5, p_normal_roughness),
+				RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 6, nearest));
+		RID resolve_set = cache->get_cache(screen_shader_rd[SCREEN_REFL_RESOLVE], 0,
+				RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, ubo),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 1, sp.refl_accum[cur]),
+				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 2, p_depth),
+				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 3, p_normal_roughness),
+				RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 4, nearest),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 5, sp.reflection));
+		RD::ComputeListID cl = rd->compute_list_begin();
+		rd->compute_list_bind_compute_pipeline(cl, screen_pipeline[SCREEN_REFL_TEMPORAL]);
+		rd->compute_list_bind_uniform_set(cl, temporal_set, 0);
+		rd->compute_list_set_push_constant(cl, &push, sizeof(push));
+		rd->compute_list_dispatch_threads(cl, half.width, half.height, 1);
+		rd->compute_list_add_barrier(cl);
+		rd->compute_list_bind_compute_pipeline(cl, screen_pipeline[SCREEN_REFL_RESOLVE]);
+		rd->compute_list_bind_uniform_set(cl, resolve_set, 0);
+		rd->compute_list_set_push_constant(cl, &push, sizeof(push));
+		rd->compute_list_dispatch_threads(cl, full.width, full.height, 1);
+		rd->compute_list_end();
+	}
+	RD::get_singleton()->draw_command_end_label();
+	sp.refl_has_history = true;
+	sp.refl_active = true;
+}
+
+void RenderDDGI::store_screen_probes_color(const RenderDataRD *p_render_data, RID p_color, RID p_depth) {
+	ERR_FAIL_NULL(p_render_data);
+	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
+	ERR_FAIL_COND(rb.is_null());
+	RenderSceneBuffersRD::DDGIScreenProbes &sp = rb->ddgi_screen;
+	if (sp.last_color.is_null() || sp.frame != RSG::rasterizer->get_frame_number() || p_color.is_null() || p_depth.is_null()) {
+		return;
+	}
+	RD *rd = RD::get_singleton();
+	RID nearest = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+	RID set = UniformSetCacheRD::get_singleton()->get_cache(screen_shader_rd[SCREEN_STORE_COLOR], 0,
+			RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, frame_trace.scene_uniform_buffer),
+			RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 1, p_color),
+			RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 2, p_depth),
+			RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 3, nearest),
+			RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 4, sp.last_color));
+	ScreenProbesPushConstant push = {};
+	push.width = sp.internal_size.width;
+	push.height = sp.internal_size.height;
+	RD::get_singleton()->draw_command_begin_label("DDGI screen probes: store color");
+	RD::ComputeListID cl = rd->compute_list_begin();
+	rd->compute_list_bind_compute_pipeline(cl, screen_pipeline[SCREEN_STORE_COLOR]);
+	rd->compute_list_bind_uniform_set(cl, set, 0);
+	rd->compute_list_set_push_constant(cl, &push, sizeof(push));
+	rd->compute_list_dispatch_threads(cl, push.width, push.height, 1);
+	rd->compute_list_end();
+	RD::get_singleton()->draw_command_end_label();
+	sp.has_last_color = true;
+}
+
 RenderDDGI::~RenderDDGI() {
 	if (inactive_params_buffer.is_valid()) {
 		RD::get_singleton()->free_rid(inactive_params_buffer);
 	}
+	if (inactive_screen_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(inactive_screen_buffer);
+	}
 	if (initialized) {
 		trace_shader.version_free(trace_version);
 		update_shader.version_free(update_version);
+		screen_shader.version_free(screen_version);
 	}
 }

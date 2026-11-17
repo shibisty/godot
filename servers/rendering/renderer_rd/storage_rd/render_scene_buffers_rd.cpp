@@ -240,7 +240,20 @@ void RenderSceneBuffersRD::free_hiz_readback() {
 	}
 }
 
+void RenderSceneBuffersRD::free_ddgi_screen_probes() {
+	DDGIScreenProbes &s = ddgi_screen;
+	RD *rd = RD::get_singleton();
+	RID *rids[] = { &s.trace, &s.radiance[0], &s.radiance[1], &s.probes[0], &s.probes[1], &s.sh, &s.sh_filtered, &s.last_color, &s.radiance_filled, &s.radiance_filtered, &s.refl_trace, &s.refl_accum[0], &s.refl_accum[1], &s.reflection };
+	for (RID *r : rids) {
+		if (r->is_valid()) {
+			rd->free_rid(*r);
+		}
+	}
+	s = DDGIScreenProbes();
+}
+
 void RenderSceneBuffersRD::free_ddgi() {
+	free_ddgi_screen_probes(); // Mariner L1.
 	for (uint32_t i = 0; i < DDGI_VOLUME_MAX; i++) {
 		free_ddgi_volume(i);
 	}

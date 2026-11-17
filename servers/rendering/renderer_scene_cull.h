@@ -1608,6 +1608,8 @@ public:
 	PASS3(environment_set_ddgi_update, RID, int, bool)
 	PASS3(environment_set_ddgi_channels, RID, float, float)
 	PASS4(environment_set_ddgi_sea, RID, bool, float, const Color &)
+	PASS4(environment_set_ddgi_screen_probes, RID, bool, int, float) // Mariner L1.
+	PASS3(environment_set_ddgi_reflections, RID, bool, float) // Mariner L2.
 	PASS9(environment_set_overhead_map, RID, bool, float, float, int, uint32_t, float, float, float) // Mariner G1a.
 	PASS2(environment_set_wetness, RID, float) // Mariner G4.
 	PASS2(environment_set_snow, RID, float) // Mariner G4b.

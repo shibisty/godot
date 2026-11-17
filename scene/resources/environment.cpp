@@ -1627,11 +1627,62 @@ Color Environment::get_ddgi_sea_color() const {
 	return ddgi_sea_color;
 }
 
+// Screen space probes over the raytracing scene (Mariner L1).
+
+void Environment::set_ddgi_screen_probes_enabled(bool p_enabled) {
+	ddgi_screen_probes_enabled = p_enabled;
+	_update_ddgi();
+}
+
+bool Environment::is_ddgi_screen_probes_enabled() const {
+	return ddgi_screen_probes_enabled;
+}
+
+void Environment::set_ddgi_screen_probes_size(int p_size) {
+	ddgi_screen_probes_size = p_size <= 8 ? 8 : 16;
+	_update_ddgi();
+}
+
+int Environment::get_ddgi_screen_probes_size() const {
+	return ddgi_screen_probes_size;
+}
+
+void Environment::set_ddgi_screen_probes_hysteresis(float p_hysteresis) {
+	ddgi_screen_probes_hysteresis = CLAMP(p_hysteresis, 0.0f, 0.98f);
+	_update_ddgi();
+}
+
+float Environment::get_ddgi_screen_probes_hysteresis() const {
+	return ddgi_screen_probes_hysteresis;
+}
+
+// Ray traced glossy reflections (Mariner L2).
+
+void Environment::set_ddgi_reflections_enabled(bool p_enabled) {
+	ddgi_reflections_enabled = p_enabled;
+	_update_ddgi();
+}
+
+bool Environment::is_ddgi_reflections_enabled() const {
+	return ddgi_reflections_enabled;
+}
+
+void Environment::set_ddgi_reflections_max_roughness(float p_roughness) {
+	ddgi_reflections_max_roughness = CLAMP(p_roughness, 0.05f, 1.0f);
+	_update_ddgi();
+}
+
+float Environment::get_ddgi_reflections_max_roughness() const {
+	return ddgi_reflections_max_roughness;
+}
+
 void Environment::_update_ddgi() {
 	RS::get_singleton()->environment_set_ddgi(environment, ddgi_enabled, ddgi_probe_count, ddgi_probe_spacing, ddgi_rays_per_probe, ddgi_hysteresis, ddgi_energy, ddgi_bias, ddgi_specular_occlusion);
 	RS::get_singleton()->environment_set_ddgi_update(environment, ddgi_probes_per_frame, ddgi_relocation);
 	RS::get_singleton()->environment_set_ddgi_channels(environment, ddgi_sky_energy, ddgi_lights_energy);
 	RS::get_singleton()->environment_set_ddgi_sea(environment, ddgi_sea_enabled, ddgi_sea_level, ddgi_sea_color);
+	RS::get_singleton()->environment_set_ddgi_screen_probes(environment, ddgi_screen_probes_enabled, ddgi_screen_probes_size, ddgi_screen_probes_hysteresis);
+	RS::get_singleton()->environment_set_ddgi_reflections(environment, ddgi_reflections_enabled, ddgi_reflections_max_roughness);
 }
 
 // Wetness of the world (Mariner G4).
@@ -2393,6 +2444,16 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_ddgi_sea_level"), &Environment::get_ddgi_sea_level);
 	ClassDB::bind_method(D_METHOD("set_ddgi_sea_color", "color"), &Environment::set_ddgi_sea_color);
 	ClassDB::bind_method(D_METHOD("get_ddgi_sea_color"), &Environment::get_ddgi_sea_color);
+	ClassDB::bind_method(D_METHOD("set_ddgi_screen_probes_enabled", "enabled"), &Environment::set_ddgi_screen_probes_enabled);
+	ClassDB::bind_method(D_METHOD("is_ddgi_screen_probes_enabled"), &Environment::is_ddgi_screen_probes_enabled);
+	ClassDB::bind_method(D_METHOD("set_ddgi_screen_probes_size", "size"), &Environment::set_ddgi_screen_probes_size);
+	ClassDB::bind_method(D_METHOD("get_ddgi_screen_probes_size"), &Environment::get_ddgi_screen_probes_size);
+	ClassDB::bind_method(D_METHOD("set_ddgi_screen_probes_hysteresis", "hysteresis"), &Environment::set_ddgi_screen_probes_hysteresis);
+	ClassDB::bind_method(D_METHOD("get_ddgi_screen_probes_hysteresis"), &Environment::get_ddgi_screen_probes_hysteresis);
+	ClassDB::bind_method(D_METHOD("set_ddgi_reflections_enabled", "enabled"), &Environment::set_ddgi_reflections_enabled);
+	ClassDB::bind_method(D_METHOD("is_ddgi_reflections_enabled"), &Environment::is_ddgi_reflections_enabled);
+	ClassDB::bind_method(D_METHOD("set_ddgi_reflections_max_roughness", "roughness"), &Environment::set_ddgi_reflections_max_roughness);
+	ClassDB::bind_method(D_METHOD("get_ddgi_reflections_max_roughness"), &Environment::get_ddgi_reflections_max_roughness);
 
 	ADD_GROUP("DDGI", "ddgi_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_ddgi_enabled", "is_ddgi_enabled");
@@ -2410,6 +2471,11 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_sea_enabled"), "set_ddgi_sea_enabled", "is_ddgi_sea_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_sea_level", PROPERTY_HINT_RANGE, "-100,100,0.01,or_less,or_greater,suffix:m"), "set_ddgi_sea_level", "get_ddgi_sea_level");
 	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "ddgi_sea_color", PROPERTY_HINT_COLOR_NO_ALPHA), "set_ddgi_sea_color", "get_ddgi_sea_color");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_screen_probes_enabled"), "set_ddgi_screen_probes_enabled", "is_ddgi_screen_probes_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddgi_screen_probes_size", PROPERTY_HINT_ENUM, "8 px:8,16 px:16"), "set_ddgi_screen_probes_size", "get_ddgi_screen_probes_size");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_screen_probes_hysteresis", PROPERTY_HINT_RANGE, "0,0.98,0.01"), "set_ddgi_screen_probes_hysteresis", "get_ddgi_screen_probes_hysteresis");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_reflections_enabled"), "set_ddgi_reflections_enabled", "is_ddgi_reflections_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_reflections_max_roughness", PROPERTY_HINT_RANGE, "0.05,1,0.01"), "set_ddgi_reflections_max_roughness", "get_ddgi_reflections_max_roughness");
 
 	// Overhead map (Mariner G1a).
 	ClassDB::bind_method(D_METHOD("set_overhead_map_enabled", "enabled"), &Environment::set_overhead_map_enabled);

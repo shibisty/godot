@@ -2284,6 +2284,20 @@ void fragment_shader(in SceneData scene_data) {
 		}
 		indirect_specular_light *= ddgi_channels.x;
 		ambient_light = ddgi_sky * ddgi_channels.x + ddgi_lights * ddgi_channels.y;
+#ifndef USE_MULTIVIEW
+		// Mariner L1: the screen space probes over the grids, where one fits this pixel's surface.
+		if ((ddgi_screen_sh.header.w & 1u) != 0u) {
+			vec4 screen_spec;
+			vec3 screen_reflect = normalize(mat3(inv_view_matrix) * reflect(-view, normal));
+			vec4 screen_gi = ddgi_screen_probe_irradiance(gl_FragCoord.xy, ddgi_world_pos, ddgi_world_normal, -vertex.z, screen_reflect, roughness, screen_spec);
+			ambient_light = mix(ambient_light, screen_gi.rgb, screen_gi.a);
+			// Mariner L2: rough surfaces reflect what the probes saw instead of the sky (the traced reflections go
+			// over this for smoother ones, below).
+			if ((ddgi_screen_sh.header.w & 2u) != 0u) {
+				indirect_specular_light = mix(indirect_specular_light, screen_spec.rgb, screen_spec.a * smoothstep(0.2, 0.45, roughness));
+			}
+		}
+#endif
 	}
 #endif // !USE_LIGHTMAP
 
@@ -2481,6 +2495,14 @@ void fragment_shader(in SceneData scene_data) {
 			ambient_light *= 1.0 - ssil.a;
 			ambient_light += ssil.rgb * albedo.rgb;
 		}
+
+#ifndef USE_MULTIVIEW
+		// Mariner L2: ray traced glossy reflections (black / weight 0 outside the opaque pass and where there are none).
+		if ((ddgi_screen_sh.header.w & 2u) != 0u) {
+			vec4 traced_reflection = texelFetch(sampler2D(ddgi_reflection_buffer, SAMPLER_NEAREST_CLAMP), ivec2(gl_FragCoord.xy), 0);
+			indirect_specular_light = mix(indirect_specular_light, traced_reflection.rgb, traced_reflection.a);
+		}
+#endif
 
 		//process ssr
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR)) {

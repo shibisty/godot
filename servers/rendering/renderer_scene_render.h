@@ -270,6 +270,8 @@ public:
 	bool environment_get_ddgi_enabled(RID p_env) const;
 	void environment_set_ddgi_channels(RID p_env, float p_sky_energy, float p_lights_energy);
 	void environment_set_ddgi_sea(RID p_env, bool p_enable, float p_level, const Color &p_color);
+	void environment_set_ddgi_screen_probes(RID p_env, bool p_enable, int p_size, float p_hysteresis); // Mariner L1.
+	void environment_set_ddgi_reflections(RID p_env, bool p_enable, float p_max_roughness); // Mariner L2.
 	void environment_set_overhead_map(RID p_env, bool p_enable, float p_size, float p_height, int p_resolution, uint32_t p_cull_mask, float p_sky_occlusion, float p_sky_occlusion_radius, float p_bias); // Mariner G1a.
 	RendererEnvironmentStorage::OverheadMapSettings environment_get_overhead_map(RID p_env) const;
 	void environment_set_wetness(RID p_env, float p_wetness); // Mariner G4.

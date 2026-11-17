@@ -2210,6 +2210,11 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	if (!p_render_data->restir_active && !is_reflection_probe && rb.is_valid() && rb->restir.params_buffer.is_valid()) {
 		rb->free_restir();
 	}
+	// Mariner L1: screen space probes of the DDGI (they need the normals of the prepass and the raytracing scene).
+	const bool using_ddgi_screen_probes = rb.is_valid() && rb_data.is_valid() && !is_reflection_probe && !using_pathtracing && is_environment(p_render_data->environment) && environment_get_ddgi_enabled(p_render_data->environment) && RendererEnvironmentStorage::get_singleton()->environment_get_ddgi_screen_probes(p_render_data->environment) && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED && rb->get_view_count() == 1 && p_render_data->rt_instances && rb->has_raytracing_scene() && RenderDDGI::is_supported();
+	if (!using_ddgi_screen_probes && rb.is_valid() && !is_reflection_probe && rb->ddgi_screen.trace.is_valid()) {
+		rb->free_ddgi_screen_probes();
+	}
 	if (using_pathtracing) {
 		using_ssr = false;
 		using_ssil = false;
@@ -2258,6 +2263,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 					using_ssil ||
 					ce_needs_normal_roughness ||
 					p_render_data->restir_active || // Mariner E20: ReSTIR reads the normals and roughness.
+					using_ddgi_screen_probes || // Mariner L1: the probes sit on the surface with its normal.
 					get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_NORMAL_BUFFER ||
 					scene_state.used_normal_texture) {
 				depth_pass_mode = PASS_MODE_DEPTH_NORMAL_ROUGHNESS;
@@ -2453,7 +2459,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	bool debug_voxelgis = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_VOXEL_GI_ALBEDO || get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_VOXEL_GI_LIGHTING || get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_VOXEL_GI_EMISSION;
 	bool debug_sdfgi_probes = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SDFGI_PROBES;
-	bool force_depth_pre_pass = scene_state.used_opaque_stencil || needs_gbuffer; // Mariner GB1: the G-buffer comes from the prepass.
+	bool force_depth_pre_pass = scene_state.used_opaque_stencil || needs_gbuffer || using_ddgi_screen_probes; // Mariner GB1: the G-buffer comes from the prepass; L1: the screen probes from its depth and normals.
 	bool depth_pre_pass = (force_depth_pre_pass || bool(GLOBAL_GET_CACHED(bool, "rendering/driver/depth_prepass/enable"))) && depth_framebuffer.is_valid() && !using_pathtracing;
 
 	SceneShaderForwardClustered::ShaderSpecialization base_specialization = scene_shader.default_specialization;
@@ -2652,6 +2658,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			} else {
 				RENDER_TIMESTAMP("DDGI");
 				ddgi_updated = ddgi->update(this, p_render_data, scene_state.uniform_buffers[depth_prepass_uniform_buffer_index], radiance_texture);
+				if (ddgi_updated && using_ddgi_screen_probes && depth_pre_pass && normal_roughness_views[0].is_valid()) {
+					RENDER_TIMESTAMP("DDGI Screen Probes");
+					ddgi->update_screen_probes(this, p_render_data, rb->get_depth_texture(0), normal_roughness_views[0]);
+				}
 			}
 		}
 		if (!ddgi_updated) {
@@ -3058,6 +3068,12 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	}
 
 	RD::get_singleton()->draw_command_end_label();
+
+	if (using_ddgi_screen_probes && rb->ddgi_screen.frame == RSG::rasterizer->get_frame_number()) {
+		// Mariner L1: the lit frame for the screen probe rays of the next frame.
+		RENDER_TIMESTAMP("DDGI Screen Probes Color");
+		ddgi->store_screen_probes_color(p_render_data, rb->get_internal_texture(0), rb->get_depth_texture(0));
+	}
 
 	RD::get_singleton()->draw_command_begin_label("Copy Framebuffer for SSIL/SSR");
 	if (using_ssil || using_ssr) {
@@ -5192,6 +5208,31 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 				uniforms.push_back(tu);
 			}
 		}
+		// Mariner L1: screen space probes updated this frame (SH with header, probes), else the inactive header.
+		const RenderSceneBuffersRD::DDGIScreenProbes *sp = use_ddgi && rb->ddgi_screen.sh_filtered.is_valid() && rb->ddgi_screen.frame == RSG::rasterizer->get_frame_number() ? &rb->ddgi_screen : nullptr;
+		RD::Uniform su;
+		su.binding = 58;
+		su.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		su.append_id(sp ? sp->sh_filtered : ddgi->get_inactive_screen_buffer());
+		uniforms.push_back(su);
+		RD::Uniform pu;
+		pu.binding = 59;
+		pu.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		pu.append_id(sp ? sp->probes[sp->current] : ddgi->get_inactive_screen_buffer());
+		uniforms.push_back(pu);
+		// Mariner L2: the probes' filtered radiance (rough reflections), the traced reflections (the opaque pass only:
+		// they belong to the surface of the depth prepass).
+		RD::Uniform ru;
+		ru.binding = 60;
+		ru.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		ru.append_id(sp && sp->radiance_filtered.is_valid() ? sp->radiance_filtered : black);
+		uniforms.push_back(ru);
+		const bool reflections = sp && sp->refl_active && sp->reflection.is_valid() && p_render_list == RENDER_LIST_OPAQUE;
+		RD::Uniform tu;
+		tu.binding = 61;
+		tu.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		tu.append_id(reflections ? sp->reflection : black);
+		uniforms.push_back(tu);
 	}
 	{
 		// Mariner E21: translucent shadow map (colour, distance); not while drawing shadows or the map itself.

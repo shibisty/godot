@@ -91,3 +91,42 @@ vec2 ddgi_atlas_uv(ivec3 slot, ivec3 count, vec3 dir, int texels, vec2 inv_atlas
 	vec2 px = vec2(ddgi_tile_origin(slot, count, texels) + 1) + oct * float(texels);
 	return px * inv_atlas_size;
 }
+
+// Mariner L1: screen space probes (one per tile of pixels on the visible surface; ddgi_screen_probes.glsl).
+struct DDGIScreenProbe {
+	vec4 position; // xyz: world position, w: linear view depth (0: no probe in this tile).
+	vec4 normal; // xyz: world normal, w: unused.
+};
+
+#define DDGI_SCREEN_PROBE_TEXELS 8 // Octahedral radiance texels per probe side (world directions).
+
+// Irradiance / PI (the ambient light convention) of L1 SH radiance coefficients (L00, L1-1 (y), L10 (z), L11 (x)).
+// Radiance towards d of L1 SH radiance coefficients, the directional part scaled by p_lobe (1: the plain L1
+// reconstruction, smaller: a wider lobe, as a rough reflection sees it).
+float ddgi_sh_radiance(vec4 sh, vec3 d, float p_lobe) {
+	return max(0.0, sh.x * 0.282095 + p_lobe * 0.488603 * (sh.y * d.y + sh.z * d.z + sh.w * d.x));
+}
+
+float ddgi_sh_irradiance(vec4 sh, vec3 n) {
+	return max(0.0, sh.x * 0.282095 + (2.0 / 3.0) * 0.488603 * (sh.y * n.y + sh.z * n.z + sh.w * n.x));
+}
+
+// SceneData stores the view matrices as mat3x4 rows (transposed affine): the full matrix.
+mat4 ddgi_affine_to_mat4(mat3x4 m) {
+	return transpose(mat4(m[0], m[1], m[2], vec4(0.0, 0.0, 0.0, 1.0)));
+}
+
+// Mariner L2: the full resolution pixel a half resolution reflection texel traces this frame (one of its 2x2, hashed
+// per texel and frame) and the roughness of the normal / roughness buffer (Forward+ encoding).
+ivec2 ddgi_reflection_pixel(ivec2 p_half, uint p_frame, ivec2 p_full_size) {
+	uint h = uint(p_half.x) * 1973u + uint(p_half.y) * 9277u + p_frame * 26699u;
+	h ^= h >> 13u;
+	h *= 0x5bd1e995u;
+	h ^= h >> 15u;
+	return min(p_half * 2 + ivec2(int(h & 1u), int((h >> 1u) & 1u)), p_full_size - 1);
+}
+
+float ddgi_decode_roughness(float p_w) {
+	float r = p_w > 0.5 ? 1.0 - p_w : p_w;
+	return clamp(r / (127.0 / 255.0), 0.0, 1.0);
+}

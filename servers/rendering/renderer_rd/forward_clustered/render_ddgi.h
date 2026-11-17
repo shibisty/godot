@@ -41,6 +41,7 @@
 #include "core/math/basis.h"
 #include "core/math/vector3i.h"
 #include "core/templates/local_vector.h"
+#include "servers/rendering/renderer_rd/shaders/raytracing/ddgi_screen_probes.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/raytracing/ddgi_trace.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/raytracing/ddgi_update.glsl.gen.h"
 #include "servers/rendering/rendering_device.h"
@@ -109,8 +110,48 @@ private:
 	enum TraceVariant {
 		TRACE_RADIANCE_2D,
 		TRACE_RADIANCE_ARRAY,
+		TRACE_SCREEN_RADIANCE_2D, // Mariner L1: the rays of the screen space probes.
+		TRACE_SCREEN_RADIANCE_ARRAY,
+		TRACE_REFLECTIONS_2D, // Mariner L2: the reflection rays.
+		TRACE_REFLECTIONS_ARRAY,
 		TRACE_MAX,
 	};
+
+	// Mariner L1: the passes of ddgi_screen_probes.glsl.
+	enum ScreenMode {
+		SCREEN_PLACE,
+		SCREEN_INTEGRATE,
+		SCREEN_FILTER,
+		SCREEN_STORE_COLOR,
+		SCREEN_REFL_TEMPORAL, // Mariner L2.
+		SCREEN_REFL_RESOLVE,
+		SCREEN_FILTER_RADIANCE,
+		SCREEN_MAX,
+	};
+	DdgiScreenProbesShaderRD screen_shader;
+	RID screen_version;
+	RID screen_shader_rd[SCREEN_MAX];
+	RID screen_pipeline[SCREEN_MAX];
+	RID inactive_screen_buffer; // Header with the active flag clear (scene shader bindings without screen probes).
+
+	// What the trace of the screen probes shares with the DDGI rays of the frame (set by update()).
+	struct FrameTrace {
+		RID scene_uniform_buffer;
+		RID radiance;
+		uint32_t light_count = 0;
+		uint32_t flags = 0;
+		float ray_length = 1000.0f;
+	} frame_trace;
+
+	// The uniforms of set 0 of ddgi_trace.glsl; bindings 10, 14 and 15 differ between the probe, the screen probe and
+	// the reflection rays (these also read the normals, binding 21).
+	enum TraceSet {
+		TRACE_SET_PROBES,
+		TRACE_SET_SCREEN,
+		TRACE_SET_REFLECTIONS,
+	};
+	LocalVector<RD::Uniform> _trace_uniforms(RenderSceneBuffersRD *p_rb, RID p_binding_10, RID p_binding_14, RID p_binding_15, TraceSet p_set, RID p_binding_21 = RID()) const;
+	void _update_reflections(RenderSceneBuffersRD *p_rb, const RenderDataRD *p_render_data, RID p_depth, RID p_normal_roughness);
 
 	DdgiTraceShaderRD trace_shader;
 	RID trace_version;
@@ -148,6 +189,17 @@ public:
 
 	// Parameters for the scene shader when a viewport has no DDGI this frame.
 	RID get_inactive_params_buffer();
+
+	// Mariner L1: the screen space probes of this frame (after update() returned true, the depth prepass with normals
+	// done): placement, rays, temporal accumulation, SH, spatial filter. Returns false when it can't (the scene shader
+	// then uses the DDGI grids alone).
+	bool update_screen_probes(RendererSceneRenderRD *p_owner, const RenderDataRD *p_render_data, RID p_depth, RID p_normal_roughness);
+	// After the frame's color is complete (resolved): keeps it, with its depth, for the hits of the next frame's rays.
+	void store_screen_probes_color(const RenderDataRD *p_render_data, RID p_color, RID p_depth);
+	// Probes of the screen space probes per pixel tile for an internal size (as allocated).
+	static Size2i screen_probe_grid(const Size2i &p_internal_size, uint32_t p_tile);
+	// Storage buffer for the scene shader's screen probe bindings (SH with header, probes) when none are active.
+	RID get_inactive_screen_buffer();
 
 	~RenderDDGI();
 };

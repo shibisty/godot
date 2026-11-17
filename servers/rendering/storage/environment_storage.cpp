@@ -1180,6 +1180,53 @@ Color RendererEnvironmentStorage::environment_get_ddgi_sea_color(RID p_env) cons
 	return env->ddgi_sea_color;
 }
 
+// Mariner L1.
+void RendererEnvironmentStorage::environment_set_ddgi_screen_probes(RID p_env, bool p_enable, int p_size, float p_hysteresis) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ddgi_screen_probes = p_enable;
+	env->ddgi_screen_probes_size = p_size <= 8 ? 8 : 16;
+	env->ddgi_screen_probes_hysteresis = CLAMP(p_hysteresis, 0.0f, 0.98f);
+}
+
+bool RendererEnvironmentStorage::environment_get_ddgi_screen_probes(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, false);
+	return env->ddgi_screen_probes;
+}
+
+int RendererEnvironmentStorage::environment_get_ddgi_screen_probes_size(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 16);
+	return env->ddgi_screen_probes_size;
+}
+
+float RendererEnvironmentStorage::environment_get_ddgi_screen_probes_hysteresis(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0.9f);
+	return env->ddgi_screen_probes_hysteresis;
+}
+
+// Mariner L2.
+void RendererEnvironmentStorage::environment_set_ddgi_reflections(RID p_env, bool p_enable, float p_max_roughness) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ddgi_reflections = p_enable;
+	env->ddgi_reflections_max_roughness = CLAMP(p_max_roughness, 0.05f, 1.0f);
+}
+
+bool RendererEnvironmentStorage::environment_get_ddgi_reflections(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, false);
+	return env->ddgi_reflections;
+}
+
+float RendererEnvironmentStorage::environment_get_ddgi_reflections_max_roughness(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0.5f);
+	return env->ddgi_reflections_max_roughness;
+}
+
 // Mariner E18.
 void RendererEnvironmentStorage::environment_set_ssao_gtao(RID p_env, bool p_enable, bool p_bent_normals, float p_thickness) {
 	Environment *env = environment_owner.get_or_null(p_env);

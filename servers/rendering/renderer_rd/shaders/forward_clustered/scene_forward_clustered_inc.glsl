@@ -511,6 +511,102 @@ layout(set = 1, binding = 44) uniform texture2D ddgi_irradiance_local;
 layout(set = 1, binding = 45) uniform texture2D ddgi_distance_local;
 layout(set = 1, binding = 46) uniform texture2D ddgi_probe_data_local;
 layout(set = 1, binding = 47) uniform texture2D ddgi_irradiance_lights_local;
+// Mariner L1: screen space probes (header.w = 0: none this frame).
+layout(set = 1, binding = 58, std430) restrict readonly buffer DDGIScreenProbeSH {
+	uvec4 header; // Probes across, down, pixels per probe, flags (1: probes active, 2: L2 reflections on).
+	vec4 sh[]; // 3 per probe (r, g, b): L1 SH of the radiance.
+}
+ddgi_screen_sh;
+layout(set = 1, binding = 59, std430) restrict readonly buffer DDGIScreenProbes {
+	DDGIScreenProbe probes[];
+}
+ddgi_screen_probes;
+layout(set = 1, binding = 60) uniform texture2D ddgi_screen_radiance; // Mariner L2: the probes' filtered radiance, 8x8 octahedral each.
+layout(set = 1, binding = 61) uniform texture2D ddgi_reflection_buffer; // Mariner L2: traced reflections (rgb), weight (a).
+
+// Mariner L2: a texel of a probe's 8x8 octahedral map, wrapped across the map's edges (a texel past an edge is the
+// interior texel it mirrors, as the octahedral border of the DDGI tiles), then bilinear between four of them.
+vec3 ddgi_screen_radiance_texel(ivec2 p_probe, ivec2 p_t) {
+	const int n = DDGI_SCREEN_PROBE_TEXELS;
+	ivec2 t = p_t;
+	if (t.x < 0 || t.x >= n) {
+		t = ivec2(clamp(t.x, 0, n - 1), n - 1 - t.y);
+	}
+	if (t.y < 0 || t.y >= n) {
+		t = ivec2(n - 1 - t.x, clamp(t.y, 0, n - 1));
+	}
+	return texelFetch(sampler2D(ddgi_screen_radiance, SAMPLER_NEAREST_CLAMP), p_probe * n + clamp(t, ivec2(0), ivec2(n - 1)), 0).rgb;
+}
+
+vec3 ddgi_screen_radiance_sample(ivec2 p_probe, vec2 p_oct) {
+	vec2 f = p_oct * float(DDGI_SCREEN_PROBE_TEXELS) - 0.5;
+	ivec2 b = ivec2(floor(f));
+	vec2 a = f - vec2(b);
+	vec3 c00 = ddgi_screen_radiance_texel(p_probe, b);
+	vec3 c10 = ddgi_screen_radiance_texel(p_probe, b + ivec2(1, 0));
+	vec3 c01 = ddgi_screen_radiance_texel(p_probe, b + ivec2(0, 1));
+	vec3 c11 = ddgi_screen_radiance_texel(p_probe, b + ivec2(1, 1));
+	return mix(mix(c00, c10, a.x), mix(c01, c11, a.x), a.y);
+}
+
+// Mariner L1: irradiance / PI (rgb) of the screen probes at a pixel and how much it applies (a): the four probes
+// around the pixel, bilinear, each only as far as it lies on the pixel's surface (plane distance) with a similar
+// normal. a = 0 where none fits (edges, newly visible surfaces, transparent surfaces in front of the probed one).
+// L2: r_specular - the probes' radiance towards p_reflect (rgb; their filtered radiance maps, towards the SH
+// reconstruction for the roughest surfaces) and how much it applies (a).
+vec4 ddgi_screen_probe_irradiance(vec2 p_frag, vec3 p_world, vec3 n_world, float p_depth, vec3 p_reflect, float p_roughness, out vec4 r_specular) {
+	uvec4 header = ddgi_screen_sh.header;
+	r_specular = vec4(0.0);
+	if ((header.w & 1u) == 0u) {
+		return vec4(0.0);
+	}
+	vec2 oct = vec3_to_oct(p_reflect);
+	vec3 map_sum = vec3(0.0);
+	ivec2 grid = ivec2(header.xy);
+	vec2 f = p_frag / float(header.z) - 0.5;
+	ivec2 base = ivec2(floor(f));
+	vec2 a = f - vec2(base);
+	float tolerance = 0.02 * p_depth + 0.05;
+	vec4 r = vec4(0.0);
+	vec4 g = vec4(0.0);
+	vec4 b = vec4(0.0);
+	float weight_sum = 0.0;
+	for (int i = 0; i < 4; i++) {
+		ivec2 o = ivec2(i & 1, i >> 1);
+		ivec2 c = clamp(base + o, ivec2(0), grid - 1);
+		uint index = uint(c.y * grid.x + c.x);
+		DDGIScreenProbe sp = ddgi_screen_probes.probes[index];
+		if (sp.position.w <= 0.0) {
+			continue;
+		}
+		vec2 bw = mix(vec2(1.0) - a, a, vec2(o));
+		float plane = abs(dot(sp.position.xyz - p_world, n_world));
+		float wn = max(dot(sp.normal.xyz, n_world), 0.0);
+		float w = bw.x * bw.y * max(0.0, 1.0 - plane / tolerance) * wn * wn;
+		if (w <= 1e-5) {
+			continue;
+		}
+		r += ddgi_screen_sh.sh[index * 3u + 0u] * w;
+		g += ddgi_screen_sh.sh[index * 3u + 1u] * w;
+		b += ddgi_screen_sh.sh[index * 3u + 2u] * w;
+		weight_sum += w;
+		if ((header.w & 2u) != 0u) {
+			map_sum += ddgi_screen_radiance_sample(c, oct) * w;
+		}
+	}
+	if (weight_sum < 1e-4) {
+		return vec4(0.0);
+	}
+	r /= weight_sum;
+	g /= weight_sum;
+	b /= weight_sum;
+	vec3 irradiance = vec3(ddgi_sh_irradiance(r, n_world), ddgi_sh_irradiance(g, n_world), ddgi_sh_irradiance(b, n_world));
+	float amount = smoothstep(0.02, 0.25, weight_sum);
+	float lobe = mix(1.0, 0.6, clamp((p_roughness - 0.2) / 0.6, 0.0, 1.0));
+	vec3 sh_spec = vec3(ddgi_sh_radiance(r, p_reflect, lobe), ddgi_sh_radiance(g, p_reflect, lobe), ddgi_sh_radiance(b, p_reflect, lobe));
+	r_specular = vec4(mix(map_sum / weight_sum, sh_spec, smoothstep(0.6, 1.0, p_roughness)), amount);
+	return vec4(irradiance, amount);
+}
 layout(set = 1, binding = 48) uniform texture2D translucent_shadow_color; // Mariner E21: transmitted colour of the nearest translucent caster.
 layout(set = 1, binding = 49) uniform texture2D translucent_shadow_distance; // Mariner E21: its distance along the light.
 layout(set = 1, binding = 50) uniform texture2D restir_diffuse; // Mariner E20: demodulated diffuse light of the ReSTIR lights.

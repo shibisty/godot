@@ -320,6 +320,11 @@ private:
 	bool ddgi_sea_enabled = false;
 	float ddgi_sea_level = 0.0;
 	Color ddgi_sea_color = Color(0.02, 0.08, 0.1);
+	bool ddgi_screen_probes_enabled = false; // Mariner L1.
+	int ddgi_screen_probes_size = 16;
+	float ddgi_screen_probes_hysteresis = 0.9;
+	bool ddgi_reflections_enabled = false; // Mariner L2.
+	float ddgi_reflections_max_roughness = 0.5;
 	void _update_ddgi();
 
 	// Overhead map (Mariner G1a).
@@ -679,6 +684,16 @@ public:
 	float get_ddgi_sea_level() const;
 	void set_ddgi_sea_color(const Color &p_color);
 	Color get_ddgi_sea_color() const;
+	void set_ddgi_screen_probes_enabled(bool p_enabled); // Mariner L1.
+	bool is_ddgi_screen_probes_enabled() const;
+	void set_ddgi_screen_probes_size(int p_size);
+	int get_ddgi_screen_probes_size() const;
+	void set_ddgi_screen_probes_hysteresis(float p_hysteresis);
+	float get_ddgi_screen_probes_hysteresis() const;
+	void set_ddgi_reflections_enabled(bool p_enabled); // Mariner L2.
+	bool is_ddgi_reflections_enabled() const;
+	void set_ddgi_reflections_max_roughness(float p_roughness);
+	float get_ddgi_reflections_max_roughness() const;
 
 	// Wetness of the world (Mariner G4).
 	void set_wetness(float p_wetness);

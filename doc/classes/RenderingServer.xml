@@ -1540,6 +1540,25 @@
 				Sets the endless sea plane seen by the DDGI probe rays, see [member Environment.ddgi_sea_enabled], [member Environment.ddgi_sea_level] and [member Environment.ddgi_sea_color].
 			</description>
 		</method>
+		<method name="environment_set_ddgi_reflections">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="max_roughness" type="float" />
+			<description>
+				Sets the ray traced glossy reflections of the DDGI, see [member Environment.ddgi_reflections_enabled] and [member Environment.ddgi_reflections_max_roughness].
+			</description>
+		</method>
+		<method name="environment_set_ddgi_screen_probes">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="size" type="int" />
+			<param index="3" name="hysteresis" type="float" />
+			<description>
+				Sets the screen space probes of the DDGI, see [member Environment.ddgi_screen_probes_enabled], [member Environment.ddgi_screen_probes_size] and [member Environment.ddgi_screen_probes_hysteresis].
+			</description>
+		</method>
 		<method name="environment_set_ddgi_update">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />
