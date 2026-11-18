@@ -178,7 +178,8 @@ void RenderForwardClustered::RenderBufferDataForwardClustered::free_data() {
 	fsr3_failed = false;
 
 	if (dlss_context) {
-		memdelete(dlss_context);
+		// Mariner E19b: kept for a few frames: a change of the 3D scale gets it back (no DLSS warm-up, history kept).
+		RendererRD::DLSSEffect::park_context(dlss_context);
 		dlss_context = nullptr;
 	}
 

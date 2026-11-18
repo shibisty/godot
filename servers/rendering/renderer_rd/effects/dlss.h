@@ -70,6 +70,9 @@ public:
 	DLSSEffect *last_effect = nullptr;
 	bool is_d3d12 = false;
 	int delay = 4; // Warmup frames before DLSS evaluates (Vulkan stability workaround).
+	// Mariner E19b: a context outlives its render buffers when only the 3D scale changes (dynamic resolution).
+	Size2i target_size;
+	uint64_t parked_frame = 0;
 
 	virtual ~DLSSContext() {}
 };
@@ -85,6 +88,11 @@ public:
 	DLSSEffect();
 	~DLSSEffect();
 	DLSSContext *create_context(Size2i p_internal_size, Size2i p_target_size);
+	// Mariner E19b: instead of freeing the context with its render buffers, keep it for a few frames: when the
+	// buffers come back with the same target size (the 3D scale changed), create_context() returns it and DLSS goes on
+	// without its warm-up frames (4 frames of the jittered internal image on screen) and with its history.
+	static void park_context(DLSSContext *p_context);
+	static void purge_parked(bool p_all = false);
 	void upscale(const DLSSContext::Parameters &p_params);
 	bool is_ready(DLSSContext *p_context);
 

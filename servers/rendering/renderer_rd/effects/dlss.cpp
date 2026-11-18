@@ -169,11 +169,60 @@ DLSSEffect::DLSSEffect() {
 }
 
 DLSSEffect::~DLSSEffect() {
+	purge_parked(true);
 	shaders.mvec_decode_shader.version_free(shaders.mvec_decode_version);
 }
 
+// Mariner E19b: contexts whose render buffers were reconfigured, kept for DLSS_PARK_FRAMES frames.
+static LocalVector<DLSSContext *> g_dlss_parked;
+static constexpr uint64_t DLSS_PARK_FRAMES = 8;
+
+void DLSSEffect::park_context(DLSSContext *p_context) {
+	if (p_context == nullptr) {
+		return;
+	}
+	DLSSContextInner *inner = (DLSSContextInner *)p_context;
+	// With frame generation running on this viewport the old rule stays: its tags are gone, so it must stop now.
+	if (StreamlineContext::get().dlssg_active() && (uint32_t)StreamlineContext::get().dlssg_viewport == (uint32_t)inner->viewport) {
+		memdelete(p_context);
+		return;
+	}
+	p_context->parked_frame = RD::get_singleton()->get_frames_drawn();
+	g_dlss_parked.push_back(p_context);
+}
+
+void DLSSEffect::purge_parked(bool p_all) {
+	const uint64_t frame = RD::get_singleton() ? RD::get_singleton()->get_frames_drawn() : 0;
+	for (uint32_t i = g_dlss_parked.size(); i-- > 0;) {
+		if (p_all || frame - g_dlss_parked[i]->parked_frame > DLSS_PARK_FRAMES) {
+			memdelete(g_dlss_parked[i]);
+			g_dlss_parked.remove_at(i);
+		}
+	}
+}
+
 DLSSContext *DLSSEffect::create_context(Size2i p_internal_size, Size2i p_target_size) {
+	purge_parked();
+	// Mariner E19b: the render buffers were only resized inside (dynamic resolution, a new scaling_3d_scale): take the
+	// context they had. DLSS accepts a changing render size within the range of its quality mode without a reset.
+	for (uint32_t i = 0; i < g_dlss_parked.size(); i++) {
+		DLSSContextInner *parked = (DLSSContextInner *)g_dlss_parked[i];
+		if (parked->target_size != p_target_size || parked->currentDlssOptions.mode == sl::DLSSMode::eOff) {
+			continue;
+		}
+		g_dlss_parked.remove_at(i);
+		const sl::DLSSOptimalSettings &os = parked->currentOptimalSettings;
+		const bool fits = (uint32_t)p_internal_size.width >= os.renderWidthMin && (uint32_t)p_internal_size.width <= os.renderWidthMax &&
+				(uint32_t)p_internal_size.height >= os.renderHeightMin && (uint32_t)p_internal_size.height <= os.renderHeightMax;
+		if (!fits) {
+			// Out of the mode's range: another quality mode (DLSS resets its history itself), still no warm-up.
+			parked->currentDlssOptions.mode = parked->find_optimal_mode(p_target_size.width, p_target_size.height, p_internal_size.width, p_internal_size.height, parked->currentOptimalSettings);
+		}
+		return parked;
+	}
+
 	DLSSContextInner *context = memnew(RendererRD::DLSSContextInner);
+	context->target_size = p_target_size;
 
 	context->currentDlssOptions.mode = context->find_optimal_mode(p_target_size.width, p_target_size.height, p_internal_size.width, p_internal_size.height, context->currentOptimalSettings);
 	context->currentDlssOptions.outputWidth = p_target_size.width;
@@ -209,6 +258,7 @@ static sl::float3 sl_convert_vector(const Vector3 &vec) {
 void DLSSEffect::upscale(const DLSSContext::Parameters &p_params) {
 	DLSSContextInner *context = (DLSSContextInner *)p_params.context;
 	ERR_FAIL_NULL(context);
+	purge_parked(); // Mariner E19b: contexts nobody took back.
 
 	// Delay enablement.
 	if (context->delay > 0) {
@@ -468,6 +518,12 @@ bool DLSSEffect::is_ready(DLSSContext *p_context) {
 #else
 DLSSEffect::DLSSEffect() {}
 DLSSEffect::~DLSSEffect() {}
+void DLSSEffect::park_context(DLSSContext *p_context) {
+	if (p_context) {
+		memdelete(p_context);
+	}
+}
+void DLSSEffect::purge_parked(bool p_all) {}
 DLSSContext *DLSSEffect::create_context(Size2i p_internal_size, Size2i p_target_size) {
 	return nullptr;
 }

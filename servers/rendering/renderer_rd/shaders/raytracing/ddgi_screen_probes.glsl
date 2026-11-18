@@ -33,7 +33,7 @@ layout(push_constant, std430) uniform Params {
 	uint width; // Internal size.
 	uint height;
 	float hysteresis;
-	uint has_history;
+	uint has_history; // Bit 0: there is a history. L1 only, bit 1: the probes are jittered in their tiles (L1b).
 }
 params;
 
@@ -74,14 +74,17 @@ void main() {
 	result.normal = vec4(0.0, 1.0, 0.0, 0.0);
 	ivec2 tile_origin = ivec2(probe * params.tile);
 	ivec2 size = ivec2(params.width, params.height);
-	// A random pixel of the tile each frame (the probes cover the tile over the frames, as the rays cover the
-	// texels); up to four tries for a pixel that is not sky.
-	uint h = hash(probe.x * 1973u + probe.y * 9277u + params.frame_index * 26699u);
+	// L1b: the center of the tile, the same surface point each frame of a still view (the history holds, the
+	// probes a pixel reads stay the same); then pixels of the tile that are the same each frame, where the center
+	// is sky. With the jitter (bit 1): a random pixel of the tile each frame (the probes cover the tile over the
+	// frames, as the rays cover the texels), the center last. Up to four tries for a pixel that is not sky.
+	bool jitter = (params.has_history & 2u) != 0u;
+	uint h = hash(probe.x * 1973u + probe.y * 9277u + (jitter ? params.frame_index * 26699u : 0u));
 	for (int i = 0; i < 4; i++) {
 		h = hash(h + uint(i));
 		ivec2 px = tile_origin + ivec2(h % params.tile, (h >> 8u) % params.tile);
-		if (i == 3) {
-			px = tile_origin + ivec2(params.tile / 2u); // The center, last.
+		if (i == (jitter ? 3 : 0)) {
+			px = tile_origin + ivec2(params.tile / 2u);
 		}
 		px = min(px, size - 1);
 		float depth = texelFetch(sampler2D(depth_buffer, nearest_sampler), px, 0).r;
@@ -147,7 +150,7 @@ void main() {
 		value = imageLoad(trace_image, texel);
 		// History: the probe of the previous frame closest to this probe's surface point, around where the point was
 		// on screen then. Accepted on the same plane and with a similar normal (else the probe starts over).
-		if (params.has_history != 0u) {
+		if ((params.has_history & 1u) != 0u) {
 			vec4 clip = scene_data_block.prev_data.projection_matrix * (ddgi_affine_to_mat4(scene_data_block.prev_data.view_matrix) * vec4(sp.position.xyz, 1.0));
 			if (clip.w > 1e-5) {
 				vec2 px = ((clip.xy / clip.w) * 0.5 + 0.5) * vec2(params.width, params.height);
@@ -180,8 +183,10 @@ void main() {
 				}
 				if (best_probe.x >= 0) {
 					vec4 history = imageLoad(history_image, best_probe * TEXELS + ivec2(local));
-					// Texels below the horizon of the probe have no ray (a = 0): only the traced ones blend.
-					value = value.a > 0.0 ? mix(value, history, params.hysteresis) : vec4(0.0);
+					// Texels below the horizon of the probe have no ray (a = 0): only the traced ones blend, and
+					// (L1b) only with a history that was traced - the previous probe's normal may differ, and a
+					// texel below its horizon holds no light: blended, it darkened the texels near the horizon.
+					value = value.a > 0.0 ? (history.a > 0.0 ? mix(value, history, params.hysteresis) : value) : vec4(0.0);
 				}
 			}
 		}

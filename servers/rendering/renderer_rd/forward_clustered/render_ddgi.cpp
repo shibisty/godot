@@ -32,6 +32,7 @@
 
 #include "render_raytracing.h"
 
+#include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_data_rd.h"
@@ -634,7 +635,10 @@ bool RenderDDGI::update_screen_probes(RendererSceneRenderRD *p_owner, const Rend
 	push.width = internal_size.width;
 	push.height = internal_size.height;
 	push.hysteresis = env_storage->environment_get_ddgi_screen_probes_hysteresis(env);
-	push.has_history = history ? 1 : 0;
+	// Mariner L1b: bit 0 - history; bit 1 - the probe on a random pixel of its tile each frame. Off by default: on
+	// surfaces smaller than a few tiles (small stones) a jittered probe lands on another surface every frame, its
+	// history is dropped and the probes that fit a pixel change - the light of a still view flickers.
+	push.has_history = (history ? 1 : 0) | (GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/screen_probes_jitter") ? 2 : 0);
 	const RID ubo = frame_trace.scene_uniform_buffer;
 
 	// Placement.
