@@ -83,7 +83,9 @@ private:
 	RID shader_rd[MODE_MAX];
 	RID pipeline[MODE_MAX];
 	RID dummy_buffer; // Commands of a non indirect multimesh.
-	RID bounds_buffer; // The screen rectangle of each object (see sw_raster.glsl), for the resolve draws.
+	// The screen rectangle of each object (see sw_raster.glsl), for the resolve draws: the viewport's own buffer (render()),
+	// as the visibility buffer - one shared by the viewports of a frame raced the next viewport's clear on the GPU.
+	RID bounds_buffer;
 	bool initialized = false;
 	LocalVector<Item> items;
 
@@ -109,6 +111,7 @@ public:
 		MAX_OBJECTS = 127, // Object ids 1-127: 7 bits of the instance flags of the resolve draw (8 in the payload).
 		MAX_PIXELS_SOFTWARE = 32, // V5-T3: instances at most this many pixels across (bounding sphere) are drawn here.
 		MAX_TEXELS_SHADOW = 32, // V5a: the same in the texels of an orthogonal shadow pass.
+		BOUNDS_BUFFER_SIZE = (MAX_OBJECTS + 1) * 4 * 4, // Bytes of a bounds buffer (render()).
 	};
 
 	void clear() { items.clear(); }
@@ -119,8 +122,9 @@ public:
 	bool has_items() const { return !items.is_empty(); }
 	RID get_bounds_buffer() const { return bounds_buffer; }
 	uint32_t get_item_count() const { return items.size(); }
-	// Rasterizes the items of the frame into the visibility buffer of the viewport (cleared first).
-	void render(const RenderDataRD *p_render_data);
+	// Rasterizes the items of the frame into the visibility buffer of the viewport (cleared first); p_bounds: the
+	// viewport's bounds buffer (BOUNDS_BUFFER_SIZE bytes; cleared first).
+	void render(const RenderDataRD *p_render_data, RID p_bounds);
 
 	// Mariner V5a: rasterizes p_items (their sources: the pass's software bucket) with p_view_projection (clip from
 	// world, depth corrected as the pass's) into the scratch (p_size: the pass's rectangle), then merges it into the

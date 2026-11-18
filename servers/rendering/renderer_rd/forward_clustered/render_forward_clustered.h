@@ -151,6 +151,7 @@ public:
 		};
 
 		RID render_sdfgi_uniform_set;
+		RID sw_raster_bounds; // Mariner V5-T2: this viewport's bounds buffer of the software raster.
 
 		void ensure_specular();
 		bool has_specular() const { return render_buffers->has_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SPECULAR); }

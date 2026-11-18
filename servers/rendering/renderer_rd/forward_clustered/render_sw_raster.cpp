@@ -59,7 +59,6 @@ void RenderSoftwareRaster::_initialize() {
 	zero.resize(32);
 	memset(zero.ptrw(), 0, zero.size());
 	dummy_buffer = RD::get_singleton()->storage_buffer_create(zero.size(), zero);
-	bounds_buffer = RD::get_singleton()->storage_buffer_create((MAX_OBJECTS + 1) * 4 * sizeof(uint32_t));
 }
 
 void RenderSoftwareRaster::set_item_source(uint32_t p_index, RID p_buffer, uint32_t p_offset, uint32_t p_capacity, RID p_commands, uint32_t p_command_word) {
@@ -210,8 +209,10 @@ bool RenderSoftwareRaster::_dispatch(RD::ComputeListID p_list, int p_mode, const
 	return true;
 }
 
-void RenderSoftwareRaster::render(const RenderDataRD *p_render_data) {
+void RenderSoftwareRaster::render(const RenderDataRD *p_render_data, RID p_bounds) {
 	ERR_FAIL_NULL(p_render_data);
+	ERR_FAIL_COND(p_bounds.is_null());
+	bounds_buffer = p_bounds;
 	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
 	ERR_FAIL_COND(rb.is_null());
 	_initialize();
@@ -235,7 +236,7 @@ void RenderSoftwareRaster::render(const RenderDataRD *p_render_data) {
 	rd->texture_clear(depth, Color(0, 0, 0, 0), 0, 1, 0, 1);
 	rd->texture_clear(payload, Color(0, 0, 0, 0), 0, 1, 0, 1);
 	rd->texture_clear(stats, Color(0, 0, 0, 0), 0, 1, 0, 1);
-	rd->buffer_clear(bounds_buffer, 0, (MAX_OBJECTS + 1) * 4 * sizeof(uint32_t));
+	rd->buffer_clear(bounds_buffer, 0, BOUNDS_BUFFER_SIZE);
 
 	const Projection camera = p_render_data->scene_data->get_cam_projection() * Projection(p_render_data->scene_data->cam_transform.affine_inverse());
 
@@ -343,7 +344,6 @@ void RenderSoftwareRaster::render_shadow(const LocalVector<Item> &p_items, const
 RenderSoftwareRaster::~RenderSoftwareRaster() {
 	if (initialized) {
 		RD::get_singleton()->free_rid(dummy_buffer);
-		RD::get_singleton()->free_rid(bounds_buffer);
 		shader.version_free(version);
 	}
 	if (shadow_scratch.is_valid()) {

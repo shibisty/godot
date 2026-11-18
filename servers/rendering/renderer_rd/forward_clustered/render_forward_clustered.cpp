@@ -182,6 +182,11 @@ void RenderForwardClustered::RenderBufferDataForwardClustered::free_data() {
 		dlss_context = nullptr;
 	}
 
+	if (sw_raster_bounds.is_valid()) {
+		RD::get_singleton()->free_rid(sw_raster_bounds);
+		sw_raster_bounds = RID();
+	}
+
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	if (mfx_temporal_context) {
 		memdelete(mfx_temporal_context);
@@ -1169,7 +1174,8 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 		bool sw_resolve = false; // Mariner V5-T2: only the resolve draws (the visibility buffer has all instances).
 		bool sw_twins = false; // Mariner V5-T3: the resolve draws are added (with the camera-culled hardware draws or alone).
 
-		if (sw_raster_collect && (inst->base_flags & INSTANCE_DATA_FLAG_MULTIMESH) && inst->data && mesh_storage->multimesh_get_software_raster(inst->data->base)) {
+		// Particles also have INSTANCE_DATA_FLAG_MULTIMESH; their base is not a multimesh.
+		if (sw_raster_collect && (inst->base_flags & INSTANCE_DATA_FLAG_MULTIMESH) && !(inst->base_flags & INSTANCE_DATA_FLAG_PARTICLES) && inst->data && mesh_storage->multimesh_get_software_raster(inst->data->base)) {
 			if (!sw_raster) {
 				sw_raster = memnew(RenderSoftwareRaster);
 			}
@@ -2359,7 +2365,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		}
 		// Mariner V5: the software rasterized multimeshes into the visibility buffer, before the passes that shade it.
 		RENDER_TIMESTAMP("Software Raster");
-		sw_raster->render(p_render_data);
+		if (rb_data->sw_raster_bounds.is_null()) {
+			rb_data->sw_raster_bounds = RD::get_singleton()->storage_buffer_create(RenderSoftwareRaster::BOUNDS_BUFFER_SIZE);
+		}
+		sw_raster->render(p_render_data, rb_data->sw_raster_bounds);
 		const StringName scope = SNAME("mariner_swraster");
 		if (rb->has_texture(scope, SNAME("attributes"))) {
 			sw_raster_frame_textures[0] = rb->get_texture(scope, SNAME("depth"));

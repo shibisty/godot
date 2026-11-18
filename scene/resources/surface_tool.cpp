@@ -33,6 +33,8 @@
 #include "core/object/class_db.h"
 #include "core/templates/a_hash_map.h"
 
+#include <cfloat>
+
 #define EQ_VERTEX_DIST 0.00001
 
 SurfaceTool::OptimizeVertexCacheFunc SurfaceTool::optimize_vertex_cache_func = nullptr;
