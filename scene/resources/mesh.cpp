@@ -1534,6 +1534,10 @@ Array ArrayMesh::_get_surfaces() const {
 		if (surface.uv_density > 0.0f) {
 			data["uv_density"] = surface.uv_density; // Mariner E17.
 		}
+		if (surface.cluster_data.size()) {
+			data["cluster_index_data"] = surface.cluster_index_data; // Mariner V1.
+			data["cluster_data"] = surface.cluster_data;
+		}
 		if (surface.index_count) {
 			data["index_data"] = surface.index_data;
 			data["index_count"] = surface.index_count;
@@ -1644,6 +1648,11 @@ void ArrayMesh::_set_surfaces(const Array &p_surfaces) {
 
 		if (d.has("blend_shapes")) {
 			surface.blend_shape_data = d["blend_shapes"];
+		}
+
+		if (d.has("cluster_data") && d.has("cluster_index_data")) { // Mariner V1.
+			surface.cluster_data = d["cluster_data"];
+			surface.cluster_index_data = d["cluster_index_data"];
 		}
 
 		// Mariner E17: meshes saved before the density was stored get it measured once, when texture streaming is on.
@@ -2064,6 +2073,37 @@ AABB ArrayMesh::get_custom_aabb() const {
 	return custom_aabb;
 }
 
+// Mariner V1: cluster LOD.
+Error ArrayMesh::build_cluster_lod() {
+	ERR_FAIL_COND_V(mesh.is_null(), ERR_UNCONFIGURED);
+	Array data = _get_surfaces();
+	bool any = false;
+	for (int i = 0; i < data.size(); i++) {
+		if (surface_get_primitive_type(i) != PRIMITIVE_TRIANGLES || !(surface_get_format(i) & ARRAY_FORMAT_INDEX)) {
+			continue;
+		}
+		Array arrays = surface_get_arrays(i);
+		Vector<uint8_t> index_data;
+		Vector<uint8_t> cluster_data;
+		Error err = SurfaceTool::build_cluster_lod(arrays[ARRAY_VERTEX], arrays[ARRAY_NORMAL], arrays[ARRAY_INDEX], index_data, cluster_data);
+		ERR_FAIL_COND_V(err != OK, err);
+		Dictionary d = data[i];
+		d["cluster_index_data"] = index_data;
+		d["cluster_data"] = cluster_data;
+		any = true;
+	}
+	if (any) {
+		_set_surfaces(data);
+		emit_changed();
+	}
+	return OK;
+}
+
+int ArrayMesh::surface_get_cluster_count(int p_surface) const {
+	ERR_FAIL_INDEX_V(p_surface, surfaces.size(), 0);
+	return RS::get_singleton()->mesh_get_surface(mesh, p_surface).cluster_data.size() / int(sizeof(SurfaceTool::ClusterLOD));
+}
+
 void ArrayMesh::regen_normal_maps() {
 	if (surfaces.is_empty()) {
 		return;
@@ -2338,6 +2378,8 @@ void ArrayMesh::_bind_methods() {
 #endif // PHYSICS_3D_DISABLED
 	ClassDB::bind_method(D_METHOD("create_outline", "margin"), &ArrayMesh::create_outline);
 	ClassDB::bind_method(D_METHOD("regen_normal_maps"), &ArrayMesh::regen_normal_maps);
+	ClassDB::bind_method(D_METHOD("build_cluster_lod"), &ArrayMesh::build_cluster_lod); // Mariner V1.
+	ClassDB::bind_method(D_METHOD("surface_get_cluster_count", "surf_idx"), &ArrayMesh::surface_get_cluster_count);
 	ClassDB::set_method_flags(get_class_static(), StringName("regen_normal_maps"), METHOD_FLAGS_DEFAULT | METHOD_FLAG_EDITOR);
 	ClassDB::bind_method(D_METHOD("lightmap_unwrap", "transform", "texel_size"), &ArrayMesh::lightmap_unwrap);
 	ClassDB::set_method_flags(get_class_static(), StringName("lightmap_unwrap"), METHOD_FLAGS_DEFAULT | METHOD_FLAG_EDITOR);

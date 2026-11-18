@@ -201,6 +201,7 @@ class RenderingDeviceDriverD3D12 : public RenderingDeviceDriver {
 	ID3D12CommandSignature *_get_dispatch_mesh_command_signature(uint32_t p_stride);
 
 	static void STDMETHODCALLTYPE _debug_message_func(D3D12_MESSAGE_CATEGORY p_category, D3D12_MESSAGE_SEVERITY p_severity, D3D12_MESSAGE_ID p_id, LPCSTR p_description, void *p_context);
+	void _print_stored_debug_messages(); // Mariner: the debug layer's messages into the log (validation layers).
 	void _set_object_name(ID3D12Object *p_object, String p_object_name);
 	Error _initialize_device();
 	Error _check_capabilities();

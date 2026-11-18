@@ -96,6 +96,8 @@ public:
 		s->blend_shape_data = p_surface.blend_shape_data;
 		s->uv_scale = p_surface.uv_scale;
 		s->uv_density = p_surface.uv_density;
+		s->cluster_index_data = p_surface.cluster_index_data; // Mariner V1.
+		s->cluster_data = p_surface.cluster_data;
 		s->material = p_surface.material;
 		m->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_MESH);
 	}

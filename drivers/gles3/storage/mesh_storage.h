@@ -117,6 +117,8 @@ struct Mesh {
 
 		Vector4 uv_scale;
 		float uv_density = 0.0f; // Mariner E17.
+		Vector<uint8_t> cluster_index_data; // Mariner V1: kept for saving only (no cluster rendering here).
+		Vector<uint8_t> cluster_data;
 
 		struct BlendShape {
 			GLuint vertex_buffer = 0;

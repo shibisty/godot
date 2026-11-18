@@ -390,6 +390,9 @@ public:
 	virtual RID get_rid() const override;
 
 	void regen_normal_maps();
+	// Mariner V1: builds the cluster LOD of every indexed triangle surface (see SurfaceTool::build_cluster_lod).
+	Error build_cluster_lod();
+	int surface_get_cluster_count(int p_surface) const;
 
 	Error lightmap_unwrap(const Transform3D &p_base_transform = Transform3D(), float p_texel_size = 0.05);
 	Error lightmap_unwrap_cached(const Transform3D &p_base_transform, float p_texel_size, const Vector<uint8_t> &p_src_cache, Vector<uint8_t> &r_dst_cache, bool p_generate_cache = true);

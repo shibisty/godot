@@ -39,6 +39,9 @@ SurfaceTool::OptimizeVertexCacheFunc SurfaceTool::optimize_vertex_cache_func = n
 SurfaceTool::OptimizeVertexFetchRemapFunc SurfaceTool::optimize_vertex_fetch_remap_func = nullptr;
 SurfaceTool::SimplifyFunc SurfaceTool::simplify_func = nullptr;
 SurfaceTool::SimplifyWithAttribFunc SurfaceTool::simplify_with_attrib_func = nullptr;
+SurfaceTool::BuildMeshletsFunc SurfaceTool::build_meshlets_func = nullptr; // Mariner V1.
+SurfaceTool::BuildMeshletsBoundFunc SurfaceTool::build_meshlets_bound_func = nullptr;
+SurfaceTool::PartitionClustersFunc SurfaceTool::partition_clusters_func = nullptr;
 SurfaceTool::SimplifyScaleFunc SurfaceTool::simplify_scale_func = nullptr;
 SurfaceTool::GenerateRemapFunc SurfaceTool::generate_remap_func = nullptr;
 SurfaceTool::RemapVertexFunc SurfaceTool::remap_vertex_func = nullptr;
@@ -1402,4 +1405,224 @@ SurfaceTool::SurfaceTool() {
 	for (int i = 0; i < RSE::ARRAY_CUSTOM_COUNT; i++) {
 		last_custom_format[i] = CUSTOM_MAX;
 	}
+}
+
+// Mariner V1: cluster LOD (the DAG of Nanite, Karis 2021; as meshoptimizer's clusterlod demo and Nyx, MIT, build it).
+// Level 0: the triangles split into clusters of up to 128. Then, while more than one cluster is left: the clusters
+// of the level are partitioned into groups of ~8 neighbours, each group's triangles merged and simplified to half
+// with the group's border locked (so neighbouring groups still fit), and split into clusters again. A group whose
+// triangles don't simplify (less than 15 %) stops there: its clusters are roots.
+
+namespace {
+
+struct BuildCluster {
+	LocalVector<uint32_t> indices;
+	Vector4 cull; // Center, radius.
+	Vector4 self; // LOD sphere.
+	float self_error = 0.0f;
+	Vector4 parent;
+	float parent_error = FLT_MAX;
+};
+
+Vector4 sphere_of_points(const Vector3 *p_positions, const LocalVector<uint32_t> &p_indices) {
+	// Ritter style: the AABB center, then the farthest point.
+	AABB box;
+	bool first = true;
+	for (uint32_t i : p_indices) {
+		if (first) {
+			box = AABB(p_positions[i], Vector3());
+			first = false;
+		} else {
+			box.expand_to(p_positions[i]);
+		}
+	}
+	const Vector3 c = box.get_center();
+	real_t r2 = 0;
+	for (uint32_t i : p_indices) {
+		r2 = MAX(r2, c.distance_squared_to(p_positions[i]));
+	}
+	return Vector4(c.x, c.y, c.z, Math::sqrt(r2));
+}
+
+// Smallest-ish sphere containing a set of spheres (each fully inside): the bounding box center of the spheres, then
+// the farthest sphere surface. Contains every input sphere, which keeps the DAG's LOD spheres nested.
+Vector4 sphere_of_spheres(const LocalVector<Vector4> &p_spheres) {
+	AABB box;
+	for (uint32_t i = 0; i < p_spheres.size(); i++) {
+		const Vector4 &s = p_spheres[i];
+		AABB b(Vector3(s.x, s.y, s.z) - Vector3(s.w, s.w, s.w), Vector3(s.w, s.w, s.w) * 2.0);
+		box = i == 0 ? b : box.merge(b);
+	}
+	const Vector3 c = box.get_center();
+	real_t r = 0;
+	for (const Vector4 &s : p_spheres) {
+		r = MAX(r, c.distance_to(Vector3(s.x, s.y, s.z)) + s.w);
+	}
+	return Vector4(c.x, c.y, c.z, r);
+}
+
+void clusterize(const LocalVector<uint32_t> &p_indices, const Vector3 *p_positions, uint32_t p_vertex_count, LocalVector<LocalVector<uint32_t>> &r_clusters) {
+	const size_t max_meshlets = SurfaceTool::build_meshlets_bound_func(p_indices.size(), SurfaceTool::CLUSTER_VERTICES, SurfaceTool::CLUSTER_TRIANGLES);
+	LocalVector<SurfaceTool::Meshlet> meshlets;
+	meshlets.resize(max_meshlets);
+	LocalVector<uint32_t> meshlet_vertices;
+	meshlet_vertices.resize(max_meshlets * SurfaceTool::CLUSTER_VERTICES);
+	LocalVector<uint8_t> meshlet_triangles;
+	meshlet_triangles.resize(max_meshlets * SurfaceTool::CLUSTER_TRIANGLES * 3);
+	const size_t count = SurfaceTool::build_meshlets_func(meshlets.ptr(), meshlet_vertices.ptr(), meshlet_triangles.ptr(), p_indices.ptr(), p_indices.size(), (const float *)p_positions, p_vertex_count, sizeof(Vector3), SurfaceTool::CLUSTER_VERTICES, SurfaceTool::CLUSTER_TRIANGLES, 0.0f);
+	for (size_t m = 0; m < count; m++) {
+		const SurfaceTool::Meshlet &ml = meshlets[m];
+		LocalVector<uint32_t> cluster;
+		cluster.resize(ml.triangle_count * 3);
+		for (uint32_t t = 0; t < ml.triangle_count * 3; t++) {
+			cluster[t] = meshlet_vertices[ml.vertex_offset + meshlet_triangles[ml.triangle_offset + t]];
+		}
+		r_clusters.push_back(std::move(cluster));
+	}
+}
+
+} // namespace
+
+Error SurfaceTool::build_cluster_lod(const Vector<Vector3> &p_positions, const Vector<Vector3> &p_normals, const Vector<int> &p_indices, Vector<uint8_t> &r_index_data, Vector<uint8_t> &r_cluster_data, int *r_levels) {
+	ERR_FAIL_COND_V_MSG(!build_meshlets_func || !build_meshlets_bound_func || !partition_clusters_func || !simplify_with_attrib_func, ERR_UNAVAILABLE, "Cluster LOD needs the meshoptimizer module.");
+	ERR_FAIL_COND_V(p_indices.size() < 3 || p_indices.size() % 3 != 0, ERR_INVALID_PARAMETER);
+	const uint32_t vertex_count = p_positions.size();
+	ERR_FAIL_COND_V(vertex_count == 0, ERR_INVALID_PARAMETER);
+	const Vector3 *positions = p_positions.ptr();
+	LocalVector<uint32_t> indices;
+	indices.resize(p_indices.size());
+	for (int i = 0; i < p_indices.size(); i++) {
+		ERR_FAIL_UNSIGNED_INDEX_V(uint32_t(p_indices[i]), vertex_count, ERR_INVALID_PARAMETER);
+		indices[i] = p_indices[i];
+	}
+	// Normals as the simplification's attributes (shading seams stay).
+	LocalVector<float> normals;
+	normals.resize(vertex_count * 3);
+	for (uint32_t v = 0; v < vertex_count; v++) {
+		const Vector3 n = int(v) < p_normals.size() ? p_normals[v] : Vector3();
+		normals[v * 3 + 0] = n.x;
+		normals[v * 3 + 1] = n.y;
+		normals[v * 3 + 2] = n.z;
+	}
+	const float normal_weights[3] = { 0.5f, 0.5f, 0.5f };
+
+	LocalVector<BuildCluster> clusters;
+	LocalVector<uint32_t> pending;
+	{
+		LocalVector<LocalVector<uint32_t>> level0;
+		clusterize(indices, positions, vertex_count, level0);
+		for (LocalVector<uint32_t> &c : level0) {
+			BuildCluster bc;
+			bc.cull = sphere_of_points(positions, c);
+			bc.self = bc.cull;
+			bc.indices = c;
+			pending.push_back(clusters.size());
+			clusters.push_back(std::move(bc));
+		}
+	}
+	int levels = 1;
+	LocalVector<uint32_t> merged;
+	LocalVector<uint32_t> simplified;
+	LocalVector<uint32_t> cluster_counts;
+	LocalVector<uint32_t> partition;
+	while (pending.size() > 1 && levels < 32) {
+		// Groups of neighbouring clusters.
+		merged.clear();
+		cluster_counts.clear();
+		for (uint32_t ci : pending) {
+			for (uint32_t i : clusters[ci].indices) {
+				merged.push_back(i);
+			}
+			cluster_counts.push_back(clusters[ci].indices.size());
+		}
+		partition.resize(pending.size());
+		const size_t group_count = partition_clusters_func(partition.ptr(), merged.ptr(), merged.size(), cluster_counts.ptr(), pending.size(), (const float *)positions, vertex_count, sizeof(Vector3), CLUSTER_GROUP_SIZE);
+		LocalVector<LocalVector<uint32_t>> groups;
+		groups.resize(group_count);
+		for (uint32_t k = 0; k < pending.size(); k++) {
+			groups[partition[k]].push_back(pending[k]);
+		}
+
+		LocalVector<uint32_t> next;
+		for (LocalVector<uint32_t> &group : groups) {
+			if (group.is_empty()) {
+				continue;
+			}
+			merged.clear();
+			LocalVector<Vector4> spheres;
+			float child_error = 0.0f;
+			for (uint32_t ci : group) {
+				for (uint32_t i : clusters[ci].indices) {
+					merged.push_back(i);
+				}
+				spheres.push_back(clusters[ci].self);
+				child_error = MAX(child_error, clusters[ci].self_error);
+			}
+			// Half the triangles; the group's border (open edges of the merged triangles) locked.
+			const size_t target = (merged.size() / 6) * 3;
+			simplified.resize(merged.size());
+			float error = 0.0f;
+			const size_t count = target >= 3 ? simplify_with_attrib_func(simplified.ptr(), merged.ptr(), merged.size(), (const float *)positions, vertex_count, sizeof(Vector3), normals.ptr(), sizeof(float) * 3, normal_weights, 3, nullptr, target, FLT_MAX, SIMPLIFY_LOCK_BORDER | SIMPLIFY_SPARSE | SIMPLIFY_ERROR_ABSOLUTE, &error) : merged.size();
+			if (count == 0 || count > merged.size() * 85 / 100) {
+				continue; // No real simplification: these clusters stay roots.
+			}
+			simplified.resize(count);
+			const Vector4 group_sphere = sphere_of_spheres(spheres);
+			const float group_error = child_error + error;
+			for (uint32_t ci : group) {
+				clusters[ci].parent = group_sphere;
+				clusters[ci].parent_error = group_error;
+			}
+			LocalVector<LocalVector<uint32_t>> parts;
+			clusterize(simplified, positions, vertex_count, parts);
+			for (LocalVector<uint32_t> &c : parts) {
+				BuildCluster bc;
+				bc.cull = sphere_of_points(positions, c);
+				bc.self = group_sphere;
+				bc.self_error = group_error;
+				bc.indices = c;
+				next.push_back(clusters.size());
+				clusters.push_back(std::move(bc));
+			}
+		}
+		if (next.is_empty()) {
+			break;
+		}
+		levels++;
+		pending = next;
+	}
+
+	// Output: indices of all clusters, then the records.
+	uint32_t total = 0;
+	for (const BuildCluster &c : clusters) {
+		total += c.indices.size();
+	}
+	r_index_data.resize(total * 4);
+	r_cluster_data.resize(clusters.size() * sizeof(ClusterLOD));
+	uint32_t *out_indices = (uint32_t *)r_index_data.ptrw();
+	ClusterLOD *out = (ClusterLOD *)r_cluster_data.ptrw();
+	uint32_t offset = 0;
+	for (uint32_t k = 0; k < clusters.size(); k++) {
+		const BuildCluster &c = clusters[k];
+		ClusterLOD &o = out[k];
+		const Vector4 parent = c.parent_error == FLT_MAX ? c.self : c.parent;
+		const Vector4 *src[3] = { &c.cull, &c.self, &parent };
+		float *dst[3] = { o.cull_sphere, o.self_sphere, o.parent_sphere };
+		for (int j = 0; j < 3; j++) {
+			dst[j][0] = src[j]->x;
+			dst[j][1] = src[j]->y;
+			dst[j][2] = src[j]->z;
+			dst[j][3] = src[j]->w;
+		}
+		o.self_error = c.self_error;
+		o.parent_error = c.parent_error;
+		o.index_offset = offset;
+		o.index_count = c.indices.size();
+		memcpy(out_indices + offset, c.indices.ptr(), c.indices.size() * 4);
+		offset += c.indices.size();
+	}
+	if (r_levels) {
+		*r_levels = levels;
+	}
+	return OK;
 }

@@ -358,6 +358,8 @@ void MeshStorage::mesh_add_surface(RID p_mesh, const RenderingServerTypes::Surfa
 
 	s->uv_scale = new_surface.uv_scale;
 	s->uv_density = new_surface.uv_density;
+	s->cluster_index_data = new_surface.cluster_index_data; // Mariner V1.
+	s->cluster_data = new_surface.cluster_data;
 
 	if (new_surface.skin_data.size() || mesh->blend_shape_count > 0) {
 		// Size must match the size of the vertex array.
@@ -677,6 +679,8 @@ RenderingServerTypes::SurfaceData MeshStorage::mesh_get_surface(RID p_mesh, int 
 
 	sd.uv_scale = s.uv_scale;
 	sd.uv_density = s.uv_density;
+	sd.cluster_index_data = s.cluster_index_data; // Mariner V1.
+	sd.cluster_data = s.cluster_data;
 
 	return sd;
 }

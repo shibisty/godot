@@ -110,6 +110,12 @@ struct SurfaceData {
 	// Mariner E17: world units covered by one unit of the first UV channel (0 when unknown). Texture streaming uses it to tell how many texels reach a screen pixel.
 	float uv_density = 0.0f;
 
+	// Mariner V1: cluster LOD (a DAG of 128 triangle clusters over all detail levels, Nanite style), empty without.
+	// cluster_index_data: uint32 indices into the vertex arrays, all clusters one after the other; cluster_data: one
+	// ClusterLOD (64 bytes, see SurfaceTool::ClusterLOD) per cluster.
+	Vector<uint8_t> cluster_index_data;
+	Vector<uint8_t> cluster_data;
+
 	RID material;
 };
 

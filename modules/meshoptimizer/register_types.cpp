@@ -47,6 +47,10 @@ void initialize_meshoptimizer_module(ModuleInitializationLevel p_level) {
 	SurfaceTool::generate_remap_func = meshopt_generateVertexRemap;
 	SurfaceTool::remap_vertex_func = meshopt_remapVertexBuffer;
 	SurfaceTool::remap_index_func = meshopt_remapIndexBuffer;
+	// Mariner V1: cluster LOD.
+	SurfaceTool::build_meshlets_func = reinterpret_cast<SurfaceTool::BuildMeshletsFunc>(static_cast<size_t (*)(meshopt_Meshlet *, unsigned int *, unsigned char *, const unsigned int *, size_t, const float *, size_t, size_t, size_t, size_t, float)>(meshopt_buildMeshlets));
+	SurfaceTool::build_meshlets_bound_func = meshopt_buildMeshletsBound;
+	SurfaceTool::partition_clusters_func = static_cast<size_t (*)(unsigned int *, const unsigned int *, size_t, const unsigned int *, size_t, const float *, size_t, size_t, size_t)>(meshopt_partitionClusters);
 }
 
 void uninitialize_meshoptimizer_module(ModuleInitializationLevel p_level) {
@@ -61,4 +65,7 @@ void uninitialize_meshoptimizer_module(ModuleInitializationLevel p_level) {
 	SurfaceTool::generate_remap_func = nullptr;
 	SurfaceTool::remap_vertex_func = nullptr;
 	SurfaceTool::remap_index_func = nullptr;
+	SurfaceTool::build_meshlets_func = nullptr;
+	SurfaceTool::build_meshlets_bound_func = nullptr;
+	SurfaceTool::partition_clusters_func = nullptr;
 }

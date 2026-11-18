@@ -49,6 +49,8 @@ occlusion_depth;
 #define SECTION_RANGE 2
 #define SECTION_LOD 4
 #define SECTION_LOD_ORTHOGONAL 8
+#define SECTION_SOFTWARE 16 // Mariner V5-T3: the last bucket is the software raster's (small on screen), info.z its limit.
+#define SECTION_SOFTWARE_ORTHOGONAL 32 // Mariner V5a: an orthogonal shadow pass - info.z limits the radius itself.
 
 #define MAX_LOD_BUCKETS 8
 #define MAX_LOD_SURFACES 8
@@ -63,7 +65,7 @@ struct SectionData {
 	vec4 camera; // xyz: the camera's position (world); w: LOD distance factor (lod_distance_multiplier / lod_bias).
 	vec4 range; // Mariner E25c: visibility range begin, end, begin margin, end margin (0: no limit).
 	vec4 lod_limits[2]; // Mariner E25c: upper end of each LOD bucket but the last (LOD distance / model scale).
-	uvec4 info; // Buckets, SECTION_* flags.
+	uvec4 info; // Buckets, SECTION_* flags, software raster limit (float bits: radius / distance).
 	uvec4 lod_counts[MAX_LOD_BUCKETS * MAX_LOD_SURFACES / 4]; // Index count per bucket and surface.
 };
 
@@ -277,7 +279,9 @@ void main() {
 			}
 		}
 
-		if ((flags & SECTION_LOD) != 0 && buckets > 1) {
+		// Mariner V5-T3: with SECTION_SOFTWARE the last bucket is the software raster's, the LOD buckets before it.
+		uint lod_buckets = (flags & SECTION_SOFTWARE) != 0 ? buckets - 1u : buckets;
+		if ((flags & SECTION_LOD) != 0 && lod_buckets > 1) {
 			// Mariner E25c: mesh LOD per instance, as the renderer picks it per instance (distance from the camera to the
 			// instance's world box, over its largest scale); the bucket's LODs are picked on the CPU.
 			float lod_distance = 1.0;
@@ -296,10 +300,21 @@ void main() {
 			mat3 basis = mat3(world_from_instance);
 			float model_scale = max(length(basis[0]), max(length(basis[1]), length(basis[2])));
 			float normalized = lod_distance * section_data.camera.w / max(model_scale, 1e-6);
-			for (uint b = 0; b < buckets - 1; b++) {
+			for (uint b = 0; b < lod_buckets - 1; b++) {
 				if (normalized >= section_data.lod_limits[b / 4][b % 4]) {
 					bucket = b + 1;
 				}
+			}
+		}
+		if ((flags & SECTION_SOFTWARE) != 0 && buckets > 1) {
+			// Mariner V5-T3: small on screen (bounding sphere radius over its distance from the camera below the limit;
+			// orthogonal: the radius) - the software raster draws it. V5a: in an orthogonal shadow pass, the radius.
+			vec3 sphere_center = (world_from_instance * vec4(params.sphere.xyz, 1.0)).xyz;
+			mat3 sphere_basis = mat3(world_from_instance);
+			float sphere_radius = params.sphere.w * max(length(sphere_basis[0]), max(length(sphere_basis[1]), length(sphere_basis[2])));
+			float sphere_distance = (flags & (SECTION_LOD_ORTHOGONAL | SECTION_SOFTWARE_ORTHOGONAL)) != 0 ? 1.0 : max(distance(section_data.camera.xyz, sphere_center) - sphere_radius, 1e-4);
+			if (sphere_radius / sphere_distance < uintBitsToFloat(section_data.info.z)) {
+				bucket = buckets - 1u;
 			}
 		}
 	} else {

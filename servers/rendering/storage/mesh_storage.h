@@ -33,6 +33,7 @@
 #include "core/math/color.h"
 #include "core/math/transform_2d.h"
 #include "core/templates/local_vector.h"
+#include "core/variant/dictionary.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/rendering_server_types.h"
 #include "servers/rendering/storage/utilities.h"
@@ -162,6 +163,11 @@ public:
 	// Mariner E25a.
 	virtual void multimesh_set_indirect_view_culling(RID p_multimesh, bool p_enable) {}
 	virtual bool multimesh_get_indirect_view_culling(RID p_multimesh) const { return false; }
+	// Mariner V5: drawn by the software rasterizer of the renderer (Forward+), not by the GPU's rasterizer.
+	virtual void multimesh_set_software_raster(RID p_multimesh, bool p_enable) {}
+	virtual bool multimesh_get_software_raster(RID p_multimesh) const { return false; }
+	// Mariner V4: the state of the cluster LOD streaming (empty without it).
+	virtual Dictionary cluster_streaming_get_stats() const { return Dictionary(); }
 	virtual RID multimesh_get_view_command_buffer_rd_rid(RID p_multimesh) const { return RID(); }
 	virtual RID multimesh_get_buffer_rd_rid(RID p_multimesh) const;
 	virtual Vector<float> multimesh_get_buffer(RID p_multimesh) const;

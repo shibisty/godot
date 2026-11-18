@@ -185,6 +185,10 @@ layout(constant_id = 2) const bool sc_emulate_point_size = false;
 
 layout(set = 0, binding = 2) uniform sampler shadow_sampler;
 
+// Mariner V5-T2: the instance is drawn as the visibility resolve of the software raster (one full screen triangle),
+// its object id in the payload in bits 17-23 (a multimesh: no particle trails).
+#define INSTANCE_FLAGS_VISIBILITY_RESOLVE (1 << 0)
+#define INSTANCE_FLAGS_VISIBILITY_RESOLVE_OBJECT_SHIFT 17
 #define INSTANCE_FLAGS_DYNAMIC (1 << 3)
 #define INSTANCE_FLAGS_NON_UNIFORM_SCALE (1 << 4)
 #define INSTANCE_FLAGS_USE_GI_BUFFERS (1 << 5)
@@ -523,6 +527,15 @@ layout(set = 1, binding = 59, std430) restrict readonly buffer DDGIScreenProbes 
 ddgi_screen_probes;
 layout(set = 1, binding = 60) uniform texture2D ddgi_screen_radiance; // Mariner L2: the probes' filtered radiance, 8x8 octahedral each.
 layout(set = 1, binding = 61) uniform texture2D ddgi_reflection_buffer; // Mariner L2: traced reflections (rgb), weight (a).
+
+// Mariner V5-T2: the visibility buffer of the software raster (render_mode visibility_resolve; see render_sw_raster.h).
+layout(set = 1, binding = 62) uniform utexture2D sw_raster_depth;
+layout(set = 1, binding = 63) uniform utexture2D sw_raster_payload;
+layout(set = 1, binding = 64) uniform utexture2D sw_raster_attributes;
+layout(set = 1, binding = 65, std430) restrict readonly buffer SwRasterBounds {
+	uint data[]; // Per object id: ~min x, ~min y, max x + 1, max y + 1 of its pixels (0: none).
+}
+sw_raster_bounds;
 
 // Mariner L2: a texel of a probe's 8x8 octahedral map, wrapped across the map's edges (a texel past an edge is the
 // interior texel it mirrors, as the octahedral border of the DDGI tiles), then bilinear between four of them.

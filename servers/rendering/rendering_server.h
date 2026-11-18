@@ -290,6 +290,9 @@ public:
 	virtual void multimesh_set_indirect_shadow_culling(RID p_multimesh, bool p_enable) = 0;
 	virtual RID multimesh_get_shadow_command_buffer_rd_rid(RID p_multimesh) const = 0;
 	virtual void multimesh_set_indirect_view_culling(RID p_multimesh, bool p_enable) = 0; // Mariner E25a.
+	virtual void multimesh_set_software_raster(RID p_multimesh, bool p_enable) = 0; // Mariner V5.
+	virtual bool multimesh_get_software_raster(RID p_multimesh) const = 0;
+	virtual Dictionary cluster_streaming_get_stats() const = 0; // Mariner V4.
 	virtual RID multimesh_get_view_command_buffer_rd_rid(RID p_multimesh) const = 0;
 	virtual RID multimesh_get_buffer_rd_rid(RID p_multimesh) const = 0;
 	virtual Vector<float> multimesh_get_buffer(RID p_multimesh) const = 0;

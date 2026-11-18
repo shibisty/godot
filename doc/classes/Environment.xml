@@ -191,15 +191,6 @@
 		<member name="ddgi_relocation" type="bool" setter="set_ddgi_relocation" getter="is_ddgi_relocation_enabled" default="true">
 			If [code]true[/code], probes move out of geometry: a probe inside a mesh moves through its closest back face, a probe very close to a surface (for example exactly in the plane of a wall or deck) moves away from it, by at most 0.45 probe spacings. Reduces light leaking and stripes along walls; turn off to see the raw grid.
 		</member>
-		<member name="ddgi_sea_color" type="Color" setter="set_ddgi_sea_color" getter="get_ddgi_sea_color" default="Color(0.02, 0.08, 0.1, 1)">
-			Color of the light scattered out of the water body of the [member ddgi_sea_enabled] sea plane (its diffuse reflectance, without the Fresnel reflection of the sky, which is added on top). Darker for deep open ocean, greener and brighter for shallow coastal water.
-		</member>
-		<member name="ddgi_sea_enabled" type="bool" setter="set_ddgi_sea_enabled" getter="is_ddgi_sea_enabled" default="false">
-			If [code]true[/code], the DDGI probe rays see an endless horizontal sea plane at [member ddgi_sea_level], wherever no geometry of the raytracing scene is closer. The ocean mesh, if it is in the raytracing scene at all, ends near the camera; without the plane, probe rays looking down past it see the sky, and hull sides, superstructures and coasts get bright sky light from below. With it they get the dim, Fresnel-weighted light of the sea, and the sun reflected off the water in shade of the hulls (ray traced). Probes below the plane (outside closed hulls) count as under water and move up with [member ddgi_relocation]. Mariner engine patch E12.
-		</member>
-		<member name="ddgi_sea_level" type="float" setter="set_ddgi_sea_level" getter="get_ddgi_sea_level" default="0.0">
-			Height of the [member ddgi_sea_enabled] sea plane (world Y, meters). Set it to the mean water level; waves are not modeled in the probe rays.
-		</member>
 		<member name="ddgi_screen_probes_enabled" type="bool" setter="set_ddgi_screen_probes_enabled" getter="is_ddgi_screen_probes_enabled" default="false">
 			If [code]true[/code], the diffuse indirect light of opaque surfaces comes from probes placed on the visible surfaces every frame (one per [member ddgi_screen_probes_size] pixels, Lumen style), each tracing a hemisphere of rays in the raytracing scene: hits that were on screen last frame take their lit color (bounces of every light, the sky and emission, at screen resolution), the others are shaded like the DDGI probe rays. The probes keep the contact light and shadow that the world grid misses: under a ship's flare, in ruts, between rocks and trees, on the leeward side of a dune. Where no screen probe fits a pixel (edges, transparent surfaces, newly visible surfaces) the DDGI grids apply as before. Needs [member ddgi_enabled], a single view and [member Viewport.raytracing_scene_enabled]; forces the depth prepass with normals. Mariner engine patch L1.
 		</member>
@@ -208,6 +199,15 @@
 		</member>
 		<member name="ddgi_screen_probes_size" type="int" setter="set_ddgi_screen_probes_size" getter="get_ddgi_screen_probes_size" default="16">
 			Screen pixels per probe: [code]16[/code] or [code]8[/code] (four times the rays, finer contact light). Each probe traces up to 32 rays per frame (the upper half of an 8x8 octahedral map).
+		</member>
+		<member name="ddgi_sea_color" type="Color" setter="set_ddgi_sea_color" getter="get_ddgi_sea_color" default="Color(0.02, 0.08, 0.1, 1)">
+			Color of the light scattered out of the water body of the [member ddgi_sea_enabled] sea plane (its diffuse reflectance, without the Fresnel reflection of the sky, which is added on top). Darker for deep open ocean, greener and brighter for shallow coastal water.
+		</member>
+		<member name="ddgi_sea_enabled" type="bool" setter="set_ddgi_sea_enabled" getter="is_ddgi_sea_enabled" default="false">
+			If [code]true[/code], the DDGI probe rays see an endless horizontal sea plane at [member ddgi_sea_level], wherever no geometry of the raytracing scene is closer. The ocean mesh, if it is in the raytracing scene at all, ends near the camera; without the plane, probe rays looking down past it see the sky, and hull sides, superstructures and coasts get bright sky light from below. With it they get the dim, Fresnel-weighted light of the sea, and the sun reflected off the water in shade of the hulls (ray traced). Probes below the plane (outside closed hulls) count as under water and move up with [member ddgi_relocation]. Mariner engine patch E12.
+		</member>
+		<member name="ddgi_sea_level" type="float" setter="set_ddgi_sea_level" getter="get_ddgi_sea_level" default="0.0">
+			Height of the [member ddgi_sea_enabled] sea plane (world Y, meters). Set it to the mean water level; waves are not modeled in the probe rays.
 		</member>
 		<member name="ddgi_sky_energy" type="float" setter="set_ddgi_sky_energy" getter="get_ddgi_sky_energy" default="1.0">
 			Multiplier of the DDGI sky channel: light that came from the ambient light / sky, with its bounces (and the sky reflection and the ambient light where no probe grid applies). Acts at once, the probes do not need to converge again: for a lightning flash or quick cloud changes set it every frame. Mariner engine patch E12.

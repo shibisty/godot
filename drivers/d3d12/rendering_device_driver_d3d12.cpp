@@ -542,6 +542,32 @@ void RenderingDeviceDriverD3D12::_debug_message_func(D3D12_MESSAGE_CATEGORY p_ca
 	}
 }
 
+// Mariner: with validation layers but without the info queue callback (CUSTOM_INFO_QUEUE_ENABLED), the debug layer's
+// messages go only to a debugger; print the stored ones (after each command list is closed) so that they reach the log.
+void RenderingDeviceDriverD3D12::_print_stored_debug_messages() {
+	if (!context_driver->use_validation_layers()) {
+		return;
+	}
+	ComPtr<ID3D12InfoQueue> info_queue;
+	if (!SUCCEEDED(device.As(&info_queue))) {
+		return;
+	}
+	const UINT64 count = info_queue->GetNumStoredMessages();
+	for (UINT64 i = 0; i < count; i++) {
+		SIZE_T length = 0;
+		if (!SUCCEEDED(info_queue->GetMessage(i, nullptr, &length)) || length == 0) {
+			continue;
+		}
+		LocalVector<uint8_t> storage;
+		storage.resize(length);
+		D3D12_MESSAGE *message = reinterpret_cast<D3D12_MESSAGE *>(storage.ptr());
+		if (SUCCEEDED(info_queue->GetMessage(i, message, &length))) {
+			_debug_message_func(message->Category, message->Severity, message->ID, message->pDescription, nullptr);
+		}
+	}
+	info_queue->ClearStoredMessages();
+}
+
 /******************/
 /**** RESOURCE ****/
 /******************/
@@ -2265,9 +2291,11 @@ static void _rd_stages_and_access_to_d3d12(BitField<RDD::PipelineStageBits> p_st
 			// No valid synchronization scope was defined and no access in particular is required.
 			r_access = D3D12_BARRIER_ACCESS_NO_ACCESS;
 		} else {
-			// Access is required but the synchronization scope wasn't compatible. We fall back to the global synchronization scope and access.
+			// Access is required but the synchronization scope wasn't compatible. We fall back to the global synchronization scope.
+			// Mariner: the access is kept - a global barrier from COMMON may only go to COMMON (the debug layer: message
+			// 1331, then the command list can't be closed), e.g. a buffer read as vertex input then by a compute shader
+			// while the graph's stages before it are compute only.
 			r_sync = D3D12_BARRIER_SYNC_ALL;
-			r_access = D3D12_BARRIER_ACCESS_COMMON;
 		}
 	}
 }
@@ -2786,6 +2814,9 @@ void RenderingDeviceDriverD3D12::command_buffer_end(CommandBufferID p_cmd_buffer
 	}
 
 	HRESULT res = cmd_buf_info->cmd_list->Close();
+#if !CUSTOM_INFO_QUEUE_ENABLED
+	_print_stored_debug_messages(); // Mariner.
+#endif
 
 	ERR_FAIL_COND_MSG(!SUCCEEDED(res), "Close failed with error " + vformat("0x%08ux", (uint64_t)res) + ".");
 	cmd_buf_info->graphics_pso = nullptr;

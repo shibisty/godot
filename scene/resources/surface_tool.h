@@ -115,6 +115,43 @@ public:
 	static RemapIndexFunc remap_index_func;
 	static void strip_mesh_arrays(PackedVector3Array &r_vertices, PackedInt32Array &r_indices);
 
+	// Mariner V1: cluster LOD. The functions come from the meshoptimizer module (null without it).
+	struct Meshlet { // meshopt_Meshlet.
+		uint32_t vertex_offset;
+		uint32_t triangle_offset;
+		uint32_t vertex_count;
+		uint32_t triangle_count;
+	};
+	typedef size_t (*BuildMeshletsFunc)(Meshlet *meshlets, unsigned int *meshlet_vertices, unsigned char *meshlet_triangles, const unsigned int *indices, size_t index_count, const float *vertex_positions, size_t vertex_count, size_t vertex_positions_stride, size_t max_vertices, size_t max_triangles, float cone_weight);
+	static BuildMeshletsFunc build_meshlets_func;
+	typedef size_t (*BuildMeshletsBoundFunc)(size_t index_count, size_t max_vertices, size_t max_triangles);
+	static BuildMeshletsBoundFunc build_meshlets_bound_func;
+	typedef size_t (*PartitionClustersFunc)(unsigned int *destination, const unsigned int *cluster_indices, size_t total_index_count, const unsigned int *cluster_index_counts, size_t cluster_count, const float *vertex_positions, size_t vertex_count, size_t vertex_positions_stride, size_t target_partition_size);
+	static PartitionClustersFunc partition_clusters_func;
+
+	// One cluster of the DAG (64 bytes, std430 as read by the GPU selection). A cluster is drawn when its own error,
+	// seen from the camera at its own LOD sphere, is small enough and its parent group's error, seen at the parent
+	// sphere, is not: the clusters of a group share the parent's values and the group's simplified clusters take them
+	// as their own, so any threshold cuts the DAG exactly once over the surface, without cracks between groups.
+	struct ClusterLOD {
+		float cull_sphere[4]; // Bounding sphere of the cluster's triangles (center, radius), mesh space.
+		float self_sphere[4]; // LOD sphere of this cluster's level (contains the spheres of the clusters it replaces).
+		float parent_sphere[4]; // LOD sphere of the group that replaces this cluster (the root's: its own).
+		float self_error; // Geometric error of this cluster (mesh units; 0 at full detail).
+		float parent_error; // Error of the replacing group (FLT_MAX: a root, nothing coarser).
+		uint32_t index_offset; // In the cluster index data (uint32 indices).
+		uint32_t index_count; // At most 3 * CLUSTER_TRIANGLES.
+	};
+	static_assert(sizeof(ClusterLOD) == 64);
+	enum {
+		CLUSTER_TRIANGLES = 128,
+		CLUSTER_VERTICES = 128,
+		CLUSTER_GROUP_SIZE = 8,
+	};
+	// Builds the cluster DAG of a triangle list: r_index_data (uint32 indices into p_positions), r_cluster_data
+	// (ClusterLOD records, the full detail level first). p_normals may be empty. r_levels: number of detail levels.
+	static Error build_cluster_lod(const Vector<Vector3> &p_positions, const Vector<Vector3> &p_normals, const Vector<int> &p_indices, Vector<uint8_t> &r_index_data, Vector<uint8_t> &r_cluster_data, int *r_levels = nullptr);
+
 private:
 	struct VertexHasher {
 		static _FORCE_INLINE_ uint32_t hash(const Vertex &p_vtx);

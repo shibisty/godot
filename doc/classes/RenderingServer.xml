@@ -1158,6 +1158,12 @@
 				Sets the texture [param repeat] mode to use for the canvas texture specified by the [param canvas_texture] RID.
 			</description>
 		</method>
+		<method name="cluster_streaming_get_stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the state of the cluster LOD streaming ([member ProjectSettings.rendering/mesh_lod/cluster_streaming/pool_size_mb]): [code]enabled[/code], [code]pool_indices[/code] and [code]pool_used_indices[/code] (the pool's size and use, in 32-bit indices), [code]pages[/code] and [code]resident_pages[/code] (groups of clusters), [code]pages_loaded[/code] and [code]pages_evicted[/code] (since the start), [code]requests[/code] (pages the GPU asked for in the last feedback) and [code]loads_failed[/code] (no room in the pool). Empty with renderers other than Forward+ and Mobile. Mariner engine patch V4.
+			</description>
+		</method>
 		<method name="compositor_create">
 			<return type="RID" />
 			<description>
@@ -1530,16 +1536,6 @@
 				Sets the multipliers of the DDGI sky and lights channels, see [member Environment.ddgi_sky_energy] and [member Environment.ddgi_lights_energy].
 			</description>
 		</method>
-		<method name="environment_set_ddgi_sea">
-			<return type="void" />
-			<param index="0" name="env" type="RID" />
-			<param index="1" name="enable" type="bool" />
-			<param index="2" name="level" type="float" />
-			<param index="3" name="color" type="Color" />
-			<description>
-				Sets the endless sea plane seen by the DDGI probe rays, see [member Environment.ddgi_sea_enabled], [member Environment.ddgi_sea_level] and [member Environment.ddgi_sea_color].
-			</description>
-		</method>
 		<method name="environment_set_ddgi_reflections">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />
@@ -1557,6 +1553,16 @@
 			<param index="3" name="hysteresis" type="float" />
 			<description>
 				Sets the screen space probes of the DDGI, see [member Environment.ddgi_screen_probes_enabled], [member Environment.ddgi_screen_probes_size] and [member Environment.ddgi_screen_probes_hysteresis].
+			</description>
+		</method>
+		<method name="environment_set_ddgi_sea">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="level" type="float" />
+			<param index="3" name="color" type="Color" />
+			<description>
+				Sets the endless sea plane seen by the DDGI probe rays, see [member Environment.ddgi_sea_enabled], [member Environment.ddgi_sea_level] and [member Environment.ddgi_sea_color].
 			</description>
 		</method>
 		<method name="environment_set_ddgi_update">
@@ -3206,6 +3212,13 @@
 				Returns the [RenderingDevice] buffer of the shadow pass draw commands of an indirect multimesh with [method multimesh_set_indirect_shadow_culling] enabled: one section per shadow pass of the last batch of shadow passes (the cascades of a directional light in order, ...), each with [code]5[/code] [code]uint32[/code] per surface; the second is the instance count drawn in that pass. For statistics; the buffer is replaced when it grows. Mariner engine patch E14b.
 			</description>
 		</method>
+		<method name="multimesh_get_software_raster" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="multimesh" type="RID" />
+			<description>
+				Returns [code]true[/code] if the multimesh is drawn by the software rasterizer, see [method multimesh_set_software_raster].
+			</description>
+		</method>
 		<method name="multimesh_get_view_command_buffer_rd_rid" qualifiers="const">
 			<return type="RID" />
 			<param index="0" name="multimesh" type="RID" />
@@ -3407,6 +3420,14 @@
 			<description>
 				Sets the physics interpolation quality for the [MultiMesh].
 				A value of [constant MULTIMESH_INTERP_QUALITY_FAST] gives fast but low quality interpolation, a value of [constant MULTIMESH_INTERP_QUALITY_HIGH] gives slower but higher quality interpolation.
+			</description>
+		</method>
+		<method name="multimesh_set_software_raster">
+			<return type="void" />
+			<param index="0" name="multimesh" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<description>
+				Draws the multimesh with the software rasterizer of Forward+, see [member MultiMesh.software_raster].
 			</description>
 		</method>
 		<method name="multimesh_set_visible_instances">

@@ -792,6 +792,30 @@ void main() {
 
 	instance_index_interp = instance_index;
 
+#ifdef USE_VISIBILITY_RESOLVE
+	// Mariner V5-T2: the visibility resolve of the software raster - the object's screen rectangle (from the raster, in
+	// whole 2x2 quads) as two triangles; the fragment stage takes the surface of each pixel from the visibility buffer
+	// (vertex() is not run here; it is in the other passes).
+#if !defined(MODE_RENDER_SDF)
+	if (bool(instances.data[instance_index].flags & INSTANCE_FLAGS_VISIBILITY_RESOLVE)) {
+		uint object = (instances.data[instance_index].flags >> INSTANCE_FLAGS_VISIBILITY_RESOLVE_OBJECT_SHIFT) & 0x7Fu;
+		uvec4 rect = uvec4(sw_raster_bounds.data[object * 4u], sw_raster_bounds.data[object * 4u + 1u], sw_raster_bounds.data[object * 4u + 2u], sw_raster_bounds.data[object * 4u + 3u]);
+		vertex_interp = vec3(0.0);
+		if (rect.z == 0u) {
+			gl_Position = vec4(2.0, 2.0, 0.5, 1.0); // Nothing drawn: degenerate.
+			return;
+		}
+		vec2 lo = vec2(uvec2(~rect.x, ~rect.y) & uvec2(~1u));
+		vec2 hi = vec2((rect.zw + 1u) & uvec2(~1u));
+		const uint corners[6] = uint[](0u, 1u, 2u, 2u, 1u, 3u);
+		uint c = corners[gl_VertexIndex % 6];
+		vec2 p = vec2((c & 1u) != 0u ? hi.x : lo.x, (c & 2u) != 0u ? hi.y : lo.y);
+		gl_Position = vec4(p / scene_data_block.data.viewport_size * 2.0 - 1.0, 0.5, 1.0);
+		return;
+	}
+#endif
+#endif
+
 #ifdef MOTION_VECTORS
 	// Previous vertex.
 	vec3 prev_vertex;
@@ -900,32 +924,77 @@ void main() {
 
 /* Varyings */
 
+#ifdef USE_VISIBILITY_RESOLVE
+layout(location = 0) in vec3 vertex_interp_vs;
+vec3 vertex_interp;
+#else
 layout(location = 0) in vec3 vertex_interp;
+#endif
 
 #ifdef NORMAL_USED
+#ifdef USE_VISIBILITY_RESOLVE
+layout(location = 1) in vec3 normal_interp_vs;
+vec3 normal_interp;
+#else
 layout(location = 1) in vec3 normal_interp;
+#endif
 #endif
 
 #if defined(COLOR_USED)
+#ifdef USE_VISIBILITY_RESOLVE
+layout(location = 2) in vec4 color_interp_vs;
+vec4 color_interp;
+#else
 layout(location = 2) in vec4 color_interp;
+#endif
 #endif
 
 #ifdef UV_USED
+#ifdef USE_VISIBILITY_RESOLVE
+layout(location = 3) in vec2 uv_interp_vs;
+vec2 uv_interp;
+#else
 layout(location = 3) in vec2 uv_interp;
+#endif
 #endif
 
 #if defined(UV2_USED) || defined(USE_LIGHTMAP)
+#ifdef USE_VISIBILITY_RESOLVE
+layout(location = 4) in vec2 uv2_interp_vs;
+vec2 uv2_interp;
+#else
 layout(location = 4) in vec2 uv2_interp;
+#endif
 #endif
 
 #ifdef TANGENT_USED
+#ifdef USE_VISIBILITY_RESOLVE
+layout(location = 5) in vec3 tangent_interp_vs;
+vec3 tangent_interp;
+#else
 layout(location = 5) in vec3 tangent_interp;
+#endif
+#ifdef USE_VISIBILITY_RESOLVE
+layout(location = 6) in vec3 binormal_interp_vs;
+vec3 binormal_interp;
+#else
 layout(location = 6) in vec3 binormal_interp;
+#endif
 #endif
 
 #ifdef MOTION_VECTORS
+#ifdef USE_VISIBILITY_RESOLVE
+layout(location = 7) in vec4 screen_position_vs;
+vec4 screen_position;
+#else
 layout(location = 7) in vec4 screen_position;
+#endif
+#ifdef USE_VISIBILITY_RESOLVE
+layout(location = 8) in vec4 prev_screen_position_vs;
+vec4 prev_screen_position;
+#else
 layout(location = 8) in vec4 prev_screen_position;
+#endif
 #endif
 
 #ifdef MODE_DUAL_PARABOLOID
@@ -934,7 +1003,14 @@ layout(location = 9) in float dp_clip;
 
 #endif
 
+#ifdef USE_VISIBILITY_RESOLVE
+layout(location = 10) in flat uint instance_index_interp_vs;
+uint instance_index_interp;
+bool vr_miss = false; // Mariner V5-T2 (visibility_resolve()).
+float vr_depth = 0.0;
+#else
 layout(location = 10) in flat uint instance_index_interp;
+#endif
 
 #ifdef USE_LIGHTMAP
 // w0, w1, w2, and w3 are the four cubic B-spline basis functions
@@ -1467,6 +1543,11 @@ void fragment_shader(in SceneData scene_data) {
 	{
 #CODE : FRAGMENT
 	}
+#ifdef USE_VISIBILITY_RESOLVE
+	if (vr_miss) {
+		discard; // Mariner V5-T2: a pixel of another surface (its quad's neighbours gave the derivatives).
+	}
+#endif
 
 	float roughness = roughness_highp;
 	float metallic = metallic_highp;
@@ -3560,7 +3641,132 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 }
 
+#ifdef USE_VISIBILITY_RESOLVE
+// Mariner V5-T2: render_mode visibility_resolve. Outside the resolve draw (shadows, probes, other renderers' passes)
+// the varyings are the vertex stage's; in it (INSTANCE_FLAGS_VISIBILITY_RESOLVE: the camera's depth prepass and opaque
+// pass of a MultiMesh.software_raster) each pixel of the full screen triangle takes the surface of the software
+// raster where it is this object's: the depth (gl_FragDepth), VERTEX from it, NORMAL / TANGENT / BINORMAL from the
+// mesh's (instance and node transforms), UV, COLOR (vertex colour times the instance colour). A 2x2 quad with none of
+// the object's pixels is discarded at once; the other pixels of a quad copy a covered neighbour (sound derivatives)
+// and are discarded after the fragment function.
+
+// One view (the resolve is not drawn in multiview passes): the members themselves, not the per-view macros.
+#undef projection_matrix
+#undef inv_projection_matrix
+void visibility_resolve() {
+	uint ii = instance_index_interp_vs;
+	instance_index_interp = ii;
+#if !defined(MODE_RENDER_SDF)
+	if (bool(instances.data[ii].flags & INSTANCE_FLAGS_VISIBILITY_RESOLVE)) {
+		uint object = (instances.data[ii].flags >> INSTANCE_FLAGS_VISIBILITY_RESOLVE_OBJECT_SHIFT) & 0x7Fu;
+		ivec2 size = textureSize(usampler2D(sw_raster_payload, SAMPLER_NEAREST_CLAMP), 0);
+		ivec2 px = ivec2(gl_FragCoord.xy);
+		ivec2 quad = px & ivec2(~1);
+		ivec2 src = ivec2(-1);
+		uvec4 payload = uvec4(0u);
+		for (int k = 0; k < 4; k++) {
+			ivec2 p = min(quad + ivec2(k & 1, k >> 1), size - 1);
+			uvec4 v = texelFetch(usampler2D(sw_raster_payload, SAMPLER_NEAREST_CLAMP), p, 0);
+			if ((v.x >> 24u) == object && (src.x < 0 || p == px)) {
+				src = p;
+				payload = v;
+			}
+		}
+		if (src.x < 0) {
+			discard;
+		}
+		vr_miss = src != px;
+		vr_depth = uintBitsToFloat(texelFetch(usampler2D(sw_raster_depth, SAMPLER_NEAREST_CLAMP), src, 0).r);
+		uvec4 attributes = texelFetch(usampler2D(sw_raster_attributes, SAMPLER_NEAREST_CLAMP), src, 0);
+
+		SceneData sd = scene_data_block.data;
+		vec2 screen_uv = (vec2(px) + 0.5) * sd.screen_pixel_size;
+		vec4 view = sd.inv_projection_matrix * vec4(screen_uv * 2.0 - 1.0, vr_depth, 1.0);
+		vertex_interp = view.xyz / view.w;
+
+		// The instance's transform after the multimesh layout of the vertex stage, then the node's.
+		uint stride = 3u + (sc_multimesh_has_color() ? 1u : 0u) + (sc_multimesh_has_custom_data() ? 1u : 0u) + (sc_multimesh_has_custom_data2() ? 1u : 0u);
+		uint offset = stride * ((payload.x & 0xFFFFFFu) + draw_call.multimesh_motion_vectors_current_offset);
+		mat4 instance_matrix = transpose(mat4(transforms.data[offset + 0u], transforms.data[offset + 1u], transforms.data[offset + 2u], vec4(0.0, 0.0, 0.0, 1.0)));
+		mat4 node_matrix = transpose(mat4(instances.data[ii].transform[0], instances.data[ii].transform[1], instances.data[ii].transform[2], vec4(0.0, 0.0, 0.0, 1.0)));
+		mat4 view_matrix = transpose(mat4(sd.view_matrix[0], sd.view_matrix[1], sd.view_matrix[2], vec4(0.0, 0.0, 0.0, 1.0)));
+		// As the vertex stage: the node's normal matrix, the instance's basis as it is.
+		mat3 node_normal = bool(instances.data[ii].flags & INSTANCE_FLAGS_NON_UNIFORM_SCALE) ? transpose(inverse(mat3(node_matrix))) : mat3(node_matrix);
+		mat3 normal_matrix = mat3(view_matrix) * node_normal * mat3(instance_matrix);
+		vec3 n = oct_to_vec3(unpackSnorm2x16(attributes.x));
+		vec3 tng = oct_to_vec3(unpackSnorm2x16(attributes.y));
+		vec3 bin = cross(n, tng) * ((payload.w & 1u) != 0u ? -1.0 : 1.0);
+#ifdef NORMAL_USED
+		normal_interp = normalize(normal_matrix * n);
+#endif
+#ifdef TANGENT_USED
+		tangent_interp = normalize(normal_matrix * tng);
+		binormal_interp = normalize(normal_matrix * bin);
+#endif
+#if defined(COLOR_USED)
+		color_interp = unpackUnorm4x8(payload.z);
+		if (sc_multimesh_has_color()) {
+			color_interp *= transforms.data[offset + 3u];
+		}
+#endif
+#ifdef UV_USED
+		uv_interp = vec2(uintBitsToFloat(attributes.z), uintBitsToFloat(attributes.w));
+		vec4 uv_scale = instances.data[ii].uv_scale;
+		if (uv_scale != vec4(0.0)) { // Compressed.
+			uv_interp = (uv_interp - 0.5) * uv_scale.xy;
+		}
+#endif
+#if defined(UV2_USED) || defined(USE_LIGHTMAP)
+		uv2_interp = vec2(0.0);
+#endif
+#ifdef MOTION_VECTORS
+		// Static instances: the camera's motion.
+		screen_position = sd.projection_matrix * vec4(vertex_interp, 1.0);
+		vec4 world = transpose(mat4(sd.inv_view_matrix[0], sd.inv_view_matrix[1], sd.inv_view_matrix[2], vec4(0.0, 0.0, 0.0, 1.0))) * vec4(vertex_interp, 1.0);
+		SceneData pd = scene_data_block.prev_data;
+		mat4 prev_view = transpose(mat4(pd.view_matrix[0], pd.view_matrix[1], pd.view_matrix[2], vec4(0.0, 0.0, 0.0, 1.0)));
+		prev_screen_position = pd.projection_matrix * (prev_view * world);
+#endif
+		return;
+	}
+#endif // !MODE_RENDER_SDF
+	vertex_interp = vertex_interp_vs;
+#ifdef NORMAL_USED
+	normal_interp = normal_interp_vs;
+#endif
+#if defined(COLOR_USED)
+	color_interp = color_interp_vs;
+#endif
+#ifdef UV_USED
+	uv_interp = uv_interp_vs;
+#endif
+#if defined(UV2_USED) || defined(USE_LIGHTMAP)
+	uv2_interp = uv2_interp_vs;
+#endif
+#ifdef TANGENT_USED
+	tangent_interp = tangent_interp_vs;
+	binormal_interp = binormal_interp_vs;
+#endif
+#ifdef MOTION_VECTORS
+	screen_position = screen_position_vs;
+	prev_screen_position = prev_screen_position_vs;
+#endif
+	vr_depth = gl_FragCoord.z;
+}
+#ifdef USE_MULTIVIEW
+#define projection_matrix scene_data.projection_matrix_view[ViewIndex]
+#define inv_projection_matrix scene_data.inv_projection_matrix_view[ViewIndex]
+#else
+#define projection_matrix scene_data.projection_matrix
+#define inv_projection_matrix scene_data.inv_projection_matrix
+#endif
+#endif // USE_VISIBILITY_RESOLVE
+
 void main() {
+#ifdef USE_VISIBILITY_RESOLVE
+	visibility_resolve();
+	gl_FragDepth = vr_depth; // DEPTH of the fragment function overrides it.
+#endif
 #ifdef UBERSHADER
 	bool front_facing = gl_FrontFacing;
 	if (uc_cull_mode() == POLYGON_CULL_BACK && !front_facing) {

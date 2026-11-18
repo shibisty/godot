@@ -2571,6 +2571,9 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("multimesh_set_indirect_shadow_culling", "multimesh", "enable"), &RenderingServer::multimesh_set_indirect_shadow_culling);
 	ClassDB::bind_method(D_METHOD("multimesh_get_shadow_command_buffer_rd_rid", "multimesh"), &RenderingServer::multimesh_get_shadow_command_buffer_rd_rid);
 	ClassDB::bind_method(D_METHOD("multimesh_set_indirect_view_culling", "multimesh", "enable"), &RenderingServer::multimesh_set_indirect_view_culling);
+	ClassDB::bind_method(D_METHOD("multimesh_set_software_raster", "multimesh", "enable"), &RenderingServer::multimesh_set_software_raster);
+	ClassDB::bind_method(D_METHOD("multimesh_get_software_raster", "multimesh"), &RenderingServer::multimesh_get_software_raster);
+	ClassDB::bind_method(D_METHOD("cluster_streaming_get_stats"), &RenderingServer::cluster_streaming_get_stats); // Mariner V4.
 	ClassDB::bind_method(D_METHOD("multimesh_get_view_command_buffer_rd_rid", "multimesh"), &RenderingServer::multimesh_get_view_command_buffer_rd_rid);
 	ClassDB::bind_method(D_METHOD("multimesh_get_buffer_rd_rid", "multimesh"), &RenderingServer::multimesh_get_buffer_rd_rid);
 	ClassDB::bind_method(D_METHOD("multimesh_get_buffer", "multimesh"), &RenderingServer::multimesh_get_buffer);
@@ -3968,6 +3971,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/occlusion_culling/occlusion_rays_per_thread", PROPERTY_HINT_RANGE, "1,2048,1,or_greater"), 512);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/camera/motion_blur/samples", PROPERTY_HINT_RANGE, "4,32,1"), 12); // Mariner E15a.
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/occlusion_culling/hiz_buffer_width", PROPERTY_HINT_RANGE, "32,1024,1"), 256); // Mariner E13.
+	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/mesh_lod/cluster_streaming/pool_size_mb", PROPERTY_HINT_RANGE, "0,2047,1,or_greater"), 0); // Mariner V4.
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/glow/upscale_mode", PROPERTY_HINT_ENUM, "Linear (Fast),Bicubic (Slow)"), 1);
 	GLOBAL_DEF("rendering/environment/glow/upscale_mode.mobile", 0);

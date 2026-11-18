@@ -6615,7 +6615,11 @@ bool EditorNode::immediate_confirmation_dialog(const String &p_text, const Strin
 }
 
 bool EditorNode::is_cmdline_mode() {
-	ERR_FAIL_NULL_V(singleton, false);
+	// Mariner: deferred calls (script docs, file system updates) can arrive after the editor node is gone,
+	// e.g. at the end of `--import`. Without an editor node there is no UI, so treat it as command-line mode.
+	if (!singleton) {
+		return true;
+	}
 	return singleton->cmdline_mode;
 }
 

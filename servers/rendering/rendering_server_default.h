@@ -470,6 +470,9 @@ public:
 	FUNC2(multimesh_set_indirect_shadow_culling, RID, bool)
 	FUNC1RC(RID, multimesh_get_shadow_command_buffer_rd_rid, RID)
 	FUNC2(multimesh_set_indirect_view_culling, RID, bool)
+	FUNC2(multimesh_set_software_raster, RID, bool) // Mariner V5.
+	FUNC1RC(bool, multimesh_get_software_raster, RID)
+	FUNC0RC(Dictionary, cluster_streaming_get_stats) // Mariner V4.
 	FUNC1RC(RID, multimesh_get_view_command_buffer_rd_rid, RID)
 	FUNC1RC(RID, multimesh_get_buffer_rd_rid, RID)
 	FUNC1RC(Vector<float>, multimesh_get_buffer, RID)

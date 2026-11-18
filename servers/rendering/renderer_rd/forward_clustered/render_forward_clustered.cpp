@@ -31,6 +31,8 @@
 #include "render_forward_clustered.h"
 
 #include "render_ddgi.h"
+#include "render_cluster_lod.h"
+#include "render_sw_raster.h"
 #include "render_pathtracer.h"
 #include "render_raytracing.h"
 #include "render_restir.h"
@@ -475,6 +477,10 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 				}
 			}
 
+			if (element_info.visibility_resolve) {
+				cull_variant = SceneShaderForwardClustered::ShaderData::CULL_VARIANT_DOUBLE_SIDED; // Mariner V5-T2.
+			}
+
 			if (cull_variant == SceneShaderForwardClustered::ShaderData::CULL_VARIANT_MAX) {
 				bool mirror = surf->owner->mirror;
 				if (p_params->reverse_cull) {
@@ -497,6 +503,9 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 			if (section) {
 				shadow_cull = p_params->cull_data->getptr(surf->owner->data->base);
 				shadow_cull_section = *section;
+				if (shadow_cull && element_info.visibility_resolve && !shadow_cull->software_bucket) {
+					shadow_cull = nullptr; // Mariner V5-T3: the software raster read the multimesh itself.
+				}
 				if (shadow_cull) {
 					xforms_uniform_set = shadow_cull->uniform_set;
 				}
@@ -633,8 +642,27 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 			}
 		}
 
+		// Mariner V2: the surface's cluster LOD cut of this scene render (the camera's list; shadow and other passes
+		// without a camera view: the whole cut).
+		const RenderClusterLOD::Cut *cluster_cut = nullptr;
+		// Mariner V3: a shadow pass's own cut (shared index buffer, one indirect command per request).
+		int cluster_request = -1;
+		if (p_params->cluster_requests && mesh_surface == surf->surface && !emulate_point_size) {
+			const uint32_t *found = p_params->cluster_requests->getptr(uint64_t(surf));
+			cluster_request = found ? int(*found) : -1;
+		}
+		if (cluster_request < 0 && !cluster_cuts.is_empty() && mesh_surface == surf->surface && !emulate_point_size) {
+			const void *const *found = cluster_cuts.getptr(uint64_t(surf));
+			cluster_cut = found ? static_cast<const RenderClusterLOD::Cut *>(*found) : nullptr;
+		}
+		constexpr bool cluster_camera_pass = p_pass_mode == PASS_MODE_COLOR || p_pass_mode == PASS_MODE_DEPTH || p_pass_mode == PASS_MODE_DEPTH_NORMAL_ROUGHNESS || p_pass_mode == PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI || p_pass_mode == PASS_MODE_DEPTH_NORMAL_ROUGHNESS_GBUFFER || p_pass_mode == PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI_GBUFFER;
+
 		if (pipeline_valid) {
-			if (!emulate_point_size) {
+			if (cluster_request >= 0) {
+				index_array_rd = cluster_lod->get_shadow_index_array();
+			} else if (cluster_cut) {
+				index_array_rd = cluster_camera_pass ? cluster_cut->camera_array : cluster_cut->shadow_array;
+			} else if (!emulate_point_size) {
 				index_array_rd = mesh_storage->mesh_surface_get_index_array(mesh_surface, element_info.lod_index);
 			} else {
 				index_array_rd = RID();
@@ -681,6 +709,10 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 			if (shadow_cull) {
 				// Mariner E14b: the section's instances (E25c: its first LOD bucket).
 				push_constant.multimesh_motion_vectors_current_offset = shadow_cull_section * shadow_cull->buckets * shadow_cull->capacity;
+				if (element_info.visibility_resolve) {
+					// Mariner V5-T3: the resolve reads the instances of the software bucket (as the software raster did).
+					push_constant.multimesh_motion_vectors_current_offset = (shadow_cull_section * shadow_cull->buckets + shadow_cull->buckets - 1) * shadow_cull->capacity;
+				}
 				push_constant.multimesh_motion_vectors_previous_offset = push_constant.multimesh_motion_vectors_current_offset;
 			}
 
@@ -703,14 +735,23 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 
 			bool indirect = bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_INDIRECT);
 
-			if (emulate_point_size) {
+			if (element_info.visibility_resolve) {
+				RD::get_singleton()->draw_list_draw(draw_list, false, 1, 6); // Mariner V5-T2: the object's screen rectangle.
+			} else if (cluster_request >= 0) {
+				// Mariner V3: the shadow pass's cut.
+				RD::get_singleton()->draw_list_draw_indirect(draw_list, true, cluster_lod->get_shadow_commands(), uint32_t(cluster_request) * RenderClusterLOD::SHADOW_REQUEST_STRIDE, 1, 0);
+			} else if (cluster_cut) {
+				// Mariner V2: the cut's indices, counted on the GPU.
+				RD::get_singleton()->draw_list_draw_indirect(draw_list, true, cluster_cut->commands, cluster_camera_pass ? RenderClusterLOD::CAMERA_COMMAND_OFFSET : RenderClusterLOD::SHADOW_COMMAND_OFFSET, 1, 0);
+			} else if (emulate_point_size) {
 				if (indirect) {
 					WARN_PRINT("Indirect draws are not supported when emulating point size.");
 				}
 				RD::get_singleton()->draw_list_draw(draw_list, false, mesh_storage->mesh_surface_get_vertex_count(mesh_surface), instance_count * 6);
 			} else if (indirect && shadow_cull && shadow_cull->buckets > 1 && surf->surface_index < RendererRD::MeshStorage::MultiMeshShadowCull::MAX_LOD_SURFACES) {
 				// Mariner E25c: one draw per LOD bucket of the section, with the bucket's LOD of this surface.
-				for (uint32_t b = 0; b < shadow_cull->buckets; b++) {
+				const uint32_t hardware_buckets = shadow_cull->software_bucket ? shadow_cull->buckets - 1 : shadow_cull->buckets; // Mariner V5-T3.
+				for (uint32_t b = 0; b < hardware_buckets; b++) {
 					const uint32_t region = shadow_cull_section * shadow_cull->buckets + b;
 					RID bucket_index_array = mesh_storage->mesh_surface_get_index_array(mesh_surface, shadow_cull->bucket_lods[b][surf->surface_index]);
 					if (bucket_index_array.is_valid() && prev_index_array_rd != bucket_index_array) {
@@ -1006,6 +1047,11 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 		}
 
 		instance_data.flags = inst->flags_cache;
+		// Mariner V5-T2: the resolve draw of a software rasterized multimesh (the camera list it was collected for).
+		const bool visibility_resolve = p_render_list == RENDER_LIST_OPAQUE && scene_state.sw_raster_pass != 0 && inst->sw_raster_pass == scene_state.sw_raster_pass && inst->sw_raster_object != 0 && (surface->flags & GeometryInstanceSurfaceDataCache::FLAG_VISIBILITY_RESOLVE_TWIN);
+		if (visibility_resolve) {
+			instance_data.flags = (instance_data.flags & ~(0x7Fu << 17)) | 1u | (inst->sw_raster_object << 17);
+		}
 		instance_data.gi_offset = inst->gi_offset_cache;
 		instance_data.layer_mask = inst->layer_mask;
 		instance_data.instance_uniforms_ofs = uint32_t(inst->shader_uniforms_offset);
@@ -1025,7 +1071,8 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 
 		scene_state.curr_gpu_ptr[p_render_list][i + p_offset] = instance_data;
 
-		const bool cant_repeat = instance_data.flags & INSTANCE_DATA_FLAG_MULTIMESH || inst->mesh_instance.is_valid();
+		// Mariner V2 / V3: a surface with a cluster DAG draws its own cut's indices.
+		const bool cant_repeat = instance_data.flags & INSTANCE_DATA_FLAG_MULTIMESH || inst->mesh_instance.is_valid() || (surface->surface && RendererRD::MeshStorage::get_singleton()->mesh_surface_has_cluster_lod(surface->surface));
 
 		if (prev_surface != nullptr && !cant_repeat && prev_surface->sort.sort_key1 == surface->sort.sort_key1 && prev_surface->sort.sort_key2 == surface->sort.sort_key2 && inst->mirror == prev_surface->owner->mirror && repeats < RenderElementInfo::MAX_REPEATS) {
 			//this element is the same as the previous one, count repeats to draw it using instancing
@@ -1045,6 +1092,7 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 		RenderElementInfo &element_info = rl->element_info[p_offset + i];
 
 		element_info.value = uint32_t(surface->sort.sort_key1 & 0xFFF);
+		element_info.visibility_resolve = visibility_resolve;
 
 		if (cant_repeat) {
 			prev_surface = nullptr;
@@ -1104,10 +1152,45 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 		}
 	}
 
+	// Mariner V5: the camera's color / prepass list leaves software rasterized multimeshes to the software rasterizer.
+	const bool sw_raster_collect = p_render_list == RENDER_LIST_OPAQUE && p_pass_mode == PASS_MODE_COLOR && p_render_data->render_buffers.is_valid() && p_render_data->reflection_probe.is_null() && p_render_data->scene_data->view_count == 1;
+	if (sw_raster_collect && !p_append && sw_raster) {
+		sw_raster->clear();
+	}
+	if (p_render_list == RENDER_LIST_OPAQUE && !p_append) {
+		// Mariner V5-T2: this fill's pass of the software raster (_fill_instance_data marks the resolve draws of it).
+		scene_state.sw_raster_pass = sw_raster_collect ? ++scene_state.sw_raster_pass_counter : 0;
+	}
+
 	//fill list
 
 	for (int i = 0; i < (int)p_render_data->instances->size(); i++) {
 		GeometryInstanceForwardClustered *inst = static_cast<GeometryInstanceForwardClustered *>((*p_render_data->instances)[i]);
+		bool sw_resolve = false; // Mariner V5-T2: only the resolve draws (the visibility buffer has all instances).
+		bool sw_twins = false; // Mariner V5-T3: the resolve draws are added (with the camera-culled hardware draws or alone).
+
+		if (sw_raster_collect && (inst->base_flags & INSTANCE_DATA_FLAG_MULTIMESH) && inst->data && mesh_storage->multimesh_get_software_raster(inst->data->base)) {
+			if (!sw_raster) {
+				sw_raster = memnew(RenderSoftwareRaster);
+			}
+			const uint32_t object = sw_raster->add(inst->data->base, inst->transform, uint64_t(inst));
+			inst->sw_raster_object = object;
+			inst->sw_raster_pass = scene_state.sw_raster_pass;
+			// Mariner V5-T3: an indirect multimesh culled for the camera splits by size on screen - the small instances
+			// go to the software raster (the cull's last bucket), the others are drawn by the GPU as usual.
+			const bool split = object != 0 && multimesh_shadow_cull && (inst->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_INDIRECT) && mesh_storage->multimesh_get_indirect_view_culling(inst->data->base);
+			if (!split) {
+				bool resolve = false;
+				for (GeometryInstanceSurfaceDataCache *s = inst->surface_caches; s && object; s = s->next) {
+					resolve = resolve || (s->flags & GeometryInstanceSurfaceDataCache::FLAG_VISIBILITY_RESOLVE_TWIN);
+				}
+				if (!resolve) {
+					continue; // Only in the visibility buffer (V5-T1).
+				}
+				sw_resolve = true;
+			}
+			sw_twins = object != 0; // Its visibility_resolve surface: the object's rectangle in the prepass and opaque pass.
+		}
 
 		Vector3 center = inst->transform.origin;
 		if (p_render_data->scene_data->cam_orthogonal) {
@@ -1257,6 +1340,19 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 		while (surf) {
 			surf->sort.uses_forward_gi = 0;
 			surf->sort.uses_lightmap = 0;
+
+			if ((surf->flags & GeometryInstanceSurfaceDataCache::FLAG_VISIBILITY_RESOLVE_TWIN) || sw_resolve) {
+				// Mariner V5-T2 / T3: the software raster draws the mesh's first surface; the resolve twin of its
+				// visibility_resolve material shades it. The twins are drawn only so; sw_resolve: nothing else is.
+				if (sw_twins && (surf->flags & GeometryInstanceSurfaceDataCache::FLAG_VISIBILITY_RESOLVE_TWIN) && surf->surface_index == 0) {
+					surf->sort.lod_index = 0;
+					surf->color_pass_inclusion_mask = 0;
+					rl->add_element(surf);
+				}
+				surf->sort.depth_layer = depth_layer;
+				surf = surf->next;
+				continue;
+			}
 
 			// LOD
 			// Mariner E25c: not for indirect multimeshes - their draw commands hold the full mesh's index count, a LOD's
@@ -1820,6 +1916,8 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 
 	//prepare shadow rendering
 	if (render_shadows) {
+		// Mariner V5a: the software raster's shadow counters of this render go to the viewport's buffers (tests, tools).
+		sw_shadow_rb = p_render_data->reflection_probe.is_null() ? p_render_data->render_buffers : Ref<RenderSceneBuffersRD>();
 		_render_shadow_begin();
 
 		//render directional shadows
@@ -1841,6 +1939,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 
 	if (render_shadows) {
 		_render_shadow_end();
+		sw_shadow_rb.unref();
 	}
 
 	if (translucent_shadow_job.valid) {
@@ -2231,6 +2330,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	scene_state.surface_decals_drawn = false;
 	_fill_render_list(RENDER_LIST_OPAQUE, p_render_data, PASS_MODE_COLOR, using_sdfgi, using_sdfgi || using_voxelgi, using_motion_pass);
 	_view_cull_indirect_multimeshes(p_render_data); // Mariner E25a.
+	_select_cluster_lods(p_render_data); // Mariner V2.
 	render_list[RENDER_LIST_OPAQUE].sort_by_key();
 	render_list[RENDER_LIST_MOTION].sort_by_key();
 	render_list[RENDER_LIST_ALPHA].sort_by_reverse_depth_and_priority();
@@ -2241,6 +2341,33 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	_fill_instance_data(RENDER_LIST_OPAQUE, render_info);
 	_fill_instance_data(RENDER_LIST_MOTION, render_info);
 	_fill_instance_data(RENDER_LIST_ALPHA, render_info);
+	for (RID &t : sw_raster_frame_textures) {
+		t = RID();
+	}
+	sw_raster_frame_bounds = RID();
+	if (sw_raster && sw_raster->has_items() && rb_data.is_valid() && !is_reflection_probe) {
+		// Mariner V5-T3: a multimesh culled for the camera gives the raster only its software bucket (small on screen,
+		// inside the view, not occluded).
+		for (uint32_t i = 0; i < sw_raster->get_item_count(); i++) {
+			const RenderSoftwareRaster::Item &item = sw_raster->get_item(i);
+			const uint32_t *section = scene_state.view_cull_sections.getptr(item.owner);
+			const RendererRD::MeshStorage::MultiMeshShadowCull *cull = section ? scene_state.view_cull_data.getptr(item.multimesh) : nullptr;
+			if (cull && cull->software_bucket) {
+				const uint32_t region = *section * cull->buckets + cull->buckets - 1;
+				sw_raster->set_item_source(i, cull->data_buffer, region * cull->capacity, cull->capacity, cull->command_buffer, region * cull->surface_count * RendererRD::MeshStorage::INDIRECT_MULTIMESH_COMMAND_STRIDE);
+			}
+		}
+		// Mariner V5: the software rasterized multimeshes into the visibility buffer, before the passes that shade it.
+		RENDER_TIMESTAMP("Software Raster");
+		sw_raster->render(p_render_data);
+		const StringName scope = SNAME("mariner_swraster");
+		if (rb->has_texture(scope, SNAME("attributes"))) {
+			sw_raster_frame_textures[0] = rb->get_texture(scope, SNAME("depth"));
+			sw_raster_frame_textures[1] = rb->get_texture(scope, SNAME("payload"));
+			sw_raster_frame_textures[2] = rb->get_texture(scope, SNAME("attributes"));
+			sw_raster_frame_bounds = sw_raster->get_bounds_buffer();
+		}
+	}
 	if (scene_state.used_surface_decals) {
 		_fill_instance_data(RENDER_LIST_SURFACE_DECAL, render_info); // Mariner GB2.
 		needs_gbuffer = true; // The decals read the surface class and albedo.
@@ -2569,6 +2696,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		}
 	}
 	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sdfgi || using_voxelgi, normal_roughness_views, rb_data.is_valid() && rb_data->has_voxelgi() ? rb_data->get_voxelgi() : RID());
+
 
 	if (using_contact_shadows) {
 		RENDER_TIMESTAMP("Contact Shadows");
@@ -3940,6 +4068,16 @@ void RenderForwardClustered::_view_cull_indirect_multimeshes(const RenderDataRD 
 
 	const Vector3 camera_position = scene_data->main_cam_transform.origin;
 	const float lod_threshold = scene_data->screen_mesh_lod_threshold;
+	// Mariner V5-T3: instances whose bounding sphere is at most SW_RASTER_MAX_PIXELS across go to the software raster:
+	// radius / distance below this (the camera's vertical scale over the viewport's pixel height).
+	float sw_raster_limit = 0.0f;
+	if (p_render_data->render_buffers.is_valid() && p_render_data->reflection_probe.is_null()) {
+		const float height = float(p_render_data->render_buffers->get_internal_size().y);
+		const float scale = scene_data->cam_projection.columns[1][1];
+		if (height > 0.0f && Math::abs(scale) > 0.0f) {
+			sw_raster_limit = float(RenderSoftwareRaster::MAX_PIXELS_SOFTWARE) / (Math::abs(scale) * height);
+		}
+	}
 	for (const KeyValue<RID, LocalVector<const GeometryInstanceForwardClustered *>> &E : users) {
 		const RID multimesh = E.key;
 		const uint32_t section_count = E.value.size();
@@ -3947,7 +4085,14 @@ void RenderForwardClustered::_view_cull_indirect_multimeshes(const RenderDataRD 
 		RendererRD::MeshStorage::MultiMeshShadowCull lods;
 		LocalVector<float> limits;
 		uint32_t lod_counts[Cull::MAX_LOD_BUCKETS * Cull::MAX_LOD_SURFACES] = {};
-		const uint32_t buckets = _indirect_lod_buckets(multimesh, lod_threshold, limits, lods, lod_counts);
+		uint32_t lod_buckets = _indirect_lod_buckets(multimesh, lod_threshold, limits, lods, lod_counts);
+		// Mariner V5-T3: a software rasterized multimesh gets one more bucket, the instances small on screen.
+		const bool software = sw_raster_limit > 0.0f && mesh_storage->multimesh_get_software_raster(multimesh);
+		if (software && lod_buckets >= Cull::MAX_LOD_BUCKETS) {
+			limits.resize(Cull::MAX_LOD_BUCKETS - 2);
+			lod_buckets = Cull::MAX_LOD_BUCKETS - 1;
+		}
+		const uint32_t buckets = lod_buckets + (software ? 1 : 0);
 
 		RendererRD::MeshStorage::MultiMeshShadowCull cull;
 		if (!mesh_storage->multimesh_view_cull_prepare(multimesh, section_count * buckets, scene_shader.default_shader_rd, TRANSFORMS_UNIFORM_SET, cull)) {
@@ -3957,6 +4102,7 @@ void RenderForwardClustered::_view_cull_indirect_multimeshes(const RenderDataRD 
 			continue;
 		}
 		cull.buckets = buckets;
+		cull.software_bucket = software;
 		memcpy(cull.bucket_lods, lods.bucket_lods, sizeof(cull.bucket_lods));
 
 		LocalVector<Cull::Pass> passes;
@@ -3987,8 +4133,12 @@ void RenderForwardClustered::_view_cull_indirect_multimeshes(const RenderDataRD 
 			}
 			data.info[0] = 1;
 			data.info[1] = flags;
-			if (buckets > 1) {
+			if (lod_buckets > 1) {
 				_set_section_lods(data, limits, lod_counts, scene_data->cam_orthogonal);
+			}
+			if (software) {
+				memcpy(&data.info[2], &sw_raster_limit, sizeof(float));
+				data.info[1] |= uint32_t(Cull::SECTION_SOFTWARE) | (scene_data->cam_orthogonal ? uint32_t(Cull::SECTION_LOD_ORTHOGONAL) : 0u);
 			}
 			pass.has_data = data.info[1] != 0;
 		}
@@ -3996,6 +4146,61 @@ void RenderForwardClustered::_view_cull_indirect_multimeshes(const RenderDataRD 
 		scene_state.view_cull_data[multimesh] = cull;
 	}
 	rd->draw_command_end_label();
+}
+
+// Mariner V2: the cluster LOD cuts of the surfaces with a cluster DAG (ArrayMesh.build_cluster_lod()) that this scene
+// render's camera sees: single meshes (not multimeshes, particles or skinned meshes), one view. A shadow pass draws the
+// cut of a surface the camera sees; surfaces only in shadows are drawn whole.
+void RenderForwardClustered::_select_cluster_lods(const RenderDataRD *p_render_data) {
+	cluster_cuts.clear();
+	RendererRD::ClusterStreaming *streaming = RendererRD::MeshStorage::get_singleton()->get_cluster_streaming();
+	if (streaming && streaming->is_enabled()) {
+		streaming->update(RSG::rasterizer->get_frame_number()); // Mariner V4: loads and evictions, once a frame.
+	}
+	if (p_render_data->scene_data->view_count != 1) {
+		if (cluster_lod) {
+			cluster_lod->begin(p_render_data);
+		}
+		return;
+	}
+	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+	bool begun = false;
+	if (cluster_lod) {
+		cluster_lod->begin(p_render_data); // The render's stats (shadow passes add theirs).
+		begun = true;
+	}
+	for (uint32_t i = 0; i < p_render_data->instances->size(); i++) {
+		GeometryInstanceForwardClustered *inst = static_cast<GeometryInstanceForwardClustered *>((*p_render_data->instances)[i]);
+		if ((inst->base_flags & (INSTANCE_DATA_FLAG_MULTIMESH | INSTANCE_DATA_FLAG_PARTICLES)) || inst->mesh_instance.is_valid()) {
+			continue;
+		}
+		for (GeometryInstanceSurfaceDataCache *surf = inst->surface_caches; surf; surf = surf->next) {
+			RID clusters;
+			RID indices;
+			uint32_t cluster_count = 0;
+			uint32_t index_count = 0;
+			if (!surf->surface || !mesh_storage->mesh_surface_get_cluster_lod(surf->surface, clusters, indices, cluster_count, index_count)) {
+				continue;
+			}
+			if (!cluster_lod) {
+				cluster_lod = memnew(RenderClusterLOD);
+			}
+			if (!begun) {
+				cluster_lod->begin(p_render_data);
+				begun = true;
+			}
+			const RenderClusterLOD::Cut *cut = cluster_lod->select(uint64_t(surf), surf->surface, inst->transform, p_render_data);
+			if (cut) {
+				cluster_cuts[uint64_t(surf)] = cut;
+			}
+		}
+	}
+	if (begun) {
+		cluster_lod->end();
+	}
+	if (cluster_lod) {
+		cluster_lod->purge(RSG::rasterizer->get_frame_number());
+	}
 }
 
 void RenderForwardClustered::_apply_view_cull(RenderListParameters &r_params) const {
@@ -4089,10 +4294,47 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 
 		shadow_pass.uniform_buffer_index = uniform_buffer_index;
 
+		if (!p_use_dp) {
+			// Mariner V3: the pass's own cut of each single mesh with a cluster DAG (error below a texel of this pass).
+			RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+			for (uint32_t i = 0; i < p_instances.size(); i++) {
+				GeometryInstanceForwardClustered *inst = static_cast<GeometryInstanceForwardClustered *>(p_instances[i]);
+				if ((inst->base_flags & (INSTANCE_DATA_FLAG_MULTIMESH | INSTANCE_DATA_FLAG_PARTICLES)) || inst->mesh_instance.is_valid()) {
+					continue;
+				}
+				for (GeometryInstanceSurfaceDataCache *surf = inst->surface_caches; surf; surf = surf->next) {
+					RID clusters;
+					RID indices;
+					uint32_t cluster_count = 0;
+					uint32_t index_count = 0;
+					if (!surf->surface || surf->surface_shadow != surf->surface || !mesh_storage->mesh_surface_get_cluster_lod(surf->surface, clusters, indices, cluster_count, index_count)) {
+						continue;
+					}
+					if (!cluster_lod) {
+						cluster_lod = memnew(RenderClusterLOD);
+					}
+					const int request = cluster_lod->shadow_add(surf->surface, inst->transform, p_projection, p_transform, viewport_size);
+					if (request >= 0) {
+						shadow_pass.cluster_requests[uint64_t(surf)] = uint32_t(request);
+					}
+				}
+			}
+		}
+
 		if (!p_use_dp && multimesh_shadow_cull) {
 			// Mariner E14b: indirect multimeshes that cull their instances per shadow pass get a section of this pass.
 			RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
 			const Projection light_clip = p_projection * Projection(p_transform.affine_inverse());
+			// Mariner V5a: in an orthogonal pass (cascades, the object map) the instances of a software rasterized
+			// multimesh at most MAX_TEXELS_SHADOW texels across (bounding sphere) go to the software raster.
+			float software_limit = 0.0f;
+			if (p_projection.is_orthogonal() && viewport_size.height > 0 && Math::abs(p_projection.columns[1][1]) > 0.0f) {
+				software_limit = float(RenderSoftwareRaster::MAX_TEXELS_SHADOW) / (Math::abs(p_projection.columns[1][1]) * float(viewport_size.height));
+				Projection correction;
+				correction.set_depth_correction(scene_data.flip_y);
+				shadow_pass.software_view_projection = correction * light_clip;
+				shadow_pass.software_pancake = p_use_pancake;
+			}
 			for (uint32_t i = 0; i < p_instances.size(); i++) {
 				const GeometryInstanceForwardClustered *inst = static_cast<const GeometryInstanceForwardClustered *>(p_instances[i]);
 				if (!(inst->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_INDIRECT) || !mesh_storage->multimesh_get_indirect_shadow_culling(inst->data->base)) {
@@ -4118,6 +4360,12 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 						pass.data.range[k] = inst->gpu_visibility_range[k];
 					}
 					pass.data.info[1] = RendererRD::MultiMeshShadowCull::SECTION_RANGE;
+				}
+				if (software_limit > 0.0f && mesh_storage->multimesh_get_software_raster(multimesh)) {
+					pass.has_data = true;
+					pass.data.info[1] |= uint32_t(RendererRD::MultiMeshShadowCull::SECTION_SOFTWARE) | uint32_t(RendererRD::MultiMeshShadowCull::SECTION_SOFTWARE_ORTHOGONAL);
+					memcpy(&pass.data.info[2], &software_limit, sizeof(float));
+					shadow_pass.software_items.push_back({ multimesh, inst->transform, pass.section });
 				}
 				passes.push_back(pass);
 				shadow_pass.shadow_cull_sections[uint64_t(inst)] = pass.section;
@@ -4151,15 +4399,26 @@ void RenderForwardClustered::_render_shadow_process() {
 			RendererRD::MeshStorage::MultiMeshShadowCull lods;
 			LocalVector<float> limits;
 			uint32_t lod_counts[RendererRD::MultiMeshShadowCull::MAX_LOD_BUCKETS * RendererRD::MultiMeshShadowCull::MAX_LOD_SURFACES] = {};
-			const uint32_t buckets = _indirect_lod_buckets(E.key, scene_state.shadow_cull_lod_threshold, limits, lods, lod_counts);
+			uint32_t lod_buckets = _indirect_lod_buckets(E.key, scene_state.shadow_cull_lod_threshold, limits, lods, lod_counts);
+			// Mariner V5a: a software rasterized multimesh in an orthogonal pass gets one more bucket (small in texels).
+			bool software = false;
+			for (const RendererRD::MultiMeshShadowCull::Pass &pass : E.value) {
+				software = software || (pass.data.info[1] & RendererRD::MultiMeshShadowCull::SECTION_SOFTWARE);
+			}
+			if (software && lod_buckets >= RendererRD::MultiMeshShadowCull::MAX_LOD_BUCKETS) {
+				limits.resize(RendererRD::MultiMeshShadowCull::MAX_LOD_BUCKETS - 2);
+				lod_buckets = RendererRD::MultiMeshShadowCull::MAX_LOD_BUCKETS - 1;
+			}
+			const uint32_t buckets = lod_buckets + (software ? 1 : 0);
 			RendererRD::MeshStorage::MultiMeshShadowCull cull;
 			if (!mesh_storage->multimesh_shadow_cull_prepare(E.key, E.value.size() * buckets, scene_shader.default_shader_rd, TRANSFORMS_UNIFORM_SET, cull)) {
 				continue; // Not drawn from sections (whole, as before).
 			}
 			cull.buckets = buckets;
+			cull.software_bucket = software;
 			memcpy(cull.bucket_lods, lods.bucket_lods, sizeof(cull.bucket_lods));
 			for (RendererRD::MultiMeshShadowCull::Pass &pass : E.value) {
-				if (buckets > 1) {
+				if (lod_buckets > 1) {
 					_set_section_lods(pass.data, limits, lod_counts, false);
 					pass.has_data = true;
 				}
@@ -4170,6 +4429,10 @@ void RenderForwardClustered::_render_shadow_process() {
 			multimesh_shadow_cull->process(cull, E.value.ptr(), E.value.size(), E.value.size());
 			scene_state.shadow_cull_data[E.key] = cull;
 		}
+	}
+
+	if (cluster_lod) {
+		cluster_lod->shadow_process(); // Mariner V3: the shadow passes' cluster cuts.
 	}
 
 	RD::get_singleton()->draw_command_end_label();
@@ -4192,10 +4455,62 @@ void RenderForwardClustered::_render_shadow_end() {
 			render_list_parameters.cull_sections = &shadow_pass.shadow_cull_sections;
 			render_list_parameters.cull_data = &scene_state.shadow_cull_data;
 		}
+		if (!shadow_pass.cluster_requests.is_empty() && cluster_lod) {
+			render_list_parameters.cluster_requests = &shadow_pass.cluster_requests; // Mariner V3.
+		}
 		_render_list_with_draw_list(&render_list_parameters, shadow_pass.framebuffer, shadow_pass.clear_depth ? RD::DRAW_CLEAR_DEPTH : RD::DRAW_DEFAULT_ALL, Vector<Color>(), 0.0f, 0, shadow_pass.rect);
+		if (!shadow_pass.software_items.is_empty()) {
+			_render_shadow_software(shadow_pass); // Mariner V5a.
+		}
 	}
 
 	RD::get_singleton()->draw_command_end_label();
+}
+
+// Mariner V5a: the software bucket of each software rasterized multimesh culled for an orthogonal shadow pass, merged
+// into the pass's rectangle after its hardware draws.
+void RenderForwardClustered::_render_shadow_software(const SceneState::ShadowPass &p_shadow_pass) {
+	LocalVector<RenderSoftwareRaster::Item> items;
+	for (const SceneState::ShadowPass::SoftwareItem &software_item : p_shadow_pass.software_items) {
+		const RendererRD::MeshStorage::MultiMeshShadowCull *cull = scene_state.shadow_cull_data.getptr(software_item.multimesh);
+		if (!cull || !cull->software_bucket) {
+			continue; // Drawn whole by the GPU.
+		}
+		const uint32_t region = software_item.section * cull->buckets + cull->buckets - 1;
+		RenderSoftwareRaster::Item item;
+		item.multimesh = software_item.multimesh;
+		item.transform = software_item.transform;
+		item.source_buffer = cull->data_buffer;
+		item.source_offset = region * cull->capacity;
+		item.source_capacity = cull->capacity;
+		// The instance count from the cull's counters (the raster reads word command_word + 1), not from the draw
+		// commands: those were read as indirect arguments by the pass's draws, a storage read after that is a barrier
+		// Direct3D 12 rejects (the render graph's global barrier with mismatched stages).
+		item.command_buffer = cull->counter_buffer;
+		item.command_word = region - 1;
+		items.push_back(item);
+	}
+	if (items.is_empty()) {
+		return;
+	}
+	if (!sw_raster) {
+		sw_raster = memnew(RenderSoftwareRaster);
+	}
+	Rect2i rect = p_shadow_pass.rect;
+	if (rect.size == Size2i()) {
+		rect.size = RD::get_singleton()->framebuffer_get_size(p_shadow_pass.framebuffer);
+	}
+	RID stats;
+	if (sw_shadow_rb.is_valid()) {
+		const StringName scope = SNAME("mariner_swraster");
+		const StringName name = SNAME("shadow_stats");
+		if (!sw_shadow_rb->has_texture(scope, name)) {
+			sw_shadow_rb->create_texture(scope, name, RD::DATA_FORMAT_R32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT, RD::TEXTURE_SAMPLES_1, Size2i(4, 1));
+			RD::get_singleton()->texture_clear(sw_shadow_rb->get_texture(scope, name), Color(0, 0, 0, 0), 0, 1, 0, 1); // First use.
+		}
+		stats = sw_shadow_rb->get_texture(scope, name);
+	}
+	sw_raster->render_shadow(items, p_shadow_pass.software_view_projection, p_shadow_pass.software_pancake, p_shadow_pass.framebuffer, rect, stats, get_scene_pass());
 }
 
 void RenderForwardClustered::_render_particle_collider_heightfield(RID p_fb, const Transform3D &p_cam_transform, const Projection &p_cam_projection, const PagedArray<RenderGeometryInstance *> &p_instances) {
@@ -5308,6 +5623,36 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		d1.append_id(decals ? rb->get_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SURFACE_DECALS_1) : black);
 		uniforms.push_back(d1);
 	}
+	{
+		// Mariner V5-T2: the visibility buffer of the software raster for the resolve draws of the opaque list.
+		if (sw_raster_empty_textures[0].is_null()) {
+			const RD::DataFormat formats[3] = { RD::DATA_FORMAT_R32_UINT, RD::DATA_FORMAT_R32G32B32A32_UINT, RD::DATA_FORMAT_R32G32B32A32_UINT };
+			for (int k = 0; k < 3; k++) {
+				RD::TextureFormat tf;
+				tf.format = formats[k];
+				tf.width = 1;
+				tf.height = 1;
+				tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_UPDATE_BIT;
+				Vector<uint8_t> zero;
+				zero.resize_initialized(k == 0 ? 4 : 16);
+				sw_raster_empty_textures[k] = RD::get_singleton()->texture_create(tf, RD::TextureView(), { zero });
+			}
+			sw_raster_empty_bounds = RD::get_singleton()->storage_buffer_create(16);
+		}
+		const bool use = p_render_list == RENDER_LIST_OPAQUE && sw_raster_frame_textures[2].is_valid();
+		for (int k = 0; k < 3; k++) {
+			RD::Uniform u;
+			u.binding = 62 + k;
+			u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+			u.append_id(use ? sw_raster_frame_textures[k] : sw_raster_empty_textures[k]);
+			uniforms.push_back(u);
+		}
+		RD::Uniform b;
+		b.binding = 65;
+		b.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		b.append_id(use && sw_raster_frame_bounds.is_valid() ? sw_raster_frame_bounds : sw_raster_empty_bounds);
+		uniforms.push_back(b);
+	}
 
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.default_shader_rd, RENDER_PASS_UNIFORM_SET, uniforms);
 }
@@ -5762,6 +6107,10 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material(Geomet
 		flags |= GeometryInstanceSurfaceDataCache::FLAG_USES_PARTICLE_TRAILS;
 	}
 
+	if (p_material->shader_data->uses_visibility_resolve) {
+		flags |= GeometryInstanceSurfaceDataCache::FLAG_VISIBILITY_RESOLVE; // Mariner V5-T2.
+	}
+
 	if (p_material->shader_data->is_animated()) {
 		flags |= GeometryInstanceSurfaceDataCache::FLAG_USES_MOTION_VECTOR;
 	}
@@ -5816,6 +6165,36 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material(Geomet
 
 	sdcache->next = ginstance->surface_caches;
 	ginstance->surface_caches = sdcache;
+
+	if (p_material->shader_data->uses_visibility_resolve) {
+		// Mariner V5-T3: the resolve draw's own copy of the surface (its own render list element and sort key), so that
+		// a software rasterized multimesh split by size draws both the hardware instances and the resolve.
+		GeometryInstanceSurfaceDataCache *twin = geometry_instance_surface_alloc.alloc();
+		twin->flags = GeometryInstanceSurfaceDataCache::FLAG_VISIBILITY_RESOLVE | GeometryInstanceSurfaceDataCache::FLAG_VISIBILITY_RESOLVE_TWIN;
+		twin->shader = p_material->shader_data;
+		twin->material = p_material;
+		twin->material_uniform_set = p_material->uniform_set;
+		twin->surface = sdcache->surface;
+		twin->primitive = sdcache->primitive;
+		twin->surface_index = p_surface;
+		twin->shader_shadow = p_material->shader_data;
+		twin->material_uniform_set_shadow = p_material->uniform_set;
+		twin->surface_shadow = sdcache->surface;
+		twin->owner = ginstance;
+		twin->next = ginstance->surface_caches;
+		ginstance->surface_caches = twin;
+		twin->sort.sort_key1 = 0;
+		twin->sort.sort_key2 = 0;
+		twin->sort.surface_index = (p_surface & 0x7F) | 0x80;
+		twin->sort.material_id_hi = (p_material_id & 0xFF000000) >> 24;
+		twin->sort.material_id_lo = (p_material_id & 0x00FFFFFF);
+		twin->sort.shader_id = p_shader_id;
+		twin->sort.geometry_id = p_mesh.get_local_index();
+		twin->sort.priority = p_material->priority;
+		twin->sort.uses_forward_gi = ginstance->can_sdfgi;
+		twin->sort.uses_projector = ginstance->using_projectors;
+		twin->sort.uses_softshadow = ginstance->using_softshadows;
+	}
 
 	//sortkey
 
@@ -6872,6 +7251,22 @@ RenderForwardClustered::~RenderForwardClustered() {
 	if (ddgi) {
 		memdelete(ddgi); // Mariner E12.
 		ddgi = nullptr;
+	}
+	for (RID &t : sw_raster_empty_textures) {
+		if (t.is_valid()) {
+			RD::get_singleton()->free_rid(t); // Mariner V5-T2.
+		}
+	}
+	if (sw_raster_empty_bounds.is_valid()) {
+		RD::get_singleton()->free_rid(sw_raster_empty_bounds);
+	}
+	if (cluster_lod) {
+		memdelete(cluster_lod); // Mariner V2.
+		cluster_lod = nullptr;
+	}
+	if (sw_raster) {
+		memdelete(sw_raster); // Mariner V5.
+		sw_raster = nullptr;
 	}
 	if (raytracing) {
 		memdelete(raytracing);

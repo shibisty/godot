@@ -42,6 +42,9 @@
 		<member name="enabled" type="bool" setter="set_enabled" getter="get_enabled">
 			If [code]true[/code] this rendering effect is applied to any viewport it is added to.
 		</member>
+		<member name="needs_gbuffer" type="bool" setter="set_needs_gbuffer" getter="get_needs_gbuffer">
+			If [code]true[/code], the depth prepass also writes the thin G-buffer (Forward+ only): an [code]RGBA8[/code] texture with the albedo in [code]rgb[/code] (square root: decode with [code]rgb * rgb[/code]) and the surface class divided by 255 in [code]a[/code] ([member BaseMaterial3D.surface_class], [code]SURFACE_CLASS[/code] in shaders). Read it with [code]render_scene_buffers.get_texture("forward_clustered", "gbuffer")[/code] in callbacks after the prepass. With 3D MSAA it is resolved by averaging, so the class is exact only away from edges between surfaces. Its shader variants are compiled the first time an effect asks for it.
+		</member>
 		<member name="needs_motion_vectors" type="bool" setter="set_needs_motion_vectors" getter="get_needs_motion_vectors">
 			If [code]true[/code] this triggers motion vectors being calculated during the opaque render state.
 			[b]Note:[/b] In [method _render_callback], to access the motion vector buffer use:
@@ -68,9 +71,6 @@
 				return vec4(normalize(p_normal_roughness.xyz * 2.0 - 1.0) * 0.5 + 0.5, roughness);
 			}
 			[/codeblock]
-		</member>
-		<member name="needs_gbuffer" type="bool" setter="set_needs_gbuffer" getter="get_needs_gbuffer" default="false">
-			If [code]true[/code], the depth prepass also writes the thin G-buffer (Forward+ only): an [code]RGBA8[/code] texture with the albedo in [code]rgb[/code] (square root: decode with [code]rgb * rgb[/code]) and the surface class divided by 255 in [code]a[/code] ([member BaseMaterial3D.surface_class], [code]SURFACE_CLASS[/code] in shaders). Read it with [code]render_scene_buffers.get_texture("forward_clustered", "gbuffer")[/code] in callbacks after the prepass. With 3D MSAA it is resolved by averaging, so the class is exact only away from edges between surfaces. Its shader variants are compiled the first time an effect asks for it.
 		</member>
 		<member name="needs_separate_specular" type="bool" setter="set_needs_separate_specular" getter="get_needs_separate_specular">
 			If [code]true[/code] this triggers specular data being rendered to a separate buffer and combined after effects have been applied, only applicable for the Forward+ renderer.

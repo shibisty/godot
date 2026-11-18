@@ -281,6 +281,7 @@ public:
 		bool uses_transparent_motion_vectors = false; // Mariner: render_mode motion_vectors_transparent
 		bool uses_opaque_late = false; // Mariner: render_mode opaque_late
 		bool uses_surface_decal = false; // Mariner GB2: render_mode surface_decal - drawn only into the decal buffer
+		bool uses_visibility_resolve = false; // Mariner V5-T2: render_mode visibility_resolve - shades the software raster
 		bool uses_alpha_fringe = false; // Mariner AA: render_mode alpha_fringe (also drawn in the transparent pass: the edge)
 		bool uses_vertex_time = false;
 		bool uses_fragment_time = false;
@@ -319,7 +320,7 @@ public:
 
 		_FORCE_INLINE_ bool uses_shared_shadow_material() const {
 			bool backface_culling = cull_mode == RSE::CULL_MODE_BACK;
-			return !uses_particle_trails && !writes_modelview_or_projection && !writes_depth && !uses_vertex && !uses_position && !uses_discard && !uses_depth_prepass_alpha && !uses_alpha_clip && !uses_alpha_antialiasing && backface_culling && !uses_point_size && !uses_world_coordinates && !wireframe && !uses_z_clip_scale && !stencil_enabled;
+			return !uses_visibility_resolve && !uses_particle_trails && !writes_modelview_or_projection && !writes_depth && !uses_vertex && !uses_position && !uses_discard && !uses_depth_prepass_alpha && !uses_alpha_clip && !uses_alpha_antialiasing && backface_culling && !uses_point_size && !uses_world_coordinates && !wireframe && !uses_z_clip_scale && !stencil_enabled;
 		}
 
 		virtual void set_code(const String &p_Code);

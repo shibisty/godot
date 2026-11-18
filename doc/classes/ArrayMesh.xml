@@ -76,6 +76,13 @@
 				[b]Note:[/b] When using indices, it is recommended to only use points, lines, or triangles.
 			</description>
 		</method>
+		<method name="build_cluster_lod">
+			<return type="int" enum="Error" />
+			<description>
+				Builds the cluster LOD of every indexed triangle surface: the triangles split into clusters of up to 128, then level by level groups of about 8 neighbouring clusters merged, simplified to half with their border locked and split again, until one cluster (or a group that doesn't simplify) is left. Every cluster keeps its own geometric error and LOD sphere and those of the group that replaces it, so any screen space error threshold selects one crack-free set of clusters over the surface (Nanite style). The clusters share the surface's vertices; the data is saved with the mesh. Needs the meshoptimizer module.
+				In Forward+, a single mesh (a [MeshInstance3D], not a multimesh, particles or a skinned mesh) with this data is drawn by its cut: each frame the GPU picks, per surface, the clusters whose error on screen is at most [member Viewport.mesh_lod_threshold] pixels (0: full detail) and draws them with the surface's material; clusters outside the camera's view are skipped. Each shadow pass draws its own cut, clusters with an error below a texel of its shadow map (directional: in world units, the same wherever the camera is, so cached cascades stay valid) inside the pass's view, also of meshes the camera does not see (dual paraboloid omni shadows draw the camera's cut, or the whole mesh). Mariner engine patches V1, V2, V3.
+			</description>
+		</method>
 		<method name="clear_blend_shapes">
 			<return type="void" />
 			<description>
@@ -142,6 +149,13 @@
 			<param index="0" name="surf_idx" type="int" />
 			<description>
 				Returns the length in vertices of the vertex array in the requested surface (see [method add_surface_from_arrays]).
+			</description>
+		</method>
+		<method name="surface_get_cluster_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="surf_idx" type="int" />
+			<description>
+				Number of clusters of the surface's cluster LOD over all detail levels (0 without, see [method build_cluster_lod]).
 			</description>
 		</method>
 		<method name="surface_get_format" qualifiers="const">

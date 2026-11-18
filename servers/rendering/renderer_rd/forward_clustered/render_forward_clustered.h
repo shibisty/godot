@@ -73,6 +73,8 @@ namespace RendererSceneRenderImplementation {
 
 class RenderPathtracer;
 class RenderDDGI;
+class RenderSoftwareRaster; // Mariner V5.
+class RenderClusterLOD; // Mariner V2.
 class RenderRestirDI;
 class RenderRaytracing;
 
@@ -284,6 +286,8 @@ private:
 		// their buffers.
 		const HashMap<uint64_t, uint32_t> *cull_sections = nullptr;
 		const HashMap<RID, RendererRD::MeshStorage::MultiMeshShadowCull> *cull_data = nullptr;
+		// Mariner V3: this shadow pass's cluster LOD requests by surface cache (their cuts in the shared index buffer).
+		const HashMap<uint64_t, uint32_t> *cluster_requests = nullptr;
 
 		RenderListParameters(GeometryInstanceSurfaceDataCache **p_elements, RenderElementInfo *p_element_info, int p_element_count, bool p_reverse_cull, PassMode p_pass_mode, uint32_t p_color_pass_flags, bool p_no_gi, bool p_use_directional_soft_shadows, RID p_render_pass_uniform_set, bool p_force_wireframe = false, const Vector2 &p_uv_offset = Vector2(), float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, uint32_t p_view_count = 1, uint32_t p_element_offset = 0, SceneShaderForwardClustered::ShaderSpecialization p_base_specialization = {}) {
 			elements = p_elements;
@@ -472,6 +476,9 @@ private:
 		bool used_opaque_stencil = false;
 		bool opaque_late_allowed = false; // Mariner: this render can split opaque_late surfaces into their own pass
 		bool used_opaque_late = false; // Mariner: RENDER_LIST_OPAQUE_LATE is not empty
+		// Mariner V5-T2: the camera pass of the software raster that RENDER_LIST_OPAQUE was last filled for (0: none).
+		uint64_t sw_raster_pass = 0;
+		uint64_t sw_raster_pass_counter = 0;
 		bool opaque_late_blocked = false; // Mariner: opaque_late surfaces went to the regular opaque list
 		bool surface_decals_allowed = false; // Mariner GB2: this render draws surface decals (one view, not a probe)
 		bool used_surface_decals = false; // Mariner GB2: RENDER_LIST_SURFACE_DECAL is not empty
@@ -493,6 +500,9 @@ private:
 
 			uint32_t uniform_buffer_index;
 
+			// Mariner V3: the pass's own cluster LOD cut of each surface with a cluster DAG (request by surface cache).
+			HashMap<uint64_t, uint32_t> cluster_requests;
+
 			// Mariner E10: copy this depth texture (the directional shadow cache) into `rect` before drawing.
 			RID copy_depth_from;
 
@@ -509,6 +519,17 @@ private:
 
 			// Mariner E14b: indirect multimeshes culled for this pass: geometry instance (pointer) -> section of its multimesh.
 			HashMap<uint64_t, uint32_t> shadow_cull_sections;
+
+			// Mariner V5a: software rasterized multimeshes culled for this orthogonal pass - their software bucket's depth
+			// (sw_raster.glsl MODE_SHADOW), with the pass's clip from world (depth corrected) and pancaking.
+			struct SoftwareItem {
+				RID multimesh;
+				Transform3D transform;
+				uint32_t section = 0;
+			};
+			LocalVector<SoftwareItem> software_items;
+			Projection software_view_projection;
+			bool software_pancake = false;
 		};
 
 		// Mariner E14b: the passes of each culled indirect multimesh in this batch of shadow passes.
@@ -546,6 +567,7 @@ private:
 				uint32_t uses_projector : 1;
 				uint32_t uses_forward_gi : 1;
 				uint32_t uses_lightmap : 1;
+				uint32_t visibility_resolve : 1; // Mariner V5-T2: one full screen triangle (set by _fill_instance_data).
 			};
 			uint32_t value;
 		};
@@ -591,6 +613,8 @@ private:
 			FLAG_PASS_OPAQUE_LATE = 524288, // Mariner: render_mode opaque_late
 			FLAG_PASS_ALPHA_FRINGE = 1048576, // Mariner AA: render_mode alpha_fringe - opaque core plus the edge in the alpha pass
 			FLAG_PASS_SURFACE_DECAL = 2097152, // Mariner GB2: render_mode surface_decal - only the decal pass
+			FLAG_VISIBILITY_RESOLVE = 4194304, // Mariner V5-T2: render_mode visibility_resolve
+			FLAG_VISIBILITY_RESOLVE_TWIN = 8388608, // Mariner V5-T3: the resolve draw's own copy of such a surface
 		};
 
 		union {
@@ -661,6 +685,9 @@ private:
 		bool can_sdfgi = false;
 		bool using_projectors = false;
 		bool using_softshadows = false;
+		// Mariner V5-T2: the object id of this software rasterized multimesh in the camera pass sw_raster_pass.
+		uint32_t sw_raster_object = 0;
+		uint64_t sw_raster_pass = 0;
 
 		//used during setup
 		uint64_t prev_transform_change_frame = 0xFFFFFFFF;
@@ -842,6 +869,18 @@ private:
 	RenderRaytracing *raytracing = nullptr; // Raytracing scene (TLAS) for compositor effects, created on first use.
 	RenderPathtracer *pathtracer = nullptr; // Path tracer (Mariner E5c, Environment.pathtracing_enabled), created on first use.
 	RenderDDGI *ddgi = nullptr; // DDGI probes (Mariner E12, Environment.ddgi_enabled).
+	RenderSoftwareRaster *sw_raster = nullptr; // Mariner V5 (created on first use).
+	Ref<RenderSceneBuffersRD> sw_shadow_rb; // Mariner V5a: the render buffers of the shadow passes being drawn (their counters).
+	// Mariner V5-T2: the visibility buffer of the scene being drawn (depth, payload, attributes; null else) for the
+	// render pass uniforms 62-64 of the opaque list, and the empty textures bound otherwise.
+	RID sw_raster_frame_textures[3];
+	RID sw_raster_empty_textures[3];
+	RID sw_raster_frame_bounds; // The objects' screen rectangles (binding 65).
+	// Mariner V2: GPU cluster LOD (created on first use); the cuts of the scene render being drawn, by surface cache.
+	RenderClusterLOD *cluster_lod = nullptr;
+	HashMap<uint64_t, const void *> cluster_cuts;
+	void _select_cluster_lods(const RenderDataRD *p_render_data);
+	RID sw_raster_empty_bounds;
 	RenderRestirDI *restir = nullptr; // Mariner E20, created on first use.
 	RendererRD::DLSSEffect *dlss_effect = nullptr;
 	RendererRD::SSEffects *ss_effects = nullptr;
@@ -942,6 +981,7 @@ private:
 	void _render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_reverse_cull_face, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, const Rect2i &p_rect = Rect2i(), bool p_flip_y = false, bool p_clear_region = true, bool p_begin = true, bool p_end = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D());
 	void _render_shadow_process();
 	void _render_shadow_end();
+	void _render_shadow_software(const SceneState::ShadowPass &p_shadow_pass); // Mariner V5a.
 
 	/* Render Scene */
 	void _process_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections);

@@ -67,6 +67,7 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	uses_transparent_motion_vectors = false;
 	uses_opaque_late = false;
 	uses_surface_decal = false;
+	uses_visibility_resolve = false;
 	uses_alpha_fringe = false;
 	uses_discard = false;
 	uses_roughness = false;
@@ -136,6 +137,7 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	actions.render_mode_flags["motion_vectors_transparent"] = &uses_transparent_motion_vectors;
 	actions.render_mode_flags["opaque_late"] = &uses_opaque_late;
 	actions.render_mode_flags["surface_decal"] = &uses_surface_decal; // Mariner GB2.
+	actions.render_mode_flags["visibility_resolve"] = &uses_visibility_resolve; // Mariner V5-T2.
 	actions.render_mode_flags["alpha_fringe"] = &uses_alpha_fringe;
 	actions.usage_flag_pointers["PREVIOUS_FRAME"] = &uses_time; // animated: include in the motion pass
 
@@ -978,6 +980,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.render_mode_defines["cull_disabled"] = "#define DO_SIDE_CHECK\n";
 		actions.render_mode_defines["particle_trails"] = "#define USE_PARTICLE_TRAILS\n";
 		actions.render_mode_defines["depth_prepass_alpha"] = "#define USE_OPAQUE_PREPASS\n";
+		actions.render_mode_defines["visibility_resolve"] = "#define USE_VISIBILITY_RESOLVE\n"; // Mariner V5-T2.
 		actions.render_mode_defines["alpha_fringe"] = "#define ALPHA_FRINGE_USED\n";
 
 		bool force_lambert = GLOBAL_GET("rendering/shading/overrides/force_lambert_over_burley");

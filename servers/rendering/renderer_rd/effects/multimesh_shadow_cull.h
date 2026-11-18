@@ -67,6 +67,8 @@ public:
 		SECTION_RANGE = 2, // By the visibility range (fade disabled) from camera, with world_rows and the mesh box.
 		SECTION_LOD = 4, // Into LOD buckets by the distance from camera (lod_limits, lod_counts).
 		SECTION_LOD_ORTHOGONAL = 8, // LOD distance 1 (orthogonal camera, as the renderer).
+		SECTION_SOFTWARE = 16, // Mariner V5-T3: the last bucket - small on screen (info[2]: float radius / distance limit).
+		SECTION_SOFTWARE_ORTHOGONAL = 32, // Mariner V5a: SECTION_SOFTWARE in an orthogonal shadow pass (info[2]: radius limit).
 	};
 	struct SectionData {
 		float view_rows[3][4];
@@ -77,7 +79,7 @@ public:
 		float camera[4]; // xyz: camera position (world); w: lod_distance_multiplier / lod_bias.
 		float range[4]; // Begin, end, begin margin, end margin.
 		float lod_limits[MAX_LOD_BUCKETS];
-		uint32_t info[4]; // Buckets, SectionFlags.
+		uint32_t info[4]; // Buckets, SectionFlags, software raster limit (float bits).
 		uint32_t lod_counts[MAX_LOD_BUCKETS * MAX_LOD_SURFACES];
 
 		void set_view(const Transform3D &p_view_from_multimesh, const Projection &p_projection);

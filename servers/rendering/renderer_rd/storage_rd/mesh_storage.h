@@ -34,6 +34,7 @@
 #include "core/templates/rid_owner.h"
 #include "core/templates/self_list.h"
 #include "servers/rendering/renderer_compositor.h"
+#include "servers/rendering/renderer_rd/storage_rd/cluster_streaming.h"
 #include "servers/rendering/renderer_rd/shaders/skeleton.glsl.gen.h"
 #include "servers/rendering/rendering_server_globals.h"
 #include "servers/rendering/storage/mesh_storage.h"
@@ -65,6 +66,8 @@ public:
 
 private:
 	static MeshStorage *singleton;
+
+	ClusterStreaming *cluster_streaming = nullptr; // Mariner V4.
 
 	RID default_rd_storage_buffer;
 
@@ -141,6 +144,17 @@ private:
 
 			Vector4 uv_scale;
 			float uv_density = 0.0f; // Mariner E17.
+
+			// Mariner V1: cluster LOD (storage buffers: uint32 indices of all clusters, ClusterLOD records).
+			RID cluster_index_buffer;
+			RID cluster_buffer;
+			uint32_t cluster_count = 0;
+			uint32_t cluster_index_count = 0;
+			// Mariner V4: streamed (cluster_index_buffer null, the indices in the streaming pool): its handle, per
+			// cluster stream records, the indices kept here (mesh_get_surface()).
+			uint32_t cluster_stream = ClusterStreaming::NO_PAGE;
+			RID cluster_stream_buffer;
+			Vector<uint8_t> cluster_index_cpu;
 
 			RID blend_shape_buffer;
 			uint32_t blend_shape_buffer_size = 0;
@@ -277,6 +291,7 @@ private:
 
 		// Mariner E25a: the same for the camera of each scene render (one section per geometry instance).
 		bool indirect_view_culling = false;
+		bool software_raster = false; // Mariner V5.
 		uint32_t view_sections = 0;
 		RID view_data_buffer;
 		RID view_command_buffer;
@@ -515,6 +530,25 @@ public:
 		return reinterpret_cast<Mesh::Surface *>(p_surface)->vertex_buffer;
 	}
 
+	// Mariner V2: the cluster DAG of a surface (V1): ClusterLOD records, their uint32 indices; false if none.
+	// Mariner V4: the per cluster stream records of a streamed surface (null if all its clusters are resident).
+	_FORCE_INLINE_ RID mesh_surface_get_cluster_stream(void *p_surface) const {
+		return reinterpret_cast<const Mesh::Surface *>(p_surface)->cluster_stream_buffer;
+	}
+	ClusterStreaming *get_cluster_streaming() const { return cluster_streaming; }
+	virtual Dictionary cluster_streaming_get_stats() const override;
+
+	_FORCE_INLINE_ bool mesh_surface_has_cluster_lod(void *p_surface) const {
+		return reinterpret_cast<const Mesh::Surface *>(p_surface)->cluster_count > 0;
+	}
+	_FORCE_INLINE_ bool mesh_surface_get_cluster_lod(void *p_surface, RID &r_clusters, RID &r_indices, uint32_t &r_cluster_count, uint32_t &r_index_count) const {
+		const Mesh::Surface *s = reinterpret_cast<const Mesh::Surface *>(p_surface);
+		r_clusters = s->cluster_buffer;
+		r_indices = s->cluster_stream_buffer.is_valid() ? cluster_streaming->get_pool() : s->cluster_index_buffer;
+		r_cluster_count = s->cluster_count;
+		r_index_count = s->cluster_index_count;
+		return s->cluster_count > 0 && s->cluster_buffer.is_valid() && r_indices.is_valid();
+	}
 	_FORCE_INLINE_ RID mesh_surface_get_attribute_buffer(void *p_surface) const {
 		return reinterpret_cast<Mesh::Surface *>(p_surface)->attribute_buffer;
 	}
@@ -807,6 +841,8 @@ public:
 		static constexpr uint32_t MAX_LOD_SURFACES = 8;
 		uint32_t buckets = 1;
 		uint8_t bucket_lods[MAX_LOD_BUCKETS][MAX_LOD_SURFACES] = {};
+		// Mariner V5-T3: the last bucket holds the instances small on screen, drawn by the software raster.
+		bool software_bucket = false;
 	};
 	// Buffers for p_sections sections (grown as needed); false if the multimesh can't be culled (no data, no mesh).
 	bool multimesh_shadow_cull_prepare(RID p_multimesh, uint32_t p_sections, RID p_shader, uint32_t p_set, MultiMeshShadowCull &r_cull);
@@ -815,6 +851,17 @@ public:
 	// Mariner E25a: instances of an indirect multimesh culled for the camera of each scene render.
 	virtual void multimesh_set_indirect_view_culling(RID p_multimesh, bool p_enable) override;
 	virtual bool multimesh_get_indirect_view_culling(RID p_multimesh) const override;
+	virtual void multimesh_set_software_raster(RID p_multimesh, bool p_enable) override; // Mariner V5.
+	virtual bool multimesh_get_software_raster(RID p_multimesh) const override;
+	// Mariner V5: the instance data of the current frame (offset in instances, motion vectors).
+	_FORCE_INLINE_ uint32_t multimesh_get_current_offset(RID p_multimesh) const {
+		MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+		return multimesh ? multimesh->motion_vectors_current_offset : 0;
+	}
+	_FORCE_INLINE_ bool multimesh_is_indirect(RID p_multimesh) const {
+		MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+		return multimesh && multimesh->indirect;
+	}
 	virtual RID multimesh_get_view_command_buffer_rd_rid(RID p_multimesh) const override;
 	bool multimesh_view_cull_prepare(RID p_multimesh, uint32_t p_sections, RID p_shader, uint32_t p_set, MultiMeshShadowCull &r_cull);
 	void _multimesh_free_view_cull(MultiMesh *multimesh);

@@ -284,6 +284,7 @@ ShaderTypes::ShaderTypes() {
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("motion_vectors_transparent") }); // Mariner: transparent pass writes motion vectors
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("opaque_late") }); // Mariner: late opaque pass, screen/depth textures = scene before it
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("surface_decal") }); // Mariner GB2: a surface decal (Forward+), drawn into the decal buffer
+		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("visibility_resolve") }); // Mariner V5-T2: shades MultiMesh.software_raster (Forward+)
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("depth_test"), { "default", "disabled", "inverted" } });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("sss_mode_skin") });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("cull"), "back", "front", "disabled" });

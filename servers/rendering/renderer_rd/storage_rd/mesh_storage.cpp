@@ -76,6 +76,9 @@ MeshStorage::MeshStorage() {
 
 	default_rd_storage_buffer = RD::get_singleton()->storage_buffer_create(sizeof(uint32_t) * 4);
 
+	// Mariner V4: streaming of the cluster LOD (0: off).
+	cluster_streaming = memnew(ClusterStreaming(uint32_t(MAX(0, int(ProjectSettings::get_singleton()->get_setting("rendering/mesh_lod/cluster_streaming/pool_size_mb", 0))))));
+
 	//default rd buffers
 	{
 		Vector<uint8_t> buffer;
@@ -216,7 +219,15 @@ MeshStorage::MeshStorage() {
 	}
 }
 
+Dictionary MeshStorage::cluster_streaming_get_stats() const {
+	return cluster_streaming ? cluster_streaming->get_stats() : Dictionary();
+}
+
 MeshStorage::~MeshStorage() {
+	if (cluster_streaming) {
+		memdelete(cluster_streaming); // Mariner V4.
+		cluster_streaming = nullptr;
+	}
 	//def buffers
 	for (int i = 0; i < DEFAULT_RD_BUFFER_MAX; i++) {
 		RD::get_singleton()->free_rid(mesh_default_rd_buffers[i]);
@@ -410,9 +421,11 @@ void MeshStorage::mesh_add_surface(RID p_mesh, const RenderingServerTypes::Surfa
 	const BitField<RD::BufferCreationBits> as_storage_flag = use_as_storage ? RD::BUFFER_CREATION_AS_STORAGE_BIT : 0;
 	// Raytracing scene: vertex / attribute / index buffers are read by acceleration structure builds and by
 	// hit shaders through device addresses.
-	const BitField<RD::BufferCreationBits> vertex_flags = _raytracing_buffer_bits(use_as_storage);
-	const BitField<RD::BufferCreationBits> attribute_flags = _raytracing_buffer_bits(false);
-	const BitField<RD::BufferCreationBits> index_flags = _raytracing_buffer_bits(false);
+	// Mariner V5: always readable as storage buffers (the software rasterizer reads positions, normals, UV, colours
+	// and indices).
+	const BitField<RD::BufferCreationBits> vertex_flags = _raytracing_buffer_bits(true);
+	const BitField<RD::BufferCreationBits> attribute_flags = _raytracing_buffer_bits(true);
+	const BitField<RD::BufferCreationBits> index_flags = _raytracing_buffer_bits(true);
 
 	if (new_surface.vertex_data.size()) {
 		// If we have an uncompressed surface that contains normals, but not tangents, we need to differentiate the array
@@ -479,6 +492,22 @@ void MeshStorage::mesh_add_surface(RID p_mesh, const RenderingServerTypes::Surfa
 
 	s->uv_scale = new_surface.uv_scale;
 	s->uv_density = new_surface.uv_density;
+
+	// Mariner V1: the cluster LOD of the surface, for the GPU cluster selection.
+	if (new_surface.cluster_data.size() >= 64 && new_surface.cluster_index_data.size() >= 12) {
+		// Mariner V4: streamed when the pool is on (else, or when it can't hold the roots, all resident).
+		if (cluster_streaming && cluster_streaming->is_enabled()) {
+			s->cluster_stream = cluster_streaming->surface_register(new_surface.cluster_data, new_surface.cluster_index_data, s->cluster_stream_buffer);
+		}
+		if (s->cluster_stream != ClusterStreaming::NO_PAGE) {
+			s->cluster_index_cpu = new_surface.cluster_index_data;
+		} else {
+			s->cluster_index_buffer = RD::get_singleton()->storage_buffer_create(new_surface.cluster_index_data.size(), new_surface.cluster_index_data);
+		}
+		s->cluster_buffer = RD::get_singleton()->storage_buffer_create(new_surface.cluster_data.size(), new_surface.cluster_data);
+		s->cluster_count = new_surface.cluster_data.size() / 64;
+		s->cluster_index_count = new_surface.cluster_index_data.size() / 4;
+	}
 
 	if (mesh->blend_shape_count > 0) {
 		s->blend_shape_buffer = RD::get_singleton()->storage_buffer_create(new_surface.blend_shape_data.size(), new_surface.blend_shape_data);
@@ -581,6 +610,15 @@ void MeshStorage::_mesh_surface_clear(Mesh *p_mesh, int p_surface) {
 
 	if (s.blend_shape_buffer.is_valid()) {
 		RD::get_singleton()->free_rid(s.blend_shape_buffer);
+	}
+	if (s.cluster_index_buffer.is_valid()) { // Mariner V1.
+		RD::get_singleton()->free_rid(s.cluster_index_buffer);
+	}
+	if (s.cluster_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(s.cluster_buffer);
+	}
+	if (s.cluster_stream != ClusterStreaming::NO_PAGE) { // Mariner V4.
+		cluster_streaming->surface_unregister(s.cluster_stream);
 	}
 
 	memdelete(p_mesh->surfaces[p_surface]);
@@ -719,6 +757,10 @@ RenderingServerTypes::SurfaceData MeshStorage::mesh_get_surface(RID p_mesh, int 
 	sd.aabb = s.aabb;
 	sd.uv_scale = s.uv_scale;
 	sd.uv_density = s.uv_density;
+	if (s.cluster_buffer.is_valid()) { // Mariner V1.
+		sd.cluster_index_data = s.cluster_index_buffer.is_valid() ? RD::get_singleton()->buffer_get_data(s.cluster_index_buffer) : s.cluster_index_cpu;
+		sd.cluster_data = RD::get_singleton()->buffer_get_data(s.cluster_buffer);
+	}
 	for (uint32_t i = 0; i < s.lod_count; i++) {
 		RenderingServerTypes::SurfaceData::LOD lod;
 		lod.edge_length = s.lods[i].edge_length;
@@ -1653,6 +1695,22 @@ bool MeshStorage::multimesh_get_indirect_view_culling(RID p_multimesh) const {
 	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
 	ERR_FAIL_NULL_V(multimesh, false);
 	return multimesh->indirect_view_culling && multimesh->indirect;
+}
+
+// Mariner V5.
+void MeshStorage::multimesh_set_software_raster(RID p_multimesh, bool p_enable) {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL(multimesh);
+	if (multimesh->software_raster != p_enable) {
+		multimesh->software_raster = p_enable;
+		multimesh->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_MULTIMESH);
+	}
+}
+
+bool MeshStorage::multimesh_get_software_raster(RID p_multimesh) const {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL_V(multimesh, false);
+	return multimesh->software_raster;
 }
 
 RID MeshStorage::multimesh_get_view_command_buffer_rd_rid(RID p_multimesh) const {

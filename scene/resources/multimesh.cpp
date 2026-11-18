@@ -365,6 +365,16 @@ bool MultiMesh::is_using_custom_data2() const {
 	return use_custom_data2;
 }
 
+// Mariner V5.
+void MultiMesh::set_software_raster(bool p_enable) {
+	software_raster = p_enable;
+	RenderingServer::get_singleton()->multimesh_set_software_raster(multimesh, p_enable);
+}
+
+bool MultiMesh::is_software_raster() const {
+	return software_raster;
+}
+
 void MultiMesh::set_instance_custom_data2(int p_instance, const Color &p_custom_data) {
 	ERR_FAIL_INDEX(p_instance, instance_count);
 	ERR_FAIL_COND_MSG(!use_custom_data2, "Can't set the second instance custom data on a MultiMesh that isn't using it (use_custom_data2).");
@@ -394,6 +404,8 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_use_custom_data", "enable"), &MultiMesh::set_use_custom_data);
 	ClassDB::bind_method(D_METHOD("is_using_custom_data"), &MultiMesh::is_using_custom_data);
 	ClassDB::bind_method(D_METHOD("set_use_custom_data2", "enable"), &MultiMesh::set_use_custom_data2); // Mariner E14c.
+	ClassDB::bind_method(D_METHOD("set_software_raster", "enable"), &MultiMesh::set_software_raster); // Mariner V5.
+	ClassDB::bind_method(D_METHOD("is_software_raster"), &MultiMesh::is_software_raster);
 	ClassDB::bind_method(D_METHOD("is_using_custom_data2"), &MultiMesh::is_using_custom_data2);
 	ClassDB::bind_method(D_METHOD("set_instance_custom_data2", "instance", "custom_data"), &MultiMesh::set_instance_custom_data2);
 	ClassDB::bind_method(D_METHOD("get_instance_custom_data2", "instance"), &MultiMesh::get_instance_custom_data2);
@@ -429,6 +441,7 @@ void MultiMesh::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_colors"), "set_use_colors", "is_using_colors");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_custom_data"), "set_use_custom_data", "is_using_custom_data");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_custom_data2"), "set_use_custom_data2", "is_using_custom_data2"); // Mariner E14c.
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "software_raster"), "set_software_raster", "is_software_raster"); // Mariner V5.
 	ADD_PROPERTY(PropertyInfo(Variant::AABB, "custom_aabb", PROPERTY_HINT_NONE, "suffix:m"), "set_custom_aabb", "get_custom_aabb");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "instance_count", PROPERTY_HINT_RANGE, "0,16384,1,or_greater"), "set_instance_count", "get_instance_count");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "visible_instance_count", PROPERTY_HINT_RANGE, "-1,16384,1,or_greater"), "set_visible_instance_count", "get_visible_instance_count");
