@@ -136,6 +136,7 @@ shared vec4 s_r[TEXEL_COUNT];
 shared vec4 s_g[TEXEL_COUNT];
 shared vec4 s_b[TEXEL_COUNT];
 shared float s_w[TEXEL_COUNT];
+shared vec4 s_e[TEXEL_COUNT]; // L1e: radiance x cosine to the probe's normal x solid angle (rgb), cosine x solid angle (a).
 
 void main() {
 	uvec2 probe = gl_WorkGroupID.xy;
@@ -202,6 +203,8 @@ void main() {
 	// L2: the texels below the probe's horizon (no rays) take the light of their mirror direction above it. The
 	// irradiance along the probe's normal stays the same, but the radiance near the horizon is no longer halved by
 	// the hard step to zero (L1 can't hold it): rough reflections at grazing angles read it.
+	// L1e: the traced light of the texel, before the fill below (the irradiance is of this one).
+	const vec4 traced = value;
 	s_r[li] = vec4(value.rgb, value.a);
 	barrier();
 	if (sp.position.w > 0.0 && value.a <= 0.0) {
@@ -212,11 +215,20 @@ void main() {
 	}
 	imageStore(filled_image, texel, value);
 	barrier();
+	// L1e: the SH of the traced light (zero below the probe's horizon), not of the filled one. With the mirror fill
+	// (L2) the light was symmetric about the surface, its L1 part along the normal was zero and the irradiance
+	// became the plain mean of the hemisphere: everything near the horizon (the slope across a hollow, a crater's
+	// wall, a stone next to the probe) counted as much as the zenith, and the ground under the probes was lit by
+	// about two thirds of the sky light the grids give (measured on the Terra stand, a slope inside a crater).
 	vec4 y = vec4(0.282095, 0.488603 * dir.y, 0.488603 * dir.z, 0.488603 * dir.x) * w;
-	s_r[li] = value.r * y;
-	s_g[li] = value.g * y;
-	s_b[li] = value.b * y;
+	s_r[li] = traced.r * y;
+	s_g[li] = traced.g * y;
+	s_b[li] = traced.b * y;
 	s_w[li] = w;
+	// The irradiance of the probe's own normal exactly (cosine weighted): L1 alone weighs the hemisphere half evenly
+	// and half by the cosine. The SH is scaled to it below; the pixels a probe lights have nearly its normal.
+	float cosine = traced.a > 0.0 ? max(dot(dir, sp.normal.xyz), 0.0) * w : 0.0;
+	s_e[li] = vec4(traced.rgb * cosine, cosine);
 	barrier();
 	for (uint stride = TEXEL_COUNT / 2u; stride > 0u; stride >>= 1u) {
 		if (li < stride) {
@@ -224,14 +236,26 @@ void main() {
 			s_g[li] += s_g[li + stride];
 			s_b[li] += s_b[li + stride];
 			s_w[li] += s_w[li + stride];
+			s_e[li] += s_e[li + stride];
 		}
 		barrier();
 	}
 	if (li == 0u) {
 		float norm = sp.position.w > 0.0 ? 4.0 * 3.14159265359 / max(s_w[0], 1e-6) : 0.0;
-		sh_buffer.sh[index * 3u + 0u] = s_r[0] * norm;
-		sh_buffer.sh[index * 3u + 1u] = s_g[0] * norm;
-		sh_buffer.sh[index * 3u + 2u] = s_b[0] * norm;
+		vec4 sh_r = s_r[0] * norm;
+		vec4 sh_g = s_g[0] * norm;
+		vec4 sh_b = s_b[0] * norm;
+		if (s_e[0].a > 1e-6) {
+			vec3 exact = s_e[0].rgb / s_e[0].a;
+			vec3 approx = vec3(ddgi_sh_irradiance(sh_r, sp.normal.xyz), ddgi_sh_irradiance(sh_g, sp.normal.xyz), ddgi_sh_irradiance(sh_b, sp.normal.xyz));
+			vec3 scale = mix(vec3(1.0), clamp(exact / max(approx, vec3(1e-6)), vec3(0.25), vec3(4.0)), step(vec3(1e-6), approx));
+			sh_r *= scale.r;
+			sh_g *= scale.g;
+			sh_b *= scale.b;
+		}
+		sh_buffer.sh[index * 3u + 0u] = sh_r;
+		sh_buffer.sh[index * 3u + 1u] = sh_g;
+		sh_buffer.sh[index * 3u + 2u] = sh_b;
 	}
 }
 

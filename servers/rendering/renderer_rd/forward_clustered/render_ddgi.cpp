@@ -677,7 +677,10 @@ bool RenderDDGI::update_screen_probes(RendererSceneRenderRD *p_owner, const Rend
 			uint32_t pad[2];
 		} trace_push = {};
 		trace_push.light_count = frame_trace.light_count;
-		trace_push.flags = frame_trace.flags | (sp.has_last_color ? 4u : 0u); // DDGI_TRACE_FLAG_LAST_COLOR.
+		// Mariner L1d: the lit color of the previous frame for the hits that were on screen can be turned off (a check
+		// of where the light of the screen probes comes from: every hit is then shaded as the grids' rays shade it).
+		const bool reuse_frame = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/screen_probes_reuse_frame");
+		trace_push.flags = frame_trace.flags | (sp.has_last_color && reuse_frame ? 4u : 0u); // DDGI_TRACE_FLAG_LAST_COLOR.
 		trace_push.ray_length = frame_trace.ray_length;
 		trace_push.grid_x = grid.width;
 		trace_push.grid_y = grid.height;
