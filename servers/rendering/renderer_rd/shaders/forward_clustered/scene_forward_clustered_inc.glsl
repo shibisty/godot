@@ -573,6 +573,15 @@ vec4 ddgi_screen_probe_irradiance(vec2 p_frag, vec3 p_world, vec3 n_world, float
 	if ((header.w & 1u) == 0u) {
 		return vec4(0.0);
 	}
+	// Mariner L1c: the probes are for the light of near things (between stones, in hollows). Where a tile of pixels
+	// covers more than about a meter of the surface (far ground; nearer at a lower 3D scale) a probe fits only the
+	// pixels of its own plane - at grazing angles a line one pixel thick and one tile long - and the rest of the tile
+	// reads the grids: light dashes over the far slopes. Fade the probes out by the size of a tile on the surface.
+	float footprint = p_depth * float(header.z) * 2.0 / (abs(scene_data_block.data.projection_matrix[1][1]) * scene_data_block.data.viewport_size.y);
+	float near_fade = 1.0 - smoothstep(0.75, 1.5, footprint);
+	if (near_fade <= 0.0) {
+		return vec4(0.0);
+	}
 	vec2 oct = vec3_to_oct(p_reflect);
 	vec3 map_sum = vec3(0.0);
 	ivec2 grid = ivec2(header.xy);
@@ -614,7 +623,7 @@ vec4 ddgi_screen_probe_irradiance(vec2 p_frag, vec3 p_world, vec3 n_world, float
 	g /= weight_sum;
 	b /= weight_sum;
 	vec3 irradiance = vec3(ddgi_sh_irradiance(r, n_world), ddgi_sh_irradiance(g, n_world), ddgi_sh_irradiance(b, n_world));
-	float amount = smoothstep(0.02, 0.25, weight_sum);
+	float amount = smoothstep(0.02, 0.25, weight_sum) * near_fade;
 	float lobe = mix(1.0, 0.6, clamp((p_roughness - 0.2) / 0.6, 0.0, 1.0));
 	vec3 sh_spec = vec3(ddgi_sh_radiance(r, p_reflect, lobe), ddgi_sh_radiance(g, p_reflect, lobe), ddgi_sh_radiance(b, p_reflect, lobe));
 	r_specular = vec4(mix(map_sum / weight_sum, sh_spec, smoothstep(0.6, 1.0, p_roughness)), amount);
