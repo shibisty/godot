@@ -417,7 +417,19 @@ void AudioServer::_mix_step() {
 		}
 
 		// Mix the audio stream.
-		unsigned int mixed_frames = playback->stream_playback->mix(&buf[LOOKAHEAD_BUFFER_SIZE], playback->pitch_scale.get(), buffer_size);
+		// Mariner AU1: a propagation delay starts the stream after some frames of silence.
+		unsigned int delay_frames = 0;
+		if (playback->start_delay_frames > 0) {
+			delay_frames = (unsigned int)MIN(playback->start_delay_frames, (uint64_t)buffer_size);
+			playback->start_delay_frames -= delay_frames;
+			for (unsigned int i = 0; i < delay_frames; i++) {
+				buf[LOOKAHEAD_BUFFER_SIZE + i] = AudioFrame(0, 0);
+			}
+		}
+		unsigned int mixed_frames = delay_frames;
+		if (delay_frames < buffer_size) {
+			mixed_frames += playback->stream_playback->mix(&buf[LOOKAHEAD_BUFFER_SIZE + delay_frames], playback->pitch_scale.get(), buffer_size - delay_frames);
+		}
 
 		if (tag_used_audio_streams && playback->stream_playback->is_playing()) {
 			playback->stream_playback->tag_used_streams();
@@ -444,6 +456,9 @@ void AudioServer::_mix_step() {
 				playback->lookahead[i] = buf[buffer_size + i];
 			}
 		}
+
+		// Mariner AU1: air absorption and the free low-pass, once per voice (not per bus and channel).
+		_mix_voice_filter(playback, buf);
 
 		// Get the bus details for this playback. This contains information about which buses the playback is assigned to and the volume of the playback on each bus.
 		AudioStreamPlaybackBusDetails *bus_details_ptr = playback->bus_details.load();
@@ -673,6 +688,76 @@ void AudioServer::_mix_step() {
 
 	mix_frames += buffer_size;
 	to_mix = buffer_size;
+}
+
+void AudioServer::_mix_voice_filter(AudioStreamPlaybackListNode *p_playback, AudioFrame *p_buf) {
+	const double rate = get_mix_rate();
+	const float air_to = (float)AudioAir::stage_coefficient(p_playback->air_cutoff_hz.get(), rate);
+	const float lowpass_to = (float)AudioAir::stage_coefficient(p_playback->lowpass_cutoff_hz.get(), rate);
+	const float air_from = p_playback->air_coef;
+	const float lowpass_from = p_playback->lowpass_coef;
+	p_playback->air_coef = air_to;
+	p_playback->lowpass_coef = lowpass_to;
+
+	const bool air = air_to < 1.0f || air_from < 1.0f;
+	const bool lowpass = lowpass_to < 1.0f || lowpass_from < 1.0f;
+	if (!air && !lowpass) {
+		return;
+	}
+	// A filter switched on starts from the current sample, not from silence.
+	if (air && air_from >= 1.0f) {
+		for (int s = 0; s < AudioAir::AIR_STAGES; s++) {
+			p_playback->air_state[0][s] = p_buf[0].left;
+			p_playback->air_state[1][s] = p_buf[0].right;
+		}
+	}
+	if (lowpass && lowpass_from >= 1.0f) {
+		for (int s = 0; s < AudioAir::LOWPASS_STAGES; s++) {
+			p_playback->lowpass_state[0][s] = p_buf[0].left;
+			p_playback->lowpass_state[1][s] = p_buf[0].right;
+		}
+	}
+
+	float(&as)[2][AudioAir::AIR_STAGES] = p_playback->air_state;
+	float(&ls)[2][AudioAir::LOWPASS_STAGES] = p_playback->lowpass_state;
+	const float inv = 1.0f / buffer_size;
+	for (unsigned int i = 0; i < buffer_size; i++) {
+		const float t = (i + 1) * inv; // The coefficient moves to the new cutoff over the mix: no zipper noise.
+		float l = p_buf[i].left;
+		float r = p_buf[i].right;
+		if (air) {
+			const float a = air_from + (air_to - air_from) * t;
+			for (int s = 0; s < AudioAir::AIR_STAGES; s++) {
+				as[0][s] += a * (l - as[0][s]);
+				as[1][s] += a * (r - as[1][s]);
+				l = as[0][s];
+				r = as[1][s];
+			}
+		}
+		if (lowpass) {
+			const float a = lowpass_from + (lowpass_to - lowpass_from) * t;
+			for (int s = 0; s < AudioAir::LOWPASS_STAGES; s++) {
+				ls[0][s] += a * (l - ls[0][s]);
+				ls[1][s] += a * (r - ls[1][s]);
+				l = ls[0][s];
+				r = ls[1][s];
+			}
+		}
+		p_buf[i] = AudioFrame(l, r);
+	}
+	// Silence must not leave denormals in the states.
+	for (int c = 0; c < 2; c++) {
+		for (int s = 0; s < AudioAir::AIR_STAGES; s++) {
+			if (Math::abs(as[c][s]) < 1e-15f) {
+				as[c][s] = 0.0f;
+			}
+		}
+		for (int s = 0; s < AudioAir::LOWPASS_STAGES; s++) {
+			if (Math::abs(ls[c][s]) < 1e-15f) {
+				ls[c][s] = 0.0f;
+			}
+		}
+	}
 }
 
 void AudioServer::_mix_step_for_channel(AudioFrame *p_out_buf, AudioFrame *p_source_buf, AudioFrame p_vol_start, AudioFrame p_vol_final, float p_attenuation_filter_cutoff_hz, float p_highshelf_gain, AudioFilterSW::Processor *p_processor_l, AudioFilterSW::Processor *p_processor_r) {
@@ -1245,7 +1330,7 @@ void AudioServer::start_playback_stream(Ref<AudioStreamPlayback> p_playback, con
 	start_playback_stream(p_playback, map, p_start_time, p_pitch_scale);
 }
 
-void AudioServer::start_playback_stream(Ref<AudioStreamPlayback> p_playback, const HashMap<StringName, Vector<AudioFrame>> &p_bus_volumes, float p_start_time, float p_pitch_scale, float p_highshelf_gain, float p_attenuation_cutoff_hz) {
+void AudioServer::start_playback_stream(Ref<AudioStreamPlayback> p_playback, const HashMap<StringName, Vector<AudioFrame>> &p_bus_volumes, float p_start_time, float p_pitch_scale, float p_highshelf_gain, float p_attenuation_cutoff_hz, float p_start_delay, float p_air_cutoff_hz, float p_lowpass_cutoff_hz) {
 	ERR_FAIL_COND(p_playback.is_null());
 
 	AudioStreamPlaybackListNode *playback_node = new AudioStreamPlaybackListNode();
@@ -1274,6 +1359,12 @@ void AudioServer::start_playback_stream(Ref<AudioStreamPlayback> p_playback, con
 	playback_node->pitch_scale.set(p_pitch_scale);
 	playback_node->highshelf_gain.set(p_highshelf_gain);
 	playback_node->attenuation_filter_cutoff_hz.set(p_attenuation_cutoff_hz);
+	// Mariner AU1: the voice filter starts at its cutoff (a new stream starts from silence), the delay before it.
+	playback_node->air_cutoff_hz.set(p_air_cutoff_hz);
+	playback_node->lowpass_cutoff_hz.set(p_lowpass_cutoff_hz);
+	playback_node->air_coef = (float)AudioAir::stage_coefficient(p_air_cutoff_hz, get_mix_rate());
+	playback_node->lowpass_coef = (float)AudioAir::stage_coefficient(p_lowpass_cutoff_hz, get_mix_rate());
+	playback_node->start_delay_frames = p_start_delay > 0.0f ? (uint64_t)(double(MIN(p_start_delay, 30.0f)) * get_mix_rate()) : 0;
 
 	memset(playback_node->prev_bus_details->volume, 0, sizeof(playback_node->prev_bus_details->volume));
 
@@ -1438,6 +1529,60 @@ void AudioServer::set_playback_highshelf_params(Ref<AudioStreamPlayback> p_playb
 
 	playback_node->attenuation_filter_cutoff_hz.set(p_attenuation_cutoff_hz);
 	playback_node->highshelf_gain.set(p_gain);
+}
+
+void AudioServer::set_playback_voice_filter(Ref<AudioStreamPlayback> p_playback, float p_air_cutoff_hz, float p_lowpass_cutoff_hz) {
+	ERR_FAIL_COND(p_playback.is_null());
+
+	AudioStreamPlaybackListNode *playback_node = _find_playback_list_node(p_playback);
+	if (!playback_node) {
+		return;
+	}
+
+	playback_node->air_cutoff_hz.set(p_air_cutoff_hz);
+	playback_node->lowpass_cutoff_hz.set(p_lowpass_cutoff_hz);
+}
+
+void AudioServer::_update_air_table(bool p_force) {
+	const float rate = get_mix_rate();
+	if (!(rate > 0.0f) || (!p_force && rate == air_table_mix_rate)) {
+		return;
+	}
+	air_table.build(air_conditions, rate);
+	air_table_mix_rate = rate;
+}
+
+void AudioServer::set_air_conditions(float p_temperature_c, float p_humidity, float p_pressure_kpa) {
+	AudioAir::Conditions c;
+	c.temperature_c = CLAMP(p_temperature_c, -60.0f, 60.0f);
+	c.humidity = CLAMP(p_humidity, 0.0f, 100.0f);
+	c.pressure_kpa = p_pressure_kpa > 1.0f ? p_pressure_kpa : 101.325;
+	// The fit takes a few milliseconds: weather noise below these steps does not rebuild it.
+	if (Math::abs(c.temperature_c - air_conditions.temperature_c) < 0.25 && Math::abs(c.humidity - air_conditions.humidity) < 1.0 && Math::abs(c.pressure_kpa - air_conditions.pressure_kpa) < 0.25) {
+		return;
+	}
+	air_conditions = c;
+	_update_air_table(true);
+}
+
+Vector3 AudioServer::get_air_conditions() const {
+	return Vector3(air_conditions.temperature_c, air_conditions.humidity, air_conditions.pressure_kpa);
+}
+
+float AudioServer::get_speed_of_sound() const {
+	return (float)AudioAir::speed_of_sound(air_conditions);
+}
+
+float AudioServer::get_air_absorption_db(float p_frequency_hz, float p_distance) const {
+	return (float)(AudioAir::absorption_db_per_m(p_frequency_hz, air_conditions) * MAX(p_distance, 0.0f));
+}
+
+float AudioServer::get_air_cutoff_hz(float p_distance) {
+	_update_air_table(false);
+	if (!(air_table_mix_rate > 0.0f)) {
+		return 0.0f;
+	}
+	return air_table.lookup(p_distance);
 }
 
 bool AudioServer::is_playback_active(Ref<AudioStreamPlayback> p_playback) {
@@ -2085,6 +2230,12 @@ void AudioServer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_speaker_mode"), &AudioServer::get_speaker_mode);
 	ClassDB::bind_method(D_METHOD("get_mix_rate"), &AudioServer::get_mix_rate);
+
+	ClassDB::bind_method(D_METHOD("set_air_conditions", "temperature_c", "humidity", "pressure_kpa"), &AudioServer::set_air_conditions, DEFVAL(101.325));
+	ClassDB::bind_method(D_METHOD("get_air_conditions"), &AudioServer::get_air_conditions);
+	ClassDB::bind_method(D_METHOD("get_speed_of_sound"), &AudioServer::get_speed_of_sound);
+	ClassDB::bind_method(D_METHOD("get_air_absorption_db", "frequency_hz", "distance"), &AudioServer::get_air_absorption_db);
+	ClassDB::bind_method(D_METHOD("get_air_cutoff_hz", "distance"), &AudioServer::get_air_cutoff_hz);
 	ClassDB::bind_method(D_METHOD("get_input_mix_rate"), &AudioServer::get_input_mix_rate);
 
 	ClassDB::bind_method(D_METHOD("get_driver_name"), &AudioServer::get_driver_name);

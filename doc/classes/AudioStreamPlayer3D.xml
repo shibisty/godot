@@ -53,6 +53,9 @@
 		</method>
 	</methods>
 	<members>
+		<member name="air_absorption" type="float" setter="set_air_absorption" getter="get_air_absorption" default="0.0">
+			If above [code]0.0[/code], the sound is low-pass filtered the way air absorbs it over the distance to the nearest listener: high frequencies fade much faster than low ones (see [method AudioServer.get_air_cutoff_hz]). The distance is multiplied by this value; [code]1.0[/code] is physical. Independent of [member attenuation_filter_db].
+		</member>
 		<member name="area_mask" type="int" setter="set_area_mask" getter="get_area_mask" default="0">
 			Determines which [Area3D] layers affect the sound for reverb and audio bus effects. Areas can be used to redirect [AudioStream]s so that they play in a certain audio bus. An example of how you might use this is making a "water" area so that sounds played in the water are redirected through an audio bus to make them sound like they are being played underwater.
 		</member>
@@ -85,6 +88,9 @@
 		<member name="emission_angle_filter_attenuation_db" type="float" setter="set_emission_angle_filter_attenuation_db" getter="get_emission_angle_filter_attenuation_db" default="-12.0">
 			Attenuation factor used if listener is outside of [member emission_angle_degrees] and [member emission_angle_enabled] is set, in decibels.
 		</member>
+		<member name="lowpass_cutoff_hz" type="float" setter="set_lowpass_cutoff_hz" getter="get_lowpass_cutoff_hz" default="0.0">
+			Cutoff of a free 12 dB per octave low-pass filter on the sound, for example set by a script when the sound is occluded. [code]0.0[/code] disables it.
+		</member>
 		<member name="max_db" type="float" setter="set_max_db" getter="get_max_db" default="3.0">
 			Sets the absolute maximum of the sound level, in decibels.
 		</member>
@@ -107,6 +113,9 @@
 		</member>
 		<member name="playing" type="bool" setter="set_playing" getter="is_playing" default="false">
 			If [code]true[/code], audio is playing or is queued to be played (see [method play]).
+		</member>
+		<member name="propagation_delay" type="bool" setter="set_propagation_delay" getter="is_propagation_delay_enabled" default="false">
+			If [code]true[/code], a sound started with [method play] is heard after the time sound takes to travel to the nearest listener ([method AudioServer.get_speed_of_sound]). The delay is set when the sound starts.
 		</member>
 		<member name="stream" type="AudioStream" setter="set_stream" getter="get_stream">
 			The [AudioStream] resource to be played.

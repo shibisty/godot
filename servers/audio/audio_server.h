@@ -33,6 +33,7 @@
 #include "core/math/audio_frame.h"
 #include "core/templates/safe_list.h"
 #include "core/variant/variant.h"
+#include "servers/audio/audio_air.h"
 #include "servers/audio/audio_effect.h"
 #include "servers/audio/audio_filter_sw.h"
 
@@ -296,6 +297,16 @@ private:
 		SafeNumeric<float> highshelf_gain;
 		SafeNumeric<float> attenuation_filter_cutoff_hz; // This isn't used unless highshelf_gain is nonzero.
 		AudioFilterSW::Processor filter_process[8];
+		// Mariner AU1: the voice filter, applied once to the source frames before they are panned to the buses.
+		// Cutoffs are set on the main thread (0 = off); the rest is audio thread state.
+		SafeNumeric<float> air_cutoff_hz;
+		SafeNumeric<float> lowpass_cutoff_hz;
+		float air_coef = 1.0f; // Coefficients of the last mix (1 = off), interpolated over the next one.
+		float lowpass_coef = 1.0f;
+		float air_state[2][AudioAir::AIR_STAGES] = {};
+		float lowpass_state[2][AudioAir::LOWPASS_STAGES] = {};
+		// Frames of silence before the stream starts (propagation delay); audio thread after the node is inserted.
+		uint64_t start_delay_frames = 0;
 		// Updating this ref after the list node is created breaks consistency guarantees, don't do it!
 		Ref<AudioStreamPlayback> stream_playback;
 		// Playback state determines the fate of a particular AudioStreamListNode during the mix step. Must be atomically replaced.
@@ -330,6 +341,14 @@ private:
 	void init_channels_and_buffers();
 
 	void _mix_step();
+	void _mix_voice_filter(AudioStreamPlaybackListNode *p_playback, AudioFrame *p_buf);
+
+	// Mariner AU1: air conditions and the fitted air filter table (main thread).
+	AudioAir::Conditions air_conditions;
+	AudioAir::Table air_table;
+	float air_table_mix_rate = 0.0f;
+	void _update_air_table(bool p_force);
+
 	void _mix_step_for_channel(AudioFrame *p_out_buf, AudioFrame *p_source_buf, AudioFrame p_vol_start, AudioFrame p_vol_final, float p_attenuation_filter_cutoff_hz, float p_highshelf_gain, AudioFilterSW::Processor *p_processor_l, AudioFilterSW::Processor *p_processor_r);
 
 	// Should only be called on the main thread.
@@ -433,7 +452,7 @@ public:
 	// Convenience method.
 	void start_playback_stream(Ref<AudioStreamPlayback> p_playback, const StringName &p_bus, Vector<AudioFrame> p_volume_db_vector, float p_start_time = 0, float p_pitch_scale = 1);
 	// Expose all parameters.
-	void start_playback_stream(Ref<AudioStreamPlayback> p_playback, const HashMap<StringName, Vector<AudioFrame>> &p_bus_volumes, float p_start_time = 0, float p_pitch_scale = 1, float p_highshelf_gain = 0, float p_attenuation_cutoff_hz = 0);
+	void start_playback_stream(Ref<AudioStreamPlayback> p_playback, const HashMap<StringName, Vector<AudioFrame>> &p_bus_volumes, float p_start_time = 0, float p_pitch_scale = 1, float p_highshelf_gain = 0, float p_attenuation_cutoff_hz = 0, float p_start_delay = 0, float p_air_cutoff_hz = 0, float p_lowpass_cutoff_hz = 0);
 	void stop_playback_stream(Ref<AudioStreamPlayback> p_playback);
 
 	void set_playback_bus_exclusive(Ref<AudioStreamPlayback> p_playback, const StringName &p_bus, Vector<AudioFrame> p_volumes);
@@ -442,6 +461,14 @@ public:
 	void set_playback_pitch_scale(Ref<AudioStreamPlayback> p_playback, float p_pitch_scale);
 	void set_playback_paused(Ref<AudioStreamPlayback> p_playback, bool p_paused);
 	void set_playback_highshelf_params(Ref<AudioStreamPlayback> p_playback, float p_gain, float p_attenuation_cutoff_hz);
+	// Mariner AU1: low-pass of a voice - the air filter (cutoff from get_air_cutoff_hz) and a free one (occlusion); 0 = off.
+	void set_playback_voice_filter(Ref<AudioStreamPlayback> p_playback, float p_air_cutoff_hz, float p_lowpass_cutoff_hz);
+
+	void set_air_conditions(float p_temperature_c, float p_humidity, float p_pressure_kpa = 101.325);
+	Vector3 get_air_conditions() const;
+	float get_speed_of_sound() const;
+	float get_air_absorption_db(float p_frequency_hz, float p_distance) const;
+	float get_air_cutoff_hz(float p_distance);
 
 	bool is_playback_active(Ref<AudioStreamPlayback> p_playback);
 	float get_playback_position(Ref<AudioStreamPlayback> p_playback);

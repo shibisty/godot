@@ -290,7 +290,12 @@ void AudioStreamPlayer3D::_notification(int p_what) {
 				internal->active.set();
 				HashMap<StringName, Vector<AudioFrame>> bus_map;
 				bus_map[_get_actual_bus()] = volume_vector;
-				AudioServer::get_singleton()->start_playback_stream(setplayback, bus_map, setplay.get(), actual_pitch_scale, linear_attenuation, attenuation_filter_cutoff_hz);
+				// Mariner AU1: the sound reaches the nearest listener after distance / speed of sound.
+				float delay = 0.0f;
+				if (propagation_delay && nearest_listener_distance > 0.0f) {
+					delay = nearest_listener_distance / AudioServer::get_singleton()->get_speed_of_sound();
+				}
+				AudioServer::get_singleton()->start_playback_stream(setplayback, bus_map, setplay.get(), actual_pitch_scale, linear_attenuation, attenuation_filter_cutoff_hz, delay, air_cutoff_hz, lowpass_cutoff_hz);
 				setplayback.unref();
 				setplay.set(-1);
 			}
@@ -422,6 +427,7 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 
 	bool has_any_listener_in_range = false;
 	linear_attenuation = 0;
+	nearest_listener_distance = -1.0f;
 	for (Camera3D *camera : cameras) {
 		if (!camera) {
 			continue;
@@ -468,6 +474,9 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 			}
 		}
 		has_any_listener_in_range = true;
+		if (nearest_listener_distance < 0.0f || dist < nearest_listener_distance) {
+			nearest_listener_distance = dist;
+		}
 
 		float multiplier = Math::db_to_linear(_get_attenuation_db(dist));
 		if (max_distance > 0) {
@@ -530,7 +539,7 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 			if (local_velocity != Vector3()) {
 				const float approaching = local_pos.normalized().dot(local_velocity.normalized());
 				const float velocity = local_velocity.length();
-				static constexpr float speed_of_sound = 343.0F;
+				const float speed_of_sound = AudioServer::get_singleton()->get_speed_of_sound(); // Mariner AU1: from the air conditions.
 
 				float doppler_pitch_scale = internal->pitch_scale * speed_of_sound / (speed_of_sound + velocity * approaching);
 
@@ -550,8 +559,10 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 		actual_pitch_scale = pitch_scale_sum / pitch_scale_weight;
 	}
 
+	air_cutoff_hz = _get_air_cutoff_hz();
 	for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
 		AudioServer::get_singleton()->set_playback_highshelf_params(playback, linear_attenuation, attenuation_filter_cutoff_hz);
+		AudioServer::get_singleton()->set_playback_voice_filter(playback, air_cutoff_hz, lowpass_cutoff_hz);
 	}
 
 	bus_volumes.clear();
@@ -772,6 +783,39 @@ float AudioStreamPlayer3D::get_attenuation_filter_db() const {
 	return attenuation_filter_db;
 }
 
+float AudioStreamPlayer3D::_get_air_cutoff_hz() const {
+	if (!(air_absorption > 0.0f) || nearest_listener_distance < 0.0f) {
+		return 0.0f;
+	}
+	return AudioServer::get_singleton()->get_air_cutoff_hz(nearest_listener_distance * air_absorption);
+}
+
+void AudioStreamPlayer3D::set_air_absorption(float p_amount) {
+	air_absorption = MAX(p_amount, 0.0f);
+	force_update_panning = true;
+}
+
+float AudioStreamPlayer3D::get_air_absorption() const {
+	return air_absorption;
+}
+
+void AudioStreamPlayer3D::set_propagation_delay(bool p_enable) {
+	propagation_delay = p_enable;
+}
+
+bool AudioStreamPlayer3D::is_propagation_delay_enabled() const {
+	return propagation_delay;
+}
+
+void AudioStreamPlayer3D::set_lowpass_cutoff_hz(float p_hz) {
+	lowpass_cutoff_hz = MAX(p_hz, 0.0f);
+	force_update_panning = true;
+}
+
+float AudioStreamPlayer3D::get_lowpass_cutoff_hz() const {
+	return lowpass_cutoff_hz;
+}
+
 void AudioStreamPlayer3D::set_attenuation_model(AttenuationModel p_model) {
 	ERR_FAIL_INDEX((int)p_model, 4);
 	attenuation_model = p_model;
@@ -912,6 +956,13 @@ void AudioStreamPlayer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_attenuation_filter_db", "db"), &AudioStreamPlayer3D::set_attenuation_filter_db);
 	ClassDB::bind_method(D_METHOD("get_attenuation_filter_db"), &AudioStreamPlayer3D::get_attenuation_filter_db);
 
+	ClassDB::bind_method(D_METHOD("set_air_absorption", "amount"), &AudioStreamPlayer3D::set_air_absorption);
+	ClassDB::bind_method(D_METHOD("get_air_absorption"), &AudioStreamPlayer3D::get_air_absorption);
+	ClassDB::bind_method(D_METHOD("set_propagation_delay", "enable"), &AudioStreamPlayer3D::set_propagation_delay);
+	ClassDB::bind_method(D_METHOD("is_propagation_delay_enabled"), &AudioStreamPlayer3D::is_propagation_delay_enabled);
+	ClassDB::bind_method(D_METHOD("set_lowpass_cutoff_hz", "hz"), &AudioStreamPlayer3D::set_lowpass_cutoff_hz);
+	ClassDB::bind_method(D_METHOD("get_lowpass_cutoff_hz"), &AudioStreamPlayer3D::get_lowpass_cutoff_hz);
+
 	ClassDB::bind_method(D_METHOD("set_attenuation_model", "model"), &AudioStreamPlayer3D::set_attenuation_model);
 	ClassDB::bind_method(D_METHOD("get_attenuation_model"), &AudioStreamPlayer3D::get_attenuation_model);
 
@@ -956,6 +1007,10 @@ void AudioStreamPlayer3D::_bind_methods() {
 	ADD_GROUP("Attenuation Filter", "attenuation_filter_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "attenuation_filter_cutoff_hz", PROPERTY_HINT_RANGE, "1,20500,1,suffix:Hz"), "set_attenuation_filter_cutoff_hz", "get_attenuation_filter_cutoff_hz");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "attenuation_filter_db", PROPERTY_HINT_RANGE, "-80,0,0.1,suffix:dB"), "set_attenuation_filter_db", "get_attenuation_filter_db");
+	ADD_GROUP("Propagation", "");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "air_absorption", PROPERTY_HINT_RANGE, "0,4,0.01"), "set_air_absorption", "get_air_absorption");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "propagation_delay"), "set_propagation_delay", "is_propagation_delay_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lowpass_cutoff_hz", PROPERTY_HINT_RANGE, "0,20500,1,suffix:Hz"), "set_lowpass_cutoff_hz", "get_lowpass_cutoff_hz");
 	ADD_GROUP("Doppler", "doppler_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "doppler_tracking", PROPERTY_HINT_ENUM, "Disabled,Idle,Physics"), "set_doppler_tracking", "get_doppler_tracking");
 

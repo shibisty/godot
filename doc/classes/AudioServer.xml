@@ -35,6 +35,27 @@
 				Generates an [AudioBusLayout] using the available buses and effects.
 			</description>
 		</method>
+		<method name="get_air_absorption_db" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="frequency_hz" type="float" />
+			<param index="1" name="distance" type="float" />
+			<description>
+				Returns the loss in decibels of a pure tone of [param frequency_hz] over [param distance] meters of air in the conditions set by [method set_air_conditions] (ISO 9613-1).
+			</description>
+		</method>
+		<method name="get_air_conditions" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the air conditions set by [method set_air_conditions]: temperature in degrees Celsius, relative humidity in percent and pressure in kilopascals.
+			</description>
+		</method>
+		<method name="get_air_cutoff_hz">
+			<return type="float" />
+			<param index="0" name="distance" type="float" />
+			<description>
+				Returns the cutoff of the air filter of a voice for a sound coming from [param distance] meters away, or [code]0[/code] if no filter is needed. The cutoff is fitted to [method get_air_absorption_db] for the current air conditions and mix rate. Used by [member AudioStreamPlayer3D.air_absorption].
+			</description>
+		</method>
 		<method name="get_bus_channels" qualifiers="const">
 			<return type="int" />
 			<param index="0" name="bus_idx" type="int" />
@@ -183,6 +204,12 @@
 				Returns the speaker configuration.
 			</description>
 		</method>
+		<method name="get_speed_of_sound" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the speed of sound in meters per second at the temperature set by [method set_air_conditions] (343.2 at 20 °C). Used by [member AudioStreamPlayer3D.propagation_delay] and the Doppler effect.
+			</description>
+		</method>
 		<method name="get_time_since_last_mix" qualifiers="const">
 			<return type="float" />
 			<description>
@@ -268,6 +295,15 @@
 			<param index="1" name="effect_idx" type="int" />
 			<description>
 				Removes the effect at index [param effect_idx] from the bus at index [param bus_idx].
+			</description>
+		</method>
+		<method name="set_air_conditions">
+			<return type="void" />
+			<param index="0" name="temperature_c" type="float" />
+			<param index="1" name="humidity" type="float" />
+			<param index="2" name="pressure_kpa" type="float" default="101.325" />
+			<description>
+				Sets the air the 3D sounds travel through: temperature in degrees Celsius, relative humidity in percent and pressure in kilopascals. Cold and dry air absorbs high frequencies faster. Changes smaller than 0.25 °C, 1 % and 0.25 kPa are ignored, as refitting the air filter takes a few milliseconds. The default is 20 °C, 50 % and 101.325 kPa.
 			</description>
 		</method>
 		<method name="set_bus_bypass_effects">

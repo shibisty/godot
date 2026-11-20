@@ -112,6 +112,14 @@ private:
 
 	float linear_attenuation = 0;
 
+	// Mariner AU1: sound in open air.
+	float air_absorption = 0.0f; // Multiplies the distance for the air filter; 0 = off.
+	bool propagation_delay = false;
+	float lowpass_cutoff_hz = 0.0f; // Free low-pass (occlusion), 0 = off.
+	float nearest_listener_distance = -1.0f; // From the last _update_panning(), -1 = no listener in range.
+	float air_cutoff_hz = 0.0f;
+	float _get_air_cutoff_hz() const;
+
 	float max_distance = 0.0;
 	bool was_further_than_max_distance_last_frame = false;
 
@@ -196,6 +204,13 @@ public:
 
 	void set_attenuation_filter_db(float p_db);
 	float get_attenuation_filter_db() const;
+
+	void set_air_absorption(float p_amount);
+	float get_air_absorption() const;
+	void set_propagation_delay(bool p_enable);
+	bool is_propagation_delay_enabled() const;
+	void set_lowpass_cutoff_hz(float p_hz);
+	float get_lowpass_cutoff_hz() const;
 
 	void set_attenuation_model(AttenuationModel p_model);
 	AttenuationModel get_attenuation_model() const;
