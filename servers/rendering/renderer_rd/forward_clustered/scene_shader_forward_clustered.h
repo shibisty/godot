@@ -287,6 +287,8 @@ public:
 		bool uses_fragment_time = false;
 		bool writes_modelview_or_projection = false;
 		bool writes_depth = false; // Mariner E16: DEPTH written in fragment().
+		bool depth_farther = false; // Mariner E16b: DEPTH is never nearer than the geometry (conservative depth).
+		bool uses_material_prepass = false; // Mariner GB4: render_mode material_prepass - the colour pass reads the prepass.
 		bool uses_world_coordinates = false;
 		bool uses_screen_texture_mipmaps = false;
 		bool uses_z_clip_scale = false;

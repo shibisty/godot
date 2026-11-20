@@ -83,6 +83,7 @@ public:
 	bool shadow_pass = false;
 	bool translucent_shadow_pass = false; // Mariner E21.
 	bool surface_decals = false; // Mariner GB3: the pass reads the decal buffer.
+	bool material_prepass = false; // Mariner GB4: the pass reads the materials of render_mode material_prepass from the prepass.
 
 	Size2 shadow_atlas_pixel_size;
 	Size2 directional_shadow_pixel_size;
@@ -121,6 +122,7 @@ private:
 		SCENE_DATA_FLAGS_IN_SHADOW_PASS = 1 << 7, // Only used by Forward+ renderer.
 		SCENE_DATA_FLAGS_TRANSLUCENT_SHADOW_PASS = 1 << 8, // Mariner E21: the material pass writes the transmitted colour.
 		SCENE_DATA_FLAGS_SURFACE_DECALS = 1 << 9, // Mariner GB3: the opaque pass reads the decal buffer.
+		SCENE_DATA_FLAGS_MATERIAL_PREPASS = 1 << 10, // Mariner GB4: the opaque pass reads the material from the prepass.
 		SCENE_DATA_FLAGS_MAX
 	};
 

@@ -281,6 +281,8 @@ ShaderTypes::ShaderTypes() {
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("blend"), "mix", "add", "sub", "mul", "premul_alpha" });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("depth_draw"), "opaque", "always", "never" });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("depth_prepass_alpha") });
+		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("depth_farther") }); // Mariner E16b: DEPTH is never nearer than the geometry
+		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("material_prepass") }); // Mariner GB4: fragment() runs once, in the prepass (Forward+)
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("motion_vectors_transparent") }); // Mariner: transparent pass writes motion vectors
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("opaque_late") }); // Mariner: late opaque pass, screen/depth textures = scene before it
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("surface_decal") }); // Mariner GB2: a surface decal (Forward+), drawn into the decal buffer

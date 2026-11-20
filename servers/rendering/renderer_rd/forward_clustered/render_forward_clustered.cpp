@@ -103,6 +103,14 @@ void RenderForwardClustered::RenderBufferDataForwardClustered::ensure_gbuffer() 
 			render_buffers->create_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER_MSAA, get_normal_roughness_format(), get_normal_roughness_usage_bits(false, msaa, render_buffers->get_can_be_storage()), render_buffers->get_texture_samples());
 		}
 	}
+	// Mariner GB4: the second target, always drawn together with the first.
+	if (!render_buffers->has_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER_AUX)) {
+		bool msaa = render_buffers->get_msaa_3d() != RSE::VIEWPORT_MSAA_DISABLED;
+		render_buffers->create_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER_AUX, get_normal_roughness_format(), get_normal_roughness_usage_bits(msaa, false, render_buffers->get_can_be_storage()) | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT);
+		if (msaa) {
+			render_buffers->create_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER_AUX_MSAA, get_normal_roughness_format(), get_normal_roughness_usage_bits(false, msaa, render_buffers->get_can_be_storage()), render_buffers->get_texture_samples());
+		}
+	}
 }
 
 void RenderForwardClustered::RenderBufferDataForwardClustered::ensure_fsr2(RendererRD::FSR2Effect *p_effect) {
@@ -296,7 +304,9 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_depth_fb(Depth
 			RID normal_roughness_buffer = render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, use_msaa ? RB_TEX_NORMAL_ROUGHNESS_MSAA : RB_TEX_NORMAL_ROUGHNESS);
 			RID gbuffer = render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, use_msaa ? RB_TEX_GBUFFER_MSAA : RB_TEX_GBUFFER);
 
-			return FramebufferCacheRD::get_singleton()->get_cache_multiview(render_buffers->get_view_count(), depth, normal_roughness_buffer, gbuffer);
+			RID gbuffer_aux = render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, use_msaa ? RB_TEX_GBUFFER_AUX_MSAA : RB_TEX_GBUFFER_AUX); // Mariner GB4.
+
+			return FramebufferCacheRD::get_singleton()->get_cache_multiview(render_buffers->get_view_count(), depth, normal_roughness_buffer, gbuffer, gbuffer_aux);
 		} break;
 		case DEPTH_FB_ROUGHNESS_VOXELGI_GBUFFER: {
 			ensure_normal_roughness_texture();
@@ -307,7 +317,9 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_depth_fb(Depth
 			RID voxelgi_buffer = render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, use_msaa ? RB_TEX_VOXEL_GI_MSAA : RB_TEX_VOXEL_GI);
 			RID gbuffer = render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, use_msaa ? RB_TEX_GBUFFER_MSAA : RB_TEX_GBUFFER);
 
-			return FramebufferCacheRD::get_singleton()->get_cache_multiview(render_buffers->get_view_count(), depth, normal_roughness_buffer, voxelgi_buffer, gbuffer);
+			RID gbuffer_aux = render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, use_msaa ? RB_TEX_GBUFFER_AUX_MSAA : RB_TEX_GBUFFER_AUX); // Mariner GB4.
+
+			return FramebufferCacheRD::get_singleton()->get_cache_multiview(render_buffers->get_view_count(), depth, normal_roughness_buffer, voxelgi_buffer, gbuffer, gbuffer_aux);
 		} break;
 		default: {
 			ERR_FAIL_V(RID());
@@ -1467,6 +1479,9 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 				if (surf->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_NORMAL_TEXTURE) {
 					scene_state.used_normal_texture = true;
 				}
+				if (p_render_list == RENDER_LIST_OPAQUE && (surf->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_MATERIAL_PREPASS)) {
+					scene_state.used_material_prepass = true; // Mariner GB4.
+				}
 				if (!opaque_late && (surf->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_DEPTH_TEXTURE)) {
 					scene_state.used_depth_texture = true;
 				}
@@ -2335,6 +2350,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	scene_state.surface_decals_allowed = rb_data.is_valid() && !is_reflection_probe && !using_pathtracing && rb->get_view_count() == 1 && rb->has_depth_texture();
 	scene_state.used_surface_decals = false;
 	scene_state.surface_decals_drawn = false;
+	scene_state.used_material_prepass = false; // Mariner GB4.
+	scene_state.material_prepass_ready = false;
 	_fill_render_list(RENDER_LIST_OPAQUE, p_render_data, PASS_MODE_COLOR, using_sdfgi, using_sdfgi || using_voxelgi, using_motion_pass);
 	_view_cull_indirect_multimeshes(p_render_data); // Mariner E25a.
 	_select_cluster_lods(p_render_data); // Mariner V2.
@@ -2381,6 +2398,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	if (scene_state.used_surface_decals) {
 		_fill_instance_data(RENDER_LIST_SURFACE_DECAL, render_info); // Mariner GB2.
 		needs_gbuffer = true; // The decals read the surface class and albedo.
+	}
+	if (scene_state.used_material_prepass && rb_data.is_valid() && !is_reflection_probe && !using_pathtracing && rb->get_view_count() == 1) {
+		needs_gbuffer = true; // Mariner GB4: the colour pass reads these materials from the prepass.
 	}
 	if (scene_state.used_opaque_late) {
 		_fill_instance_data(RENDER_LIST_OPAQUE_LATE, render_info);
@@ -2432,12 +2452,14 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				depth_framebuffer = rb_data->get_depth_fb(RenderBufferDataForwardClustered::DEPTH_FB_ROUGHNESS_GBUFFER);
 				depth_pass_clear.push_back(Color(0, 0, 0, 0));
 				depth_pass_clear.push_back(Color(0, 0, 0, 0));
+				depth_pass_clear.push_back(Color(0, 0, 0, 0)); // Mariner GB4: the second target (a 0: no material_prepass surface).
 			} break;
 			case PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI_GBUFFER: {
 				depth_framebuffer = rb_data->get_depth_fb(RenderBufferDataForwardClustered::DEPTH_FB_ROUGHNESS_VOXELGI_GBUFFER);
 				depth_pass_clear.push_back(Color(0, 0, 0, 0));
 				depth_pass_clear.push_back(Color(0, 0, 0, 0));
 				depth_pass_clear.push_back(Color(0, 0, 0, 0));
+				depth_pass_clear.push_back(Color(0, 0, 0, 0)); // Mariner GB4.
 			} break;
 			default: {
 			};
@@ -2651,6 +2673,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				if (depth_pass_mode == PASS_MODE_DEPTH_NORMAL_ROUGHNESS_GBUFFER || depth_pass_mode == PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI_GBUFFER) {
 					// Mariner GB1: averaged (the surface class is exact away from edges between classes).
 					RD::get_singleton()->texture_resolve_multisample(rb_data->get_gbuffer_msaa(), rb_data->get_gbuffer());
+					RD::get_singleton()->texture_resolve_multisample(rb_data->get_gbuffer_aux_msaa(), rb_data->get_gbuffer_aux()); // Mariner GB4.
 				}
 			} else if (finish_depth) {
 				for (uint32_t v = 0; v < rb->get_view_count(); v++) {
@@ -2659,6 +2682,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			}
 			RD::get_singleton()->draw_command_end_label();
 		}
+
+		// Mariner GB4: the prepass just drawn holds the materials of the material_prepass surfaces - the colour pass
+		// reads them (albedo, normal, roughness, AO, MAIN_LIGHT_SHADOW, WET_FILM) and does not run fragment() again.
+		scene_state.material_prepass_ready = scene_state.used_material_prepass && rb_data.is_valid() && rb_data->has_gbuffer() && !is_reflection_probe && rb->get_view_count() == 1 && (depth_pass_mode == PASS_MODE_DEPTH_NORMAL_ROUGHNESS_GBUFFER || depth_pass_mode == PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI_GBUFFER);
 
 		if (scene_state.used_surface_decals && rb_data.is_valid() && rb_data->has_gbuffer()) {
 			// Mariner GB2: surface decals into the decal buffer - each pixel of a decal's box reads the surface point
@@ -2837,8 +2864,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	_update_render_base_uniform_set();
 
 	p_render_data->scene_data->surface_decals = scene_state.surface_decals_drawn; // Mariner GB3: the opaque pass reads the decal buffer.
+	p_render_data->scene_data->material_prepass = scene_state.material_prepass_ready; // Mariner GB4: and the materials of the prepass.
 	uint32_t opaque_pass_uniform_buffer_index = _setup_environment(p_render_data, is_reflection_probe, screen_size, screen_size, p_default_bg_color, true, using_motion_pass);
 	p_render_data->scene_data->surface_decals = false;
+	p_render_data->scene_data->material_prepass = false;
 
 	RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, p_render_data, radiance_texture, samplers, opaque_pass_uniform_buffer_index, true);
 
@@ -5619,8 +5648,15 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		RD::Uniform g;
 		g.binding = 55;
 		g.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
-		g.append_id(p_render_list == RENDER_LIST_SURFACE_DECAL && rb_data.is_valid() && rb_data->has_gbuffer() ? rb_data->get_gbuffer() : black);
+		// Mariner GB4: and for the colour passes (opaque, motion) that read the materials of the prepass.
+		const bool gb_read = rb_data.is_valid() && rb_data->has_gbuffer() && (p_render_list == RENDER_LIST_SURFACE_DECAL || ((p_render_list == RENDER_LIST_OPAQUE || p_render_list == RENDER_LIST_MOTION) && scene_state.material_prepass_ready));
+		g.append_id(gb_read ? rb_data->get_gbuffer() : black);
 		uniforms.push_back(g);
+		RD::Uniform ga;
+		ga.binding = 66;
+		ga.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		ga.append_id(gb_read ? rb_data->get_gbuffer_aux() : black);
+		uniforms.push_back(ga);
 		const bool decals = p_render_list == RENDER_LIST_OPAQUE && scene_state.surface_decals_drawn && rb.is_valid() && rb->has_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SURFACE_DECALS_0);
 		RD::Uniform d0;
 		d0.binding = 56;
@@ -6080,6 +6116,10 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material(Geomet
 	if (p_material->shader_data->uses_normal_texture) {
 		flags |= GeometryInstanceSurfaceDataCache::FLAG_USES_NORMAL_TEXTURE;
 		global_surface_data.normal_texture_used = true;
+	}
+
+	if (p_material->shader_data->uses_material_prepass) {
+		flags |= GeometryInstanceSurfaceDataCache::FLAG_USES_MATERIAL_PREPASS; // Mariner GB4.
 	}
 
 	if (ginstance->data->cast_double_sided_shadows) {

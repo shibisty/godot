@@ -909,6 +909,12 @@ void main() {
 
 #VERSION_DEFINES
 
+#ifdef DEPTH_FARTHER_USED
+// Mariner E16b: render_mode depth_farther - the fragment function only moves DEPTH away from the camera (reverse Z:
+// to a smaller value), so the early depth test by the depth of the geometry stays valid for rejection.
+layout(depth_less) out float gl_FragDepth;
+#endif
+
 #define SHADER_IS_SRGB false
 #define SHADER_SPACE_FAR 0.0
 
@@ -1157,8 +1163,10 @@ layout(location = 1) out uvec2 voxel_gi_buffer;
 // Mariner GB1: the thin G-buffer - rgb the albedo (sqrt: gamma 2), a the surface class / 255.
 #ifdef MODE_RENDER_VOXEL_GI
 layout(location = 2) out vec4 gbuffer_output_buffer;
+layout(location = 3) out vec4 gbuffer_aux_output_buffer; // Mariner GB4.
 #else
 layout(location = 1) out vec4 gbuffer_output_buffer;
+layout(location = 2) out vec4 gbuffer_aux_output_buffer; // Mariner GB4.
 #endif
 #endif
 
@@ -1540,6 +1548,48 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 #endif
 
+#if defined(MATERIAL_PREPASS_USED) && !defined(MODE_RENDER_DEPTH) && !defined(MODE_RENDER_MATERIAL) && !defined(MODE_RENDER_SDF) && !defined(USE_MULTIVIEW)
+	// Mariner GB4 (render_mode material_prepass): the prepass ran fragment() and left its results in the normal-roughness
+	// target and the thin G-buffer; the colour pass reads them and only lights the pixel. A pixel where the prepass
+	// drew another kind of surface (a 0 in the second target) is not this material's: discarded. Without the buffers
+	// (reflection probes, the path tracer, several views) the flag is off and fragment() runs as usual.
+	if (bool(scene_data.flags & SCENE_DATA_FLAGS_MATERIAL_PREPASS)) {
+		ivec2 mp_pixel = ivec2(gl_FragCoord.xy);
+		vec4 mp_aux = texelFetch(sampler2D(gbuffer_aux_buffer, SAMPLER_NEAREST_CLAMP), mp_pixel, 0);
+		if (mp_aux.a < 0.5) {
+			discard;
+		}
+		vec4 mp_gbuffer = texelFetch(sampler2D(gbuffer_buffer, SAMPLER_NEAREST_CLAMP), mp_pixel, 0);
+		vec4 mp_normal_roughness = texelFetch(sampler2D(normal_roughness_buffer, SAMPLER_NEAREST_CLAMP), mp_pixel, 0);
+		albedo_highp = mp_gbuffer.rgb * mp_gbuffer.rgb;
+		surface_class = int(round(mp_gbuffer.a * 255.0));
+#ifdef NORMAL_USED
+		normal_highp = normalize(mp_normal_roughness.xyz * 2.0 - 1.0);
+#endif
+		float mp_roughness = mp_normal_roughness.a;
+		if (mp_roughness > 0.5) {
+			mp_roughness = 1.0 - mp_roughness; // The dynamic bit (see the prepass output below).
+		}
+		roughness_highp = mp_roughness * (255.0 / 127.0);
+#ifdef NORMAL_USED
+		if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_ROUGHNESS_LIMITER)) {
+			// The prepass stored the roughness after the roughness limiter, and the limiter below runs again (after the
+			// wet film): take its kernel off - the same normals give the same kernel (else smooth, wet surfaces came
+			// out rougher: limited twice, the film applied to the limited roughness).
+			vec3 mp_dndu = dFdx(normal_highp);
+			vec3 mp_dndv = dFdy(normal_highp);
+			float mp_kernel = min(2.0 * scene_data.roughness_limiter_amount * (dot(mp_dndu, mp_dndu) + dot(mp_dndv, mp_dndv)), scene_data.roughness_limiter_limit);
+			roughness_highp = sqrt(max(roughness_highp * roughness_highp - mp_kernel, 0.0));
+		}
+#endif
+		ao = mp_aux.r;
+		main_light_shadow = mp_aux.g;
+		wet_film = mp_aux.b;
+#ifdef DEPTH_FARTHER_USED
+		gl_FragDepth = gl_FragCoord.z; // The depth of the geometry: not behind the depth the prepass wrote (E16b).
+#endif
+	} else
+#endif
 	{
 #CODE : FRAGMENT
 	}
@@ -3544,6 +3594,12 @@ void fragment_shader(in SceneData scene_data) {
 
 #ifdef MODE_RENDER_GBUFFER
 	gbuffer_output_buffer = vec4(sqrt(clamp(albedo, vec3(0.0), vec3(1.0))), float(clamp(surface_class, 0, 255)) * (1.0 / 255.0));
+#ifdef MATERIAL_PREPASS_USED
+	// Mariner GB4: what else the colour pass needs from fragment() of a material_prepass surface.
+	gbuffer_aux_output_buffer = vec4(clamp(ao, 0.0, 1.0), clamp(main_light_shadow, 0.0, 1.0), clamp(wet_film, 0.0, 1.0), 1.0);
+#else
+	gbuffer_aux_output_buffer = vec4(1.0, 1.0, 0.0, 0.0);
+#endif
 #endif
 
 #endif //MODE_RENDER_NORMAL_ROUGHNESS

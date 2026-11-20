@@ -660,10 +660,12 @@ layout(set = 1, binding = 54) uniform texture2D overhead_map_height_texture;
 // (0: height, wetness, roughness offset; 1: albedo over black, coverage), read by the opaque pass. Black when unused.
 #ifdef USE_MULTIVIEW
 layout(set = 1, binding = 55) uniform texture2DArray gbuffer_buffer;
+layout(set = 1, binding = 66) uniform texture2DArray gbuffer_aux_buffer; // Mariner GB4.
 layout(set = 1, binding = 56) uniform texture2DArray surface_decal_buffer0;
 layout(set = 1, binding = 57) uniform texture2DArray surface_decal_buffer1;
 #else
 layout(set = 1, binding = 55) uniform texture2D gbuffer_buffer;
+layout(set = 1, binding = 66) uniform texture2D gbuffer_aux_buffer; // Mariner GB4: r AO, g MAIN_LIGHT_SHADOW, b WET_FILM, a 1 on material_prepass surfaces.
 layout(set = 1, binding = 56) uniform texture2D surface_decal_buffer0;
 layout(set = 1, binding = 57) uniform texture2D surface_decal_buffer1;
 #endif

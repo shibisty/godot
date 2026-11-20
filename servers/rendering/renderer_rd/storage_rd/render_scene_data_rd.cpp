@@ -157,6 +157,7 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 	ubo.flags |= shadow_pass ? SCENE_DATA_FLAGS_IN_SHADOW_PASS : 0;
 	ubo.flags |= translucent_shadow_pass ? SCENE_DATA_FLAGS_TRANSLUCENT_SHADOW_PASS : 0;
 	ubo.flags |= surface_decals ? SCENE_DATA_FLAGS_SURFACE_DECALS : 0;
+	ubo.flags |= material_prepass ? SCENE_DATA_FLAGS_MATERIAL_PREPASS : 0;
 
 	if (p_debug_mode == RSE::VIEWPORT_DEBUG_DRAW_UNSHADED) {
 		ubo.flags |= SCENE_DATA_FLAGS_USE_AMBIENT_LIGHT;

@@ -65,6 +65,9 @@
 // Mariner GB1: the thin G-buffer from the prepass (rgb albedo, sqrt; a surface class / 255), when asked for.
 #define RB_TEX_GBUFFER SNAME("gbuffer")
 #define RB_TEX_GBUFFER_MSAA SNAME("gbuffer_msaa")
+// Mariner GB4: its second target (r AO, g MAIN_LIGHT_SHADOW, b WET_FILM, a 1 where a material_prepass surface is).
+#define RB_TEX_GBUFFER_AUX SNAME("gbuffer_aux")
+#define RB_TEX_GBUFFER_AUX_MSAA SNAME("gbuffer_aux_msaa")
 // Mariner GB2: the decal buffer (0 RGBA16F height, wetness, roughness offset; 1 RGBA8 albedo over black, coverage).
 #define RB_TEX_SURFACE_DECALS_0 SNAME("surface_decals_0")
 #define RB_TEX_SURFACE_DECALS_1 SNAME("surface_decals_1")
@@ -178,6 +181,8 @@ public:
 		RID get_gbuffer(uint32_t p_layer) { return render_buffers->get_texture_slice(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER, p_layer, 0); }
 		RID get_gbuffer_msaa() const { return render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER_MSAA); }
 		RID get_gbuffer_msaa(uint32_t p_layer) { return render_buffers->get_texture_slice(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER_MSAA, p_layer, 0); }
+		RID get_gbuffer_aux() const { return render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER_AUX); } // Mariner GB4.
+		RID get_gbuffer_aux_msaa() const { return render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_GBUFFER_AUX_MSAA); }
 
 		void ensure_fsr2(RendererRD::FSR2Effect *p_effect);
 		RendererRD::FSR2Context *get_fsr2_context() const { return fsr2_context; }
@@ -484,6 +489,8 @@ private:
 		bool surface_decals_allowed = false; // Mariner GB2: this render draws surface decals (one view, not a probe)
 		bool used_surface_decals = false; // Mariner GB2: RENDER_LIST_SURFACE_DECAL is not empty
 		bool surface_decals_drawn = false; // Mariner GB3: the decal buffer holds this frame's decals
+		bool used_material_prepass = false; // Mariner GB4: the opaque list has a material_prepass surface
+		bool material_prepass_ready = false; // Mariner GB4: the prepass of this render wrote the thin G-buffer for them
 
 		struct ShadowPass {
 			uint32_t element_from;
@@ -616,6 +623,7 @@ private:
 			FLAG_PASS_SURFACE_DECAL = 2097152, // Mariner GB2: render_mode surface_decal - only the decal pass
 			FLAG_VISIBILITY_RESOLVE = 4194304, // Mariner V5-T2: render_mode visibility_resolve
 			FLAG_VISIBILITY_RESOLVE_TWIN = 8388608, // Mariner V5-T3: the resolve draw's own copy of such a surface
+			FLAG_USES_MATERIAL_PREPASS = 16777216, // Mariner GB4: render_mode material_prepass
 		};
 
 		union {

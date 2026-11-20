@@ -86,6 +86,8 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	uses_time = false;
 	writes_modelview_or_projection = false;
 	writes_depth = false;
+	depth_farther = false;
+	uses_material_prepass = false;
 	uses_world_coordinates = false;
 	uses_particle_trails = false;
 	uses_z_clip_scale = false;
@@ -134,6 +136,8 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	actions.usage_flag_pointers["ALPHA_ANTIALIASING_EDGE"] = &uses_alpha_antialiasing;
 	actions.usage_flag_pointers["ALPHA_TEXTURE_COORDINATE"] = &uses_alpha_antialiasing;
 	actions.render_mode_flags["depth_prepass_alpha"] = &uses_depth_prepass_alpha;
+	actions.render_mode_flags["depth_farther"] = &depth_farther; // Mariner E16b.
+	actions.render_mode_flags["material_prepass"] = &uses_material_prepass; // Mariner GB4.
 	actions.render_mode_flags["motion_vectors_transparent"] = &uses_transparent_motion_vectors;
 	actions.render_mode_flags["opaque_late"] = &uses_opaque_late;
 	actions.render_mode_flags["surface_decal"] = &uses_surface_decal; // Mariner GB2.
@@ -493,7 +497,10 @@ void SceneShaderForwardClustered::ShaderData::_create_pipeline(PipelineKey p_pip
 				// We already have a depth from the depth pre-pass, there is no need to write it again.
 				// In addition we can use COMPARE_OP_EQUAL instead of COMPARE_OP_LESS_OR_EQUAL.
 				// This way we can use the early depth test to discard transparent fragments before the fragment shader even starts.
-				depth_stencil_state.depth_compare_operator = RD::COMPARE_OP_EQUAL;
+				// Mariner E16b: a shader that declares its DEPTH as never nearer than the geometry (conservative depth)
+				// is tested with GREATER_OR_EQUAL: the result is the same (the pre-pass stored the nearest written depth),
+				// but the hardware can reject the hidden fragments by the depth of the geometry before the shader runs.
+				depth_stencil_state.depth_compare_operator = (writes_depth && depth_farther) ? RD::COMPARE_OP_GREATER_OR_EQUAL : RD::COMPARE_OP_EQUAL;
 				depth_stencil_state.enable_depth_write = false;
 			}
 		}
@@ -509,11 +516,11 @@ void SceneShaderForwardClustered::ShaderData::_create_pipeline(PipelineKey p_pip
 				break;
 			case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER: // Mariner GB1: + the thin G-buffer.
 			case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_GBUFFER_MULTIVIEW:
-				blend_state = RD::PipelineColorBlendState::create_disabled(2);
+				blend_state = RD::PipelineColorBlendState::create_disabled(3); // Mariner GB4: + the second target.
 				break;
 			case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER:
 			case PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_AND_GBUFFER_MULTIVIEW:
-				blend_state = RD::PipelineColorBlendState::create_disabled(3);
+				blend_state = RD::PipelineColorBlendState::create_disabled(4);
 				break;
 			case PIPELINE_VERSION_SURFACE_DECAL: {
 				// Mariner GB2: the decal buffer - 0 added up (heights, wetness, roughness offsets), 1 the albedo blended over
@@ -980,6 +987,8 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.render_mode_defines["cull_disabled"] = "#define DO_SIDE_CHECK\n";
 		actions.render_mode_defines["particle_trails"] = "#define USE_PARTICLE_TRAILS\n";
 		actions.render_mode_defines["depth_prepass_alpha"] = "#define USE_OPAQUE_PREPASS\n";
+		actions.render_mode_defines["depth_farther"] = "#define DEPTH_FARTHER_USED\n"; // Mariner E16b.
+		actions.render_mode_defines["material_prepass"] = "#define MATERIAL_PREPASS_USED\n"; // Mariner GB4.
 		actions.render_mode_defines["visibility_resolve"] = "#define USE_VISIBILITY_RESOLVE\n"; // Mariner V5-T2.
 		actions.render_mode_defines["alpha_fringe"] = "#define ALPHA_FRINGE_USED\n";
 
