@@ -295,7 +295,7 @@ void AudioStreamPlayer3D::_notification(int p_what) {
 				if (propagation_delay && nearest_listener_distance > 0.0f) {
 					delay = nearest_listener_distance / AudioServer::get_singleton()->get_speed_of_sound();
 				}
-				AudioServer::get_singleton()->start_playback_stream(setplayback, bus_map, setplay.get(), actual_pitch_scale, linear_attenuation, attenuation_filter_cutoff_hz, delay, air_cutoff_hz, lowpass_cutoff_hz);
+				AudioServer::get_singleton()->start_playback_stream(setplayback, bus_map, setplay.get(), actual_pitch_scale, linear_attenuation, attenuation_filter_cutoff_hz, delay, air_cutoff_hz, lowpass_cutoff_hz, peak_eq_hz, peak_eq_db, peak_eq_q);
 				setplayback.unref();
 				setplay.set(-1);
 			}
@@ -563,6 +563,7 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 	for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
 		AudioServer::get_singleton()->set_playback_highshelf_params(playback, linear_attenuation, attenuation_filter_cutoff_hz);
 		AudioServer::get_singleton()->set_playback_voice_filter(playback, air_cutoff_hz, lowpass_cutoff_hz);
+		AudioServer::get_singleton()->set_playback_peak_eq(playback, peak_eq_hz, peak_eq_db, peak_eq_q);
 	}
 
 	bus_volumes.clear();
@@ -816,6 +817,33 @@ float AudioStreamPlayer3D::get_lowpass_cutoff_hz() const {
 	return lowpass_cutoff_hz;
 }
 
+void AudioStreamPlayer3D::set_peak_eq_hz(float p_hz) {
+	peak_eq_hz = CLAMP(p_hz, 20.0f, 20000.0f);
+	force_update_panning = true;
+}
+
+float AudioStreamPlayer3D::get_peak_eq_hz() const {
+	return peak_eq_hz;
+}
+
+void AudioStreamPlayer3D::set_peak_eq_db(float p_db) {
+	peak_eq_db = CLAMP(p_db, -40.0f, 24.0f);
+	force_update_panning = true;
+}
+
+float AudioStreamPlayer3D::get_peak_eq_db() const {
+	return peak_eq_db;
+}
+
+void AudioStreamPlayer3D::set_peak_eq_q(float p_q) {
+	peak_eq_q = CLAMP(p_q, 0.1f, 16.0f);
+	force_update_panning = true;
+}
+
+float AudioStreamPlayer3D::get_peak_eq_q() const {
+	return peak_eq_q;
+}
+
 void AudioStreamPlayer3D::set_attenuation_model(AttenuationModel p_model) {
 	ERR_FAIL_INDEX((int)p_model, 4);
 	attenuation_model = p_model;
@@ -962,6 +990,12 @@ void AudioStreamPlayer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_propagation_delay_enabled"), &AudioStreamPlayer3D::is_propagation_delay_enabled);
 	ClassDB::bind_method(D_METHOD("set_lowpass_cutoff_hz", "hz"), &AudioStreamPlayer3D::set_lowpass_cutoff_hz);
 	ClassDB::bind_method(D_METHOD("get_lowpass_cutoff_hz"), &AudioStreamPlayer3D::get_lowpass_cutoff_hz);
+	ClassDB::bind_method(D_METHOD("set_peak_eq_hz", "hz"), &AudioStreamPlayer3D::set_peak_eq_hz);
+	ClassDB::bind_method(D_METHOD("get_peak_eq_hz"), &AudioStreamPlayer3D::get_peak_eq_hz);
+	ClassDB::bind_method(D_METHOD("set_peak_eq_db", "db"), &AudioStreamPlayer3D::set_peak_eq_db);
+	ClassDB::bind_method(D_METHOD("get_peak_eq_db"), &AudioStreamPlayer3D::get_peak_eq_db);
+	ClassDB::bind_method(D_METHOD("set_peak_eq_q", "q"), &AudioStreamPlayer3D::set_peak_eq_q);
+	ClassDB::bind_method(D_METHOD("get_peak_eq_q"), &AudioStreamPlayer3D::get_peak_eq_q);
 
 	ClassDB::bind_method(D_METHOD("set_attenuation_model", "model"), &AudioStreamPlayer3D::set_attenuation_model);
 	ClassDB::bind_method(D_METHOD("get_attenuation_model"), &AudioStreamPlayer3D::get_attenuation_model);
@@ -1011,6 +1045,9 @@ void AudioStreamPlayer3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "air_absorption", PROPERTY_HINT_RANGE, "0,4,0.01"), "set_air_absorption", "get_air_absorption");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "propagation_delay"), "set_propagation_delay", "is_propagation_delay_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lowpass_cutoff_hz", PROPERTY_HINT_RANGE, "0,20500,1,suffix:Hz"), "set_lowpass_cutoff_hz", "get_lowpass_cutoff_hz");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "peak_eq_hz", PROPERTY_HINT_RANGE, "20,20000,1,exp,suffix:Hz"), "set_peak_eq_hz", "get_peak_eq_hz");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "peak_eq_db", PROPERTY_HINT_RANGE, "-40,24,0.1,suffix:dB"), "set_peak_eq_db", "get_peak_eq_db");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "peak_eq_q", PROPERTY_HINT_RANGE, "0.1,16,0.01"), "set_peak_eq_q", "get_peak_eq_q");
 	ADD_GROUP("Doppler", "doppler_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "doppler_tracking", PROPERTY_HINT_ENUM, "Disabled,Idle,Physics"), "set_doppler_tracking", "get_doppler_tracking");
 

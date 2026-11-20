@@ -105,6 +105,15 @@
 			Two speaker stereo arrangements implement the [url=https://webaudio.github.io/web-audio-api/#stereopanner-algorithm]WebAudio standard for StereoPannerNode Panning[/url] where the volume is cosine of half the azimuth angle to the ear.
 			For other speaker arrangements such as the 5.1 and 7.1 the SPCAP (Speaker-Placement Correction Amplitude) algorithm is implemented.
 		</member>
+		<member name="peak_eq_db" type="float" setter="set_peak_eq_db" getter="get_peak_eq_db" default="0.0">
+			Gain of a parametric band (peaking equalizer) on the sound at [member peak_eq_hz], for example a negative one for the dip a porous ground causes between about 125 Hz and 1 kHz. [code]0.0[/code] disables it.
+		</member>
+		<member name="peak_eq_hz" type="float" setter="set_peak_eq_hz" getter="get_peak_eq_hz" default="500.0">
+			Center frequency of the parametric band, see [member peak_eq_db].
+		</member>
+		<member name="peak_eq_q" type="float" setter="set_peak_eq_q" getter="get_peak_eq_q" default="1.0">
+			Quality factor of the parametric band: higher values make it narrower ([code]1.4[/code] is about one octave wide).
+		</member>
 		<member name="pitch_scale" type="float" setter="set_pitch_scale" getter="get_pitch_scale" default="1.0">
 			The pitch and the tempo of the audio, as a multiplier of the audio sample's sample rate.
 		</member>

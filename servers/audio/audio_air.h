@@ -186,4 +186,45 @@ struct Table {
 	}
 };
 
+// Mariner AU1b: one parametric band of a voice (peaking EQ, Audio EQ Cookbook, R. Bristow-Johnson): gain_db at f0,
+// width by Q; for a ground dip (ISO 9613-2: porous ground takes 125 Hz - 1 kHz away) the gain is negative.
+struct Peak {
+	float b0 = 1.0f;
+	float b1 = 0.0f;
+	float b2 = 0.0f;
+	float a1 = 0.0f;
+	float a2 = 0.0f;
+	bool is_identity() const { return b0 == 1.0f && b1 == 0.0f && b2 == 0.0f && a1 == 0.0f && a2 == 0.0f; }
+};
+
+// Coefficients normalized by a0; identity when the band is off (|gain| < 0.05 dB, f0 outside 20 Hz - 0.45 rate).
+inline Peak peak_coeffs(double p_f0, double p_gain_db, double p_q, double p_rate) {
+	Peak k;
+	if (!(p_f0 > 20.0) || p_f0 >= p_rate * 0.45 || (p_gain_db < 0.05 && p_gain_db > -0.05)) {
+		return k;
+	}
+	const double q = p_q > 0.1 ? p_q : 0.1;
+	const double A = std::pow(10.0, p_gain_db / 40.0);
+	const double w0 = 6.283185307179586 * p_f0 / p_rate;
+	const double alpha = std::sin(w0) / (2.0 * q);
+	const double c = std::cos(w0);
+	const double a0 = 1.0 + alpha / A;
+	k.b0 = float((1.0 + alpha * A) / a0);
+	k.b1 = float(-2.0 * c / a0);
+	k.b2 = float((1.0 - alpha * A) / a0);
+	k.a1 = float(-2.0 * c / a0);
+	k.a2 = float((1.0 - alpha / A) / a0);
+	return k;
+}
+
+// Gain of the band at a frequency, dB.
+inline double peak_db(const Peak &p_k, double p_f, double p_rate) {
+	const double w = 6.283185307179586 * p_f / p_rate;
+	// H(e^jw) = (b0 + b1 z^-1 + b2 z^-2) / (1 + a1 z^-1 + a2 z^-2)
+	const double c1 = std::cos(w), s1 = std::sin(w), c2 = std::cos(2.0 * w), s2 = std::sin(2.0 * w);
+	const double nr = p_k.b0 + p_k.b1 * c1 + p_k.b2 * c2, ni = -(p_k.b1 * s1 + p_k.b2 * s2);
+	const double dr = 1.0 + p_k.a1 * c1 + p_k.a2 * c2, di = -(p_k.a1 * s1 + p_k.a2 * s2);
+	return 10.0 * std::log10((nr * nr + ni * ni) / (dr * dr + di * di));
+}
+
 } // namespace AudioAir

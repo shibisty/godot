@@ -701,7 +701,22 @@ void AudioServer::_mix_voice_filter(AudioStreamPlaybackListNode *p_playback, Aud
 
 	const bool air = air_to < 1.0f || air_from < 1.0f;
 	const bool lowpass = lowpass_to < 1.0f || lowpass_from < 1.0f;
-	if (!air && !lowpass) {
+	// Mariner AU1b: the band moves to its new coefficients over the mix (linear in the coefficients: the stability
+	// region of (a1, a2) is a triangle, so a mix of two stable filters stays stable).
+	const AudioAir::Peak peak_from = p_playback->peak_coef;
+	const AudioAir::Peak peak_to = AudioAir::peak_coeffs(p_playback->peak_hz.get(), p_playback->peak_db.get(), p_playback->peak_q.get(), rate);
+	p_playback->peak_coef = peak_to;
+	const bool peak = !peak_from.is_identity() || !peak_to.is_identity();
+	if (peak && peak_from.is_identity()) {
+		for (int c = 0; c < 2; c++) {
+			const float x = c == 0 ? p_buf[0].left : p_buf[0].right;
+			p_playback->peak_state[c][0] = x; // x1, x2, y1, y2: a band at DC passes 1, so the history starts at the sample
+			p_playback->peak_state[c][1] = x;
+			p_playback->peak_state[c][2] = x;
+			p_playback->peak_state[c][3] = x;
+		}
+	}
+	if (!air && !lowpass && !peak) {
 		return;
 	}
 	// A filter switched on starts from the current sample, not from silence.
@@ -743,6 +758,27 @@ void AudioServer::_mix_voice_filter(AudioStreamPlaybackListNode *p_playback, Aud
 				r = ls[1][s];
 			}
 		}
+		if (peak) {
+			const float b0 = peak_from.b0 + (peak_to.b0 - peak_from.b0) * t;
+			const float b1 = peak_from.b1 + (peak_to.b1 - peak_from.b1) * t;
+			const float b2 = peak_from.b2 + (peak_to.b2 - peak_from.b2) * t;
+			const float a1 = peak_from.a1 + (peak_to.a1 - peak_from.a1) * t;
+			const float a2 = peak_from.a2 + (peak_to.a2 - peak_from.a2) * t;
+			for (int c = 0; c < 2; c++) {
+				float *st = p_playback->peak_state[c];
+				const float x = c == 0 ? l : r;
+				const float y = b0 * x + b1 * st[0] + b2 * st[1] - a1 * st[2] - a2 * st[3];
+				st[1] = st[0];
+				st[0] = x;
+				st[3] = st[2];
+				st[2] = y;
+				if (c == 0) {
+					l = y;
+				} else {
+					r = y;
+				}
+			}
+		}
 		p_buf[i] = AudioFrame(l, r);
 	}
 	// Silence must not leave denormals in the states.
@@ -755,6 +791,11 @@ void AudioServer::_mix_voice_filter(AudioStreamPlaybackListNode *p_playback, Aud
 		for (int s = 0; s < AudioAir::LOWPASS_STAGES; s++) {
 			if (Math::abs(ls[c][s]) < 1e-15f) {
 				ls[c][s] = 0.0f;
+			}
+		}
+		for (int s = 0; s < 4; s++) {
+			if (Math::abs(p_playback->peak_state[c][s]) < 1e-15f) {
+				p_playback->peak_state[c][s] = 0.0f;
 			}
 		}
 	}
@@ -1330,7 +1371,7 @@ void AudioServer::start_playback_stream(Ref<AudioStreamPlayback> p_playback, con
 	start_playback_stream(p_playback, map, p_start_time, p_pitch_scale);
 }
 
-void AudioServer::start_playback_stream(Ref<AudioStreamPlayback> p_playback, const HashMap<StringName, Vector<AudioFrame>> &p_bus_volumes, float p_start_time, float p_pitch_scale, float p_highshelf_gain, float p_attenuation_cutoff_hz, float p_start_delay, float p_air_cutoff_hz, float p_lowpass_cutoff_hz) {
+void AudioServer::start_playback_stream(Ref<AudioStreamPlayback> p_playback, const HashMap<StringName, Vector<AudioFrame>> &p_bus_volumes, float p_start_time, float p_pitch_scale, float p_highshelf_gain, float p_attenuation_cutoff_hz, float p_start_delay, float p_air_cutoff_hz, float p_lowpass_cutoff_hz, float p_peak_hz, float p_peak_db, float p_peak_q) {
 	ERR_FAIL_COND(p_playback.is_null());
 
 	AudioStreamPlaybackListNode *playback_node = new AudioStreamPlaybackListNode();
@@ -1364,6 +1405,10 @@ void AudioServer::start_playback_stream(Ref<AudioStreamPlayback> p_playback, con
 	playback_node->lowpass_cutoff_hz.set(p_lowpass_cutoff_hz);
 	playback_node->air_coef = (float)AudioAir::stage_coefficient(p_air_cutoff_hz, get_mix_rate());
 	playback_node->lowpass_coef = (float)AudioAir::stage_coefficient(p_lowpass_cutoff_hz, get_mix_rate());
+	playback_node->peak_hz.set(p_peak_hz);
+	playback_node->peak_db.set(p_peak_db);
+	playback_node->peak_q.set(p_peak_q);
+	playback_node->peak_coef = AudioAir::peak_coeffs(p_peak_hz, p_peak_db, p_peak_q, get_mix_rate());
 	playback_node->start_delay_frames = p_start_delay > 0.0f ? (uint64_t)(double(MIN(p_start_delay, 30.0f)) * get_mix_rate()) : 0;
 
 	memset(playback_node->prev_bus_details->volume, 0, sizeof(playback_node->prev_bus_details->volume));
@@ -1541,6 +1586,19 @@ void AudioServer::set_playback_voice_filter(Ref<AudioStreamPlayback> p_playback,
 
 	playback_node->air_cutoff_hz.set(p_air_cutoff_hz);
 	playback_node->lowpass_cutoff_hz.set(p_lowpass_cutoff_hz);
+}
+
+void AudioServer::set_playback_peak_eq(Ref<AudioStreamPlayback> p_playback, float p_hz, float p_db, float p_q) {
+	ERR_FAIL_COND(p_playback.is_null());
+
+	AudioStreamPlaybackListNode *playback_node = _find_playback_list_node(p_playback);
+	if (!playback_node) {
+		return;
+	}
+
+	playback_node->peak_hz.set(p_hz);
+	playback_node->peak_db.set(p_db);
+	playback_node->peak_q.set(p_q);
 }
 
 void AudioServer::_update_air_table(bool p_force) {

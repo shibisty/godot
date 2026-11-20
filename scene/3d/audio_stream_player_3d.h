@@ -116,6 +116,10 @@ private:
 	float air_absorption = 0.0f; // Multiplies the distance for the air filter; 0 = off.
 	bool propagation_delay = false;
 	float lowpass_cutoff_hz = 0.0f; // Free low-pass (occlusion), 0 = off.
+	// Mariner AU1b: one parametric band (peaking EQ), 0 dB = off.
+	float peak_eq_hz = 500.0f;
+	float peak_eq_db = 0.0f;
+	float peak_eq_q = 1.0f;
 	float nearest_listener_distance = -1.0f; // From the last _update_panning(), -1 = no listener in range.
 	float air_cutoff_hz = 0.0f;
 	float _get_air_cutoff_hz() const;
@@ -211,6 +215,12 @@ public:
 	bool is_propagation_delay_enabled() const;
 	void set_lowpass_cutoff_hz(float p_hz);
 	float get_lowpass_cutoff_hz() const;
+	void set_peak_eq_hz(float p_hz);
+	float get_peak_eq_hz() const;
+	void set_peak_eq_db(float p_db);
+	float get_peak_eq_db() const;
+	void set_peak_eq_q(float p_q);
+	float get_peak_eq_q() const;
 
 	void set_attenuation_model(AttenuationModel p_model);
 	AttenuationModel get_attenuation_model() const;

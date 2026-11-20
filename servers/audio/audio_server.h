@@ -305,6 +305,13 @@ private:
 		float lowpass_coef = 1.0f;
 		float air_state[2][AudioAir::AIR_STAGES] = {};
 		float lowpass_state[2][AudioAir::LOWPASS_STAGES] = {};
+		// Mariner AU1b: one parametric band (peaking EQ): f0, gain (dB), Q set on the main thread; coefficients of the
+		// last mix and the biquad state (x1, x2, y1, y2 per channel) on the audio thread.
+		SafeNumeric<float> peak_hz;
+		SafeNumeric<float> peak_db;
+		SafeNumeric<float> peak_q;
+		AudioAir::Peak peak_coef;
+		float peak_state[2][4] = {};
 		// Frames of silence before the stream starts (propagation delay); audio thread after the node is inserted.
 		uint64_t start_delay_frames = 0;
 		// Updating this ref after the list node is created breaks consistency guarantees, don't do it!
@@ -452,7 +459,7 @@ public:
 	// Convenience method.
 	void start_playback_stream(Ref<AudioStreamPlayback> p_playback, const StringName &p_bus, Vector<AudioFrame> p_volume_db_vector, float p_start_time = 0, float p_pitch_scale = 1);
 	// Expose all parameters.
-	void start_playback_stream(Ref<AudioStreamPlayback> p_playback, const HashMap<StringName, Vector<AudioFrame>> &p_bus_volumes, float p_start_time = 0, float p_pitch_scale = 1, float p_highshelf_gain = 0, float p_attenuation_cutoff_hz = 0, float p_start_delay = 0, float p_air_cutoff_hz = 0, float p_lowpass_cutoff_hz = 0);
+	void start_playback_stream(Ref<AudioStreamPlayback> p_playback, const HashMap<StringName, Vector<AudioFrame>> &p_bus_volumes, float p_start_time = 0, float p_pitch_scale = 1, float p_highshelf_gain = 0, float p_attenuation_cutoff_hz = 0, float p_start_delay = 0, float p_air_cutoff_hz = 0, float p_lowpass_cutoff_hz = 0, float p_peak_hz = 0, float p_peak_db = 0, float p_peak_q = 1);
 	void stop_playback_stream(Ref<AudioStreamPlayback> p_playback);
 
 	void set_playback_bus_exclusive(Ref<AudioStreamPlayback> p_playback, const StringName &p_bus, Vector<AudioFrame> p_volumes);
@@ -463,6 +470,8 @@ public:
 	void set_playback_highshelf_params(Ref<AudioStreamPlayback> p_playback, float p_gain, float p_attenuation_cutoff_hz);
 	// Mariner AU1: low-pass of a voice - the air filter (cutoff from get_air_cutoff_hz) and a free one (occlusion); 0 = off.
 	void set_playback_voice_filter(Ref<AudioStreamPlayback> p_playback, float p_air_cutoff_hz, float p_lowpass_cutoff_hz);
+	// Mariner AU1b: one parametric band of a voice (peaking EQ); p_db 0 = off.
+	void set_playback_peak_eq(Ref<AudioStreamPlayback> p_playback, float p_hz, float p_db, float p_q);
 
 	void set_air_conditions(float p_temperature_c, float p_humidity, float p_pressure_kpa = 101.325);
 	Vector3 get_air_conditions() const;
