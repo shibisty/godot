@@ -289,7 +289,16 @@ void AudioStreamPlayer3D::_notification(int p_what) {
 			if (setplayback.is_valid() && setplay.get() >= 0) {
 				internal->active.set();
 				HashMap<StringName, Vector<AudioFrame>> bus_map;
-				bus_map[_get_actual_bus()] = volume_vector;
+				// Mariner AU3: start with every bus the panning just chose (own bus or area bus, and the area's reverb
+				// bus). Only the actual bus was given: the reverb send came a physics tick later, so a short sound
+				// (a click, a shot's attack) never reached the reverb.
+				if (!volume_vector.is_empty() && !bus_volumes.is_empty()) {
+					for (const KeyValue<StringName, Vector<AudioFrame>> &kv : bus_volumes) {
+						bus_map[kv.key] = kv.value;
+					}
+				} else {
+					bus_map[_get_actual_bus()] = volume_vector;
+				}
 				// Mariner AU1: the sound reaches the nearest listener after distance / speed of sound.
 				float delay = 0.0f;
 				if (propagation_delay && nearest_listener_distance > 0.0f) {
@@ -573,6 +582,10 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 			if (area->is_overriding_audio_bus()) {
 				//override audio bus
 				bus_volumes[area->get_audio_bus_name()] = output_volume_vector;
+			} else {
+				// Mariner AU3: an area that only adds reverb keeps the direct sound on the player's own bus (it was
+				// dropped: the sound went only to the reverb bus).
+				bus_volumes[internal->bus] = output_volume_vector;
 			}
 
 			if (area->is_using_reverb_bus()) {

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AudioEffectConvolution" inherits="AudioEffect" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Mariner: convolution with a measured impulse response.
+	</brief_description>
+	<description>
+		Mariner: uniformly partitioned overlap-save FFT convolution (block 256 frames; the wet signal lags by one block). The impulse response is set with [method set_impulse] as float samples and resampled linearly to the mix rate (up to 12 seconds).
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_impulse_left" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<description>
+				Left (or only) channel of the impulse response as given.
+			</description>
+		</method>
+		<method name="get_impulse_rate" qualifiers="const">
+			<return type="float" />
+			<description>
+				Sample rate of the impulse response as given.
+			</description>
+		</method>
+		<method name="get_impulse_right" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<description>
+				Right channel of the impulse response as given (empty: the left one is used for both).
+			</description>
+		</method>
+		<method name="get_partition_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Number of 256-frame partitions of the prepared impulse response.
+			</description>
+		</method>
+		<method name="set_impulse">
+			<return type="void" />
+			<param index="0" name="left" type="PackedFloat32Array" />
+			<param index="1" name="right" type="PackedFloat32Array" />
+			<param index="2" name="rate" type="float" />
+			<description>
+				Sets the impulse response: samples of the left channel, of the right one (may be empty) and their sample rate. The spectra are prepared on the calling thread.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="dry" type="float" setter="set_dry" getter="get_dry" default="0.0">
+			Level of the input passed through.
+		</member>
+		<member name="wet" type="float" setter="set_wet" getter="get_wet" default="1.0">
+			Level of the convolved signal (linear).
+		</member>
+	</members>
+</class>

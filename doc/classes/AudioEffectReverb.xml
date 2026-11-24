@@ -17,6 +17,15 @@
 		<member name="damping" type="float" setter="set_damping" getter="get_damping" default="0.5">
 			Defines how reflective the imaginary room's walls are. The more reflective, the more high frequency content the reverb has. Value can range from 0 to 1.
 		</member>
+		<member name="decay_hf_ratio" type="float" setter="set_decay_hf_ratio" getter="get_decay_hf_ratio" default="1.0">
+			Mariner: when [member decay_time] is above 0, the reverberation time at [member decay_hf_reference] divided by [member decay_time] (0.05 to 1). The comb loop low-pass is solved for it exactly.
+		</member>
+		<member name="decay_hf_reference" type="float" setter="set_decay_hf_reference" getter="get_decay_hf_reference" default="5000.0">
+			Mariner: frequency in Hz at which [member decay_hf_ratio] holds.
+		</member>
+		<member name="decay_time" type="float" setter="set_decay_time" getter="get_decay_time" default="0.0">
+			Mariner: reverberation time RT60 at low frequencies, in seconds. Above 0 it replaces [member room_size] and [member damping]: each comb's feedback is set so the tail decays by 60 dB in this time (any value, not only the 0.6 to 10 s that [member room_size] reaches). 0 keeps the classic behavior.
+		</member>
 		<member name="dry" type="float" setter="set_dry" getter="get_dry" default="1.0">
 			The volume ratio of the original audio. At 0, only the modified audio is outputted. Value can range from 0 to 1.
 		</member>

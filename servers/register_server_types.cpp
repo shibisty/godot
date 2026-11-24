@@ -50,6 +50,7 @@
 #include "servers/audio/effects/audio_effect_phaser.h"
 #include "servers/audio/effects/audio_effect_pitch_shift.h"
 #include "servers/audio/effects/audio_effect_record.h"
+#include "servers/audio/effects/audio_effect_convolution.h"
 #include "servers/audio/effects/audio_effect_reverb.h"
 #include "servers/audio/effects/audio_effect_spectrum_analyzer.h"
 #include "servers/audio/effects/audio_effect_stereo_enhance.h"
@@ -192,6 +193,7 @@ void register_server_types() {
 		GDREGISTER_CLASS(AudioEffectAmplify);
 
 		GDREGISTER_CLASS(AudioEffectReverb);
+		GDREGISTER_CLASS(AudioEffectConvolution); // Mariner AU4
 
 		GDREGISTER_CLASS(AudioEffectLowPassFilter);
 		GDREGISTER_CLASS(AudioEffectHighPassFilter);

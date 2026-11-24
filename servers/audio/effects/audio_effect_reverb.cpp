@@ -43,6 +43,7 @@ void AudioEffectReverbInstance::process(const AudioFrame *p_src_frames, AudioFra
 		r.set_room_size(base->room_size);
 		r.set_damp(base->damping);
 		r.set_extra_spread(base->spread);
+		r.set_decay(base->decay_time, base->decay_hf_ratio, base->decay_hf_reference);
 		r.set_wet(base->wet);
 		r.set_dry(base->dry);
 	}
@@ -153,6 +154,30 @@ float AudioEffectReverb::get_hpf() const {
 	return hpf;
 }
 
+void AudioEffectReverb::set_decay_time(float p_sec) {
+	decay_time = MAX(p_sec, 0.0f);
+}
+
+void AudioEffectReverb::set_decay_hf_ratio(float p_ratio) {
+	decay_hf_ratio = CLAMP(p_ratio, 0.05f, 1.0f);
+}
+
+void AudioEffectReverb::set_decay_hf_reference(float p_hz) {
+	decay_hf_reference = CLAMP(p_hz, 100.0f, 20000.0f);
+}
+
+float AudioEffectReverb::get_decay_time() const {
+	return decay_time;
+}
+
+float AudioEffectReverb::get_decay_hf_ratio() const {
+	return decay_hf_ratio;
+}
+
+float AudioEffectReverb::get_decay_hf_reference() const {
+	return decay_hf_reference;
+}
+
 void AudioEffectReverb::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_predelay_msec", "msec"), &AudioEffectReverb::set_predelay_msec);
 	ClassDB::bind_method(D_METHOD("get_predelay_msec"), &AudioEffectReverb::get_predelay_msec);
@@ -178,6 +203,13 @@ void AudioEffectReverb::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_hpf", "amount"), &AudioEffectReverb::set_hpf);
 	ClassDB::bind_method(D_METHOD("get_hpf"), &AudioEffectReverb::get_hpf);
 
+	ClassDB::bind_method(D_METHOD("set_decay_time", "seconds"), &AudioEffectReverb::set_decay_time);
+	ClassDB::bind_method(D_METHOD("get_decay_time"), &AudioEffectReverb::get_decay_time);
+	ClassDB::bind_method(D_METHOD("set_decay_hf_ratio", "ratio"), &AudioEffectReverb::set_decay_hf_ratio);
+	ClassDB::bind_method(D_METHOD("get_decay_hf_ratio"), &AudioEffectReverb::get_decay_hf_ratio);
+	ClassDB::bind_method(D_METHOD("set_decay_hf_reference", "hz"), &AudioEffectReverb::set_decay_hf_reference);
+	ClassDB::bind_method(D_METHOD("get_decay_hf_reference"), &AudioEffectReverb::get_decay_hf_reference);
+
 	ADD_GROUP("Predelay", "predelay_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "predelay_msec", PROPERTY_HINT_RANGE, "20,500,1,suffix:ms"), "set_predelay_msec", "get_predelay_msec");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "predelay_feedback", PROPERTY_HINT_RANGE, "0,0.98,0.01"), "set_predelay_feedback", "get_predelay_feedback");
@@ -188,6 +220,10 @@ void AudioEffectReverb::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hipass", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_hpf", "get_hpf");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "dry", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_dry", "get_dry");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wet", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_wet", "get_wet");
+	ADD_GROUP("Decay", "decay_");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "decay_time", PROPERTY_HINT_RANGE, "0,20,0.01,suffix:s"), "set_decay_time", "get_decay_time");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "decay_hf_ratio", PROPERTY_HINT_RANGE, "0.05,1,0.01"), "set_decay_hf_ratio", "get_decay_hf_ratio");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "decay_hf_reference", PROPERTY_HINT_RANGE, "100,20000,1,suffix:Hz"), "set_decay_hf_reference", "get_decay_hf_reference");
 }
 
 AudioEffectReverb::AudioEffectReverb() {

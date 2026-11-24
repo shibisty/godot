@@ -63,6 +63,7 @@ private:
 	struct AllPass {
 		int size = 0;
 		float *buffer = nullptr;
+		float feedback = 0.7f; // Mariner AU3: lower for short decay_time
 		int pos = 0;
 		int extra_spread_frames = 0;
 		AllPass() {}
@@ -89,6 +90,9 @@ private:
 		float predelay;
 		float predelay_fb;
 		float hpf;
+		float decay_time; // Mariner AU3: RT60 at DC, s (0 - room_size/damp as in Freeverb)
+		float decay_hf_ratio; // Mariner AU3: RT60 at decay_hf_reference / RT60 at DC (<= 1)
+		float decay_hf_reference; // Hz
 	} params;
 
 	void configure_buffers();
@@ -106,6 +110,11 @@ public:
 	void set_mix_rate(float p_mix_rate);
 	void set_extra_spread(float p_spread);
 	void set_extra_spread_base(float p_sec);
+	void set_decay(float p_time, float p_hf_ratio, float p_hf_reference); // Mariner AU3
+
+	// Mariner AU3: comb feedback and loop low-pass for a comb of p_length frames so that it decays 60 dB in p_time
+	// seconds at DC and in p_time * p_hf_ratio at p_hf_reference (loop: g * (1 - d) / (1 - d z^-1)).
+	static void decay_coefs(int p_length, float p_mix_rate, float p_time, float p_hf_ratio, float p_hf_reference, float &r_feedback, float &r_damp);
 
 	void process(float *p_src, float *p_dst, int p_frames);
 

@@ -568,8 +568,10 @@ void AudioServer::_mix_step() {
 		Bus *bus = buses[i];
 
 		for (int k = 0; k < bus->channels.size(); k++) {
-			if (bus->channels[k].active && !bus->channels[k].used) {
-				// Buffer was not used, but it's still active, so it must be cleaned.
+			if (!bus->channels[k].used) {
+				// Buffer was not used, so it must be cleaned (Mariner AU4: also when inactive — an effect that processes
+				// silence, e.g. AudioEffectConvolution or AudioEffectRecord, would otherwise get its own previous output
+				// back as input: the swap below leaves it in the buffer; the forest tail fed back and grew by 70 dB).
 				AudioFrame *buf = bus->channels.write[k].buffer.ptrw();
 
 				for (uint32_t j = 0; j < buffer_size; j++) {

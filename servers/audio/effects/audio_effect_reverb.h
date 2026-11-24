@@ -65,6 +65,9 @@ class AudioEffectReverb : public AudioEffect {
 	float spread;
 	float dry;
 	float wet;
+	float decay_time = 0.0; // Mariner AU3
+	float decay_hf_ratio = 1.0;
+	float decay_hf_reference = 5000.0;
 
 protected:
 	static void _bind_methods();
@@ -78,6 +81,12 @@ public:
 	void set_dry(float p_dry);
 	void set_wet(float p_wet);
 	void set_hpf(float p_hpf);
+	void set_decay_time(float p_sec);
+	void set_decay_hf_ratio(float p_ratio);
+	void set_decay_hf_reference(float p_hz);
+	float get_decay_time() const;
+	float get_decay_hf_ratio() const;
+	float get_decay_hf_reference() const;
 
 	float get_predelay_msec() const;
 	float get_predelay_feedback() const;

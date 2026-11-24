@@ -35,6 +35,7 @@
 #include "core/config/engine.h"
 #include "core/os/os.h"
 
+#include <avrt.h>
 #include <functiondiscoverykeys.h>
 #include <wrl/client.h>
 
@@ -389,7 +390,11 @@ Error AudioDriverWASAPI::audio_device_init(AudioDeviceWASAPI *p_device, bool p_i
 			pwfex->nSamplesPerSec = mix_rate;
 			pwfex->nAvgBytesPerSec = pwfex->nSamplesPerSec * pwfex->nChannels * (pwfex->wBitsPerSample / 8);
 		}
-		hr = p_device->audio_client->Initialize(AUDCLNT_SHAREMODE_SHARED, streamflags, p_input ? REFTIMES_PER_SEC : 0, 0, pwfex, nullptr);
+		// Mariner AU2: the output buffer is as long as audio/driver/output_latency (0 = the device default, ~10 ms):
+		// a 10 ms buffer underruns (8–18 ms of silence, heard as crackle) whenever the mixing thread is late by
+		// more than that, e.g. while the game loads and compiles shaders on every core.
+		const REFERENCE_TIME out_duration = (REFERENCE_TIME)target_latency_ms * (REFTIMES_PER_SEC / 1000);
+		hr = p_device->audio_client->Initialize(AUDCLNT_SHAREMODE_SHARED, streamflags, p_input ? REFTIMES_PER_SEC : out_duration, 0, pwfex, nullptr);
 
 		if (p_reinit) {
 			// In case we're trying to re-initialize the device, prevent throwing this error on the console,
@@ -449,6 +454,13 @@ Error AudioDriverWASAPI::audio_device_init(AudioDeviceWASAPI *p_device, bool p_i
 		// Period frames must be an integral multiple of fundamental_period_frames or IAudioClient3 initialization will fail,
 		// so we need to select the closest multiple to the user-specified latency.
 		UINT32 desired_period_frames = target_latency_ms * mix_rate / 1000;
+		if (desired_period_frames > max_period_frames) {
+			// Mariner AU2: IAudioClient3 cannot go above the engine period (usually 10 ms), so the requested latency
+			// would be silently clamped; the plain IAudioClient takes any buffer length.
+			print_verbose("WASAPI: output_latency " + itos(target_latency_ms) + " ms is above the IAudioClient3 maximum period (" + itos(max_period_frames) + " frames), falling back to IAudioClient.");
+			CoTaskMemFree(pwfex);
+			return audio_device_init(p_device, p_input, p_reinit, true);
+		}
 		UINT32 period_frames = (desired_period_frames / fundamental_period_frames) * fundamental_period_frames;
 		if (Math::abs((int64_t)period_frames - (int64_t)desired_period_frames) > Math::abs((int64_t)(period_frames + fundamental_period_frames) - (int64_t)desired_period_frames)) {
 			period_frames = period_frames + fundamental_period_frames;
@@ -740,6 +752,18 @@ void AudioDriverWASAPI::thread_func(void *p_udata) {
 	CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
 	AudioDriverWASAPI *ad = static_cast<AudioDriverWASAPI *>(p_udata);
+
+	// Mariner AU2: the main thread runs as MMCSS "Games" at TIME_CRITICAL (display_server_windows.cpp) and worker
+	// threads load all cores; at normal priority this thread was late by more than the WASAPI buffer. MMCSS "Pro Audio"
+	// is the task Windows provides for audio rendering threads.
+	DWORD mmcss_index = 0;
+	HANDLE mmcss = AvSetMmThreadCharacteristicsW(L"Pro Audio", &mmcss_index);
+	if (mmcss) {
+		AvSetMmThreadPriority(mmcss, AVRT_PRIORITY_HIGH);
+	} else {
+		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+	}
+
 	uint32_t avail_frames = 0;
 	uint32_t write_ofs = 0;
 
@@ -974,6 +998,9 @@ void AudioDriverWASAPI::thread_func(void *p_udata) {
 		if (written_frames == 0 && read_frames == 0) {
 			OS::get_singleton()->delay_usec(1000);
 		}
+	}
+	if (mmcss) {
+		AvRevertMmThreadCharacteristics(mmcss);
 	}
 	CoUninitialize();
 }

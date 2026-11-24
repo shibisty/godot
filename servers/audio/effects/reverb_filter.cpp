@@ -31,6 +31,7 @@
 #include "reverb_filter.h"
 
 #include "core/math/audio_frame.h"
+#include "core/math/math_funcs.h"
 #include "core/os/memory.h"
 
 const float Reverb::comb_tunings[MAX_COMBS] = {
@@ -119,7 +120,6 @@ void Reverb::process(float *p_src, float *p_dst, int p_frames) {
 		}
 	}
 
-	static const float allpass_feedback = 0.7;
 	/* this one works, but the other version is just nicer....
 	int ap_size_limit[MAX_ALLPASS];
 
@@ -162,8 +162,8 @@ void Reverb::process(float *p_src, float *p_dst, int p_frames) {
 			}
 
 			float aux = a.buffer[a.pos];
-			a.buffer[a.pos] = undenormalize(allpass_feedback * aux + p_dst[j]);
-			p_dst[j] = aux - allpass_feedback * a.buffer[a.pos];
+			a.buffer[a.pos] = undenormalize(a.feedback * aux + p_dst[j]);
+			p_dst[j] = aux - a.feedback * a.buffer[a.pos];
 			a.pos++;
 		}
 	}
@@ -273,13 +273,63 @@ void Reverb::configure_buffers() {
 	echo_buffer_pos = 0;
 }
 
+void Reverb::decay_coefs(int p_length, float p_mix_rate, float p_time, float p_hf_ratio, float p_hf_reference, float &r_feedback, float &r_damp) {
+	// Per pass of the loop the comb loses 60 dB * L / (fs * T): g = 10^(-3 L / (fs T)) at DC (the low-pass has gain 1
+	// there). At f_hf the pass gain must be 10^(-3 L / (fs T ratio)), so the low-pass needs |H(f_hf)| = h with
+	// log10 h = -3 L / (fs T) * (1 / ratio - 1). |H|^2 = (1 - d)^2 / (1 - 2 d cos w + d^2) = h^2 gives
+	// (1 - h^2) d^2 - 2 (1 - h^2 cos w) d + (1 - h^2) = 0; the root in [0, 1) is the smaller one.
+	const double L = MAX(p_length, 1);
+	const double T = MAX((double)p_time, 1e-3);
+	const double fs = MAX((double)p_mix_rate, 1.0);
+	r_feedback = (float)Math::pow(10.0, -3.0 * L / (fs * T));
+	r_damp = 0.0f;
+	const double ratio = CLAMP((double)p_hf_ratio, 0.05, 1.0);
+	if (ratio >= 0.9999) {
+		return;
+	}
+	const double h = Math::pow(10.0, -3.0 * L / (fs * T) * (1.0 / ratio - 1.0));
+	const double w = Math::TAU * MIN((double)p_hf_reference, fs * 0.49) / fs;
+	const double h2 = h * h;
+	const double a = 1.0 - h2;
+	const double b = 1.0 - h2 * Math::cos(w);
+	if (a <= 1e-12) {
+		return;
+	}
+	const double disc = MAX(b * b - a * a, 0.0);
+	r_damp = (float)CLAMP((b - Math::sqrt(disc)) / a, 0.0, 0.9999);
+}
+
+void Reverb::set_decay(float p_time, float p_hf_ratio, float p_hf_reference) {
+	params.decay_time = p_time;
+	params.decay_hf_ratio = p_hf_ratio;
+	params.decay_hf_reference = p_hf_reference;
+	update_parameters();
+}
+
 void Reverb::update_parameters() {
 	//more freeverb derived constants
 	static const float room_scale = 0.28f;
 	static const float room_offset = 0.7f;
 
+	// Mariner AU3: a diffuser rings on its own (gain 0.7 per pass: the longest, 12.6 ms, alone decays 60 dB in about
+	// 0.24 s), so with a short decay_time its feedback is lowered to decay in decay_time too.
+	for (int i = 0; i < MAX_ALLPASS; i++) {
+		AllPass &a = allpass[i];
+		a.feedback = 0.7f;
+		if (params.decay_time > 0.0f && a.size > 0) {
+			int length = a.size - std::rint((float)a.extra_spread_frames * (1.0 - params.extra_spread));
+			a.feedback = MIN(0.7f, (float)Math::pow(10.0, -3.0 * MAX(length, 1) / (MAX((double)params.mix_rate, 1.0) * MAX((double)params.decay_time, 1e-3))));
+		}
+	}
+
 	for (int i = 0; i < MAX_COMBS; i++) {
 		Comb &c = comb[i];
+		if (params.decay_time > 0.0f) {
+			// Mariner AU3: exact decay time instead of Freeverb's room_size (feedback 0.7..0.98, RT60 0.6..10 s).
+			int length = c.size - std::rint((float)c.extra_spread_frames * (1.0 - params.extra_spread));
+			decay_coefs(length, params.mix_rate, params.decay_time, params.decay_hf_ratio, params.decay_hf_reference, c.feedback, c.damp);
+			continue;
+		}
 		c.feedback = room_offset + params.room_size * room_scale;
 		if (c.feedback < room_offset) {
 			c.feedback = room_offset;
@@ -327,6 +377,9 @@ Reverb::Reverb() {
 	params.predelay = 150;
 	params.predelay_fb = 0.4;
 	params.hpf = 0;
+	params.decay_time = 0;
+	params.decay_hf_ratio = 1;
+	params.decay_hf_reference = 5000;
 
 	input_buffer = memnew_arr(float, INPUT_BUFFER_MAX_SIZE);
 
